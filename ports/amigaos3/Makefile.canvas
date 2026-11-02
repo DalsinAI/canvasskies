@@ -32,7 +32,7 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_TOPDOWN_BATTLEFIELD_BMP=\"PROGDIR:assets/canvas-skies/topdown-battlefield.bmp\" \
 	-DCANVAS_TOPDOWN_PLAYER_BMP=\"PROGDIR:assets/canvas-skies/topdown-player.bmp\" \
 	-DCANVAS_DOGFIGHT_BACKGROUND_BMP=\"PROGDIR:assets/canvas-skies/dogfight-panorama-v2.bmp\" \
-	-DCANVAS_DOGFIGHT_ENEMY_BMP=\"PROGDIR:assets/canvas-skies/dogfight-enemy.bmp\" \
+	-DCANVAS_DOGFIGHT_ENEMY_BMP=\"PROGDIR:assets/canvas-skies/dogfight-enemy-headon.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit.bmp\" \
 	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_GUNNER_RING_BMP=\"PROGDIR:assets/canvas-skies/gunner-ring-empty-v2.bmp\" \

@@ -94,7 +94,7 @@
 #define CANVAS_DOGFIGHT_BACKGROUND_BMP "assets/canvas-skies/dogfight-panorama-v2.bmp"
 #endif
 #ifndef CANVAS_DOGFIGHT_ENEMY_BMP
-#define CANVAS_DOGFIGHT_ENEMY_BMP "assets/canvas-skies/dogfight-enemy.bmp"
+#define CANVAS_DOGFIGHT_ENEMY_BMP "assets/canvas-skies/dogfight-enemy-headon.bmp"
 #endif
 #ifndef CANVAS_PILOT_COCKPIT_BMP
 #define CANVAS_PILOT_COCKPIT_BMP "assets/canvas-skies/pilot-cockpit.bmp"
@@ -159,6 +159,7 @@
 #define MAX_ENEMIES 10
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
+#define MAX_BULLET_HOLES 18
 #define MIDGROUND_ELEMENT_COUNT 6
 #define NEAR_ELEMENT_COUNT 6
 #define SKY_PARALLAX 0.008f
@@ -259,6 +260,9 @@ typedef struct {
 
 typedef struct {
     float x, y, phase;
+    float crash_x, crash_y, crash_vx, crash_vy, crash_angle;
+    int crash_size;
+    int crashing;
     int active, hp, max_hp;
     uint32_t last_shot;
 } Enemy;
@@ -271,6 +275,11 @@ typedef struct {
     uint32_t next_round;
     int burst_left;
 } Target;
+
+typedef struct {
+    float x, y; /* source-airframe coordinates */
+    int active;
+} BulletHole;
 
 typedef struct {
     SDL_AudioDeviceID device;
@@ -354,12 +363,15 @@ typedef struct {
     float player_x;
     float player_y;
     float player_vy;
+    float gunner_view_x;
+    float gunner_view_y;
     float view_bank;
     float view_pitch;
     float airspeed;
     float scroll;
     float fuel;
     int health;
+    int tail_integrity;
     int score;
     int objectives;
     int ammunition;
@@ -371,6 +383,8 @@ typedef struct {
     Explosion explosions[MAX_EXPLOSIONS];
     Enemy enemies[MAX_ENEMIES];
     Target targets[MAX_TARGETS];
+    BulletHole bullet_holes[MAX_BULLET_HOLES];
+    int next_bullet_hole;
 } Game;
 
 static int is_perspective_mode(MissionMode mode)
@@ -380,7 +394,7 @@ static int is_perspective_mode(MissionMode mode)
 
 static float gunner_traverse(const Game *g)
 {
-    float value = (g->player_x - 320.0f) / 175.0f;
+    float value = (g->gunner_view_x - 320.0f) / 176.0f;
     if (value < -1.0f) value = -1.0f;
     if (value > 1.0f) value = 1.0f;
     return value;
@@ -388,10 +402,58 @@ static float gunner_traverse(const Game *g)
 
 static float gunner_elevation(const Game *g)
 {
-    float value = (235.0f - g->player_y) / 90.0f;
+    float value = (235.0f - g->gunner_view_y) / 90.0f;
     if (value < 0.0f) value = 0.0f;
     if (value > 1.0f) value = 1.0f;
     return value;
+}
+
+static float gunner_aim_traverse(const Game *g)
+{
+    float value = (g->player_x - 28.0f) / 584.0f;
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    return value;
+}
+
+static float gunner_aim_elevation(const Game *g)
+{
+    float value = (300.0f - g->player_y) / 272.0f;
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    return value;
+}
+
+static void gunner_muzzle_position(const Game *g, float *x, float *y)
+{
+    static const int muzzle_x_in_frame[5] = {28, 108, 210, 312, 392};
+    static const int muzzle_y_in_frame[5] = {25, 28, 31, 34, 37};
+    float traverse = gunner_aim_traverse(g);
+    float elevation = gunner_aim_elevation(g);
+    int column = (int)(traverse * 4.999f);
+    int row = (int)(elevation * 4.999f);
+    int carriage_x = 320 + (int)((traverse - 0.5f) * 74.0f);
+    int carriage_y = 176 + (int)(fabsf(traverse - 0.5f) * 8.0f);
+    /* These points are the painted muzzle-ring centres in each atlas frame,
+     * not an estimate from screen centre. */
+    *x = (float)(carriage_x - 210 + muzzle_x_in_frame[column]);
+    *y = (float)(carriage_y + muzzle_y_in_frame[row]);
+}
+
+static int gunner_tail_blocks_shot(const Game *g, int aim_x, int aim_y)
+{
+    float look = gunner_traverse(g);
+    float elevation = gunner_elevation(g);
+    int tail_x = 320 - (int)(look * 132.0f);
+    int tail_y = 226 + (int)(elevation * 34.0f);
+    int fin_top = 76 + (int)(elevation * 26.0f);
+    /* The fin blocks the central vertical cone; the tailplane blocks the
+     * lower horizontal cone.  Both move with the transformed airframe. */
+    if (abs(aim_x - tail_x) < 27 && aim_y >= fin_top && aim_y <= tail_y + 18)
+        return 1;
+    if (abs(aim_y - tail_y) < 24 && abs(aim_x - tail_x) < 242)
+        return 1;
+    return 0;
 }
 
 static uint32_t scene_hash(uint32_t value)
@@ -465,6 +527,19 @@ static void present_frame(Game *g)
     dest.y = (dst->h - dest.h) / 2;
     SDL_BlitScaled(g->screen, NULL, dst, &dest);
     SDL_UpdateWindowSurface(g->window);
+}
+
+static void toggle_fullscreen(Game *g)
+{
+    uint32_t flags = g->fullscreen ? 0u : SDL_WINDOW_FULLSCREEN;
+    if (SDL_SetWindowFullscreen(g->window, flags) == 0) {
+        g->fullscreen = !g->fullscreen;
+        g->window_surface = SDL_GetWindowSurface(g->window);
+        g->redraw_static = 1;
+    } else {
+        fprintf(stderr, "Canvas Skies fullscreen switch failed: %s\n",
+                SDL_GetError());
+    }
 }
 
 static void rect(SDL_Surface *s, int x, int y, int w, int h, uint32_t c)
@@ -1059,11 +1134,16 @@ static int current_mission_goal(const Game *g)
 static void reset_sortie(Game *g)
 {
     int i;
+    int perspective_enemy_count;
     const Chapter *chapter = &chapters[g->chapter];
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     if (mode == MISSION_TOP_DOWN) {
         g->player_x = 320.0f;
         g->player_y = 310.0f;
+    } else if (mode == MISSION_GUNNER_3D) {
+        /* Begin clear of the fin so the first burst cannot hit our own tail. */
+        g->player_x = 238.0f;
+        g->player_y = 126.0f;
     } else if (is_perspective_mode(mode)) {
         g->player_x = 320.0f;
         g->player_y = 190.0f;
@@ -1072,12 +1152,20 @@ static void reset_sortie(Game *g)
         g->player_y = 265.0f;
     }
     g->player_vy = 0.0f;
+    if (mode == MISSION_GUNNER_3D) {
+        g->gunner_view_x = 320.0f + (g->player_x - 320.0f) * 0.80f;
+        g->gunner_view_y = 235.0f - gunner_aim_elevation(g) * 90.0f;
+    } else {
+        g->gunner_view_x = g->player_x;
+        g->gunner_view_y = g->player_y;
+    }
     g->view_bank = 0.0f;
     g->view_pitch = 0.0f;
     g->airspeed = 98.0f;
     g->scroll = 0.0f;
     g->fuel = 100.0f;
     g->health = 100;
+    g->tail_integrity = 100;
     g->score = 0;
     g->objectives = 0;
     g->ammunition = 260 - g->chapter * 13;
@@ -1089,19 +1177,34 @@ static void reset_sortie(Game *g)
     g->last_damage = 0;
     memset(g->bullets, 0, sizeof(g->bullets));
     memset(g->explosions, 0, sizeof(g->explosions));
+    memset(g->bullet_holes, 0, sizeof(g->bullet_holes));
+    g->next_bullet_hole = 0;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = 0.0f;
     g->audio.other_engine = 0.0f;
     g->audio.other_pitch = 0.0f;
     g->audio.vehicle_engine = 0.0f;
+    perspective_enemy_count = chapter->enemy_count;
+    if (mode == MISSION_GUNNER_3D && perspective_enemy_count > 2)
+        perspective_enemy_count = 2;
     for (i = 0; i < MAX_ENEMIES; ++i) {
         g->enemies[i].x = 760.0f + i * 620.0f;
         g->enemies[i].y = 90.0f + (float)((i * 47) % 120);
         g->enemies[i].phase = i * 0.8f;
-        g->enemies[i].hp = 1 + g->chapter / 3;
+        /* Even the earliest aircraft must first show visible battle damage.
+         * Later years add durability, but nothing goes straight from pristine
+         * to a crash on the first round. */
+        g->enemies[i].hp = 3 + g->chapter / 2;
         g->enemies[i].max_hp = g->enemies[i].hp;
+        g->enemies[i].crashing = 0;
+        g->enemies[i].crash_x = 0.0f;
+        g->enemies[i].crash_y = 0.0f;
+        g->enemies[i].crash_vx = 0.0f;
+        g->enemies[i].crash_vy = 0.0f;
+        g->enemies[i].crash_angle = 0.0f;
+        g->enemies[i].crash_size = 0;
         g->enemies[i].active = is_perspective_mode(mode) &&
-                               i < chapter->enemy_count;
+                               i < perspective_enemy_count;
         g->enemies[i].last_shot = SDL_GetTicks() + 650u + (uint32_t)i * 390u;
     }
     for (i = 0; i < MAX_TARGETS; ++i) {
@@ -1241,7 +1344,14 @@ static float enemy_depth_3d(const Game *g, const Enemy *enemy, int index)
 {
     static const float closing_rate[4] = {1.05f, 1.48f, 0.84f, 1.22f};
     int behaviour = index & 3;
-    return enemy->x - g->scroll * closing_rate[behaviour];
+    float depth = enemy->x - g->scroll * closing_rate[behaviour];
+    if (campaign_missions[g->chapter][g->mission].mode == MISSION_GUNNER_3D) {
+        /* Rear attackers do not sit in a formation.  Each works in and out of
+         * range independently, briefly pulling away before closing again. */
+        depth += sinf(g->scroll * (0.0043f + index * 0.0007f) +
+                      enemy->phase) * (260.0f + index * 95.0f);
+    }
+    return depth;
 }
 
 static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
@@ -1253,16 +1363,36 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
     int path = index & 3;
     if (depth < -520.0f || depth > 3300.0f) return 0;
     if (depth >= 90.0f) {
+        int flight_x;
+        int flight_y;
         approach = (3300.0f - depth) / 3210.0f;
         if (approach < 0.0f) approach = 0.0f;
         if (approach > 1.0f) approach = 1.0f;
+        if (approach < 0.035f) return 0;
         close = depth < 760.0f ? (760.0f - depth) / 670.0f : 0.0f;
         *size = (int)(10.0f + powf(approach, 1.22f) * 98.0f);
-        *sx = 320 + (int)(sinf(enemy->phase + g->scroll * 0.0025f) *
-                          (38.0f + approach * 145.0f));
-        *sy = 176 + (int)((enemy->y - 150.0f) * 0.30f +
-                          cosf(enemy->phase * 1.7f + g->scroll * 0.0018f) *
-                          (11.0f + approach * 35.0f));
+        flight_x = 320 + (int)(sinf(enemy->phase + g->scroll * 0.0025f) *
+                               (38.0f + approach * 145.0f));
+        flight_y = 176 + (int)((enemy->y - 150.0f) * 0.30f +
+                               cosf(enemy->phase * 1.7f +
+                                    g->scroll * 0.0018f) *
+                               (11.0f + approach * 35.0f));
+        if (campaign_missions[g->chapter][g->mission].mode ==
+            MISSION_GUNNER_3D && approach < 0.30f) {
+            float entry = (approach - 0.035f) / 0.265f;
+            int entry_x = (index & 1) ? SCREEN_W + 42 : -42;
+            int entry_y = (index & 1) ? 275 : 18;
+            if (entry < 0.0f) entry = 0.0f;
+            if (entry > 1.0f) entry = 1.0f;
+            /* Smooth turn-in: dive from high port or catch from low
+             * starboard, rather than appearing at a combat position. */
+            entry = entry * entry * (3.0f - 2.0f * entry);
+            *sx = entry_x + (int)((flight_x - entry_x) * entry);
+            *sy = entry_y + (int)((flight_y - entry_y) * entry);
+        } else {
+            *sx = flight_x;
+            *sy = flight_y;
+        }
         if (path == 0) {
             *sx += (int)(side * close * close * 112.0f);
             *sy += (int)(close * close * 42.0f);
@@ -1421,6 +1551,8 @@ static void update_perspective_sortie(Game *g, float dt,
 {
     int i;
     int active_enemies = 0;
+    int crashing_enemies = 0;
+    int tail_strike = 0;
     uint32_t now = SDL_GetTicks();
     int aim_x;
     int aim_y;
@@ -1428,22 +1560,58 @@ static void update_perspective_sortie(Game *g, float dt,
                  g->ammunition > 0 &&
                  now - g->last_shot >= (gunner ? 95u : 115u);
     if (gunner) {
+        float aim_elevation;
+        float follow;
+        float target_view_x;
+        float target_view_y;
         /* Tom flies a gentle evasive course.  The player swivels Neddy's
-         * whole rear-seat view through a 90-degree aft arc and elevates the
-         * single Lewis gun from level to about 75 degrees. */
+         * crosshair through the rear arc.  The observer's viewpoint follows
+         * with damped motion while the single Lewis gun stays on the sight. */
         g->airspeed = 112.0f + sinf(g->scroll * 0.006f) * 8.0f;
-        if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 205.0f * dt;
-        if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 205.0f * dt;
-        if (keys[SDL_SCANCODE_UP]) g->player_y -= 185.0f * dt;
-        if (keys[SDL_SCANCODE_DOWN]) g->player_y += 185.0f * dt;
-        if (g->player_x < 145.0f) g->player_x = 145.0f;
-        if (g->player_x > 495.0f) g->player_x = 495.0f;
-        if (g->player_y < 145.0f) g->player_y = 145.0f;
-        if (g->player_y > 235.0f) g->player_y = 235.0f;
-        g->view_bank = sinf(g->scroll * 0.0027f) * 0.18f +
-                       sinf(g->scroll * 0.0089f + 1.4f) * 0.075f;
-        g->view_pitch = sinf(g->scroll * 0.0019f) * 0.10f +
-                        sinf(g->scroll * 0.0067f + 0.8f) * 0.045f;
+        if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 225.0f * dt;
+        if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 225.0f * dt;
+        if (keys[SDL_SCANCODE_UP]) g->player_y -= 195.0f * dt;
+        if (keys[SDL_SCANCODE_DOWN]) g->player_y += 195.0f * dt;
+        if (g->player_x < 28.0f) g->player_x = 28.0f;
+        if (g->player_x > 612.0f) g->player_x = 612.0f;
+        if (g->player_y < 28.0f) g->player_y = 28.0f;
+        if (g->player_y > 300.0f) g->player_y = 300.0f;
+        aim_elevation = gunner_aim_elevation(g);
+        target_view_x = 320.0f + (g->player_x - 320.0f) * 0.80f;
+        target_view_y = 235.0f - aim_elevation * 90.0f;
+        follow = 1.0f - expf(-4.2f * dt);
+        g->gunner_view_x += (target_view_x - g->gunner_view_x) * follow;
+        g->gunner_view_y += (target_view_y - g->gunner_view_y) * follow;
+        {
+            float tail_control = (float)g->tail_integrity / 100.0f;
+            float threat = 0.0f;
+            for (i = 0; i < MAX_ENEMIES; ++i) {
+                float depth;
+                float proximity;
+                if (!g->enemies[i].active || g->enemies[i].crashing)
+                    continue;
+                depth = enemy_depth_3d(g, &g->enemies[i], i);
+                if (depth <= 40.0f || depth >= 1700.0f) continue;
+                proximity = 1.0f - depth / 1700.0f;
+                if (now >= g->enemies[i].last_shot &&
+                    now - g->enemies[i].last_shot < 650u)
+                    proximity += 0.24f;
+                if (proximity > threat) threat = proximity;
+            }
+            if (threat > 1.0f) threat = 1.0f;
+            if (tail_control < 0.0f) tail_control = 0.0f;
+            /* The pilot flies the evasive aeroplane.  Manoeuvres become
+             * forceful when an attacker closes or has just fired, so the
+             * horizon, tail and target all move under the gunner. */
+            g->view_bank = (sinf(g->scroll * 0.0027f) *
+                            (0.12f + threat * 0.25f) +
+                            sinf(g->scroll * 0.0097f + 1.4f) *
+                            (0.05f + threat * 0.11f)) * tail_control;
+            g->view_pitch = (sinf(g->scroll * 0.0019f) *
+                             (0.07f + threat * 0.13f) +
+                             sinf(g->scroll * 0.0079f + 0.8f) *
+                             (0.03f + threat * 0.07f)) * tail_control;
+        }
     } else {
         /* In the scout the controls fly the aeroplane, not a mouse cursor.
          * The fixed Vickers sight remains on the centre line. */
@@ -1464,14 +1632,41 @@ static void update_perspective_sortie(Game *g, float dt,
         g->player_x = 320.0f;
         g->player_y = 190.0f;
     }
-    /* In the gunner view the sight stays with the observer's eyes while the
-     * landscape, tail and aircraft move around it. */
-    aim_x = gunner ? 320 : (int)g->player_x;
-    aim_y = gunner ? 190 : (int)g->player_y;
+    /* In the gunner view the open crosshair is the authoritative hit point.
+     * The camera follows it with lag; it is never replaced by the gun sight. */
+    aim_x = (int)g->player_x;
+    aim_y = (int)g->player_y;
+    tail_strike = gunner && gunner_tail_blocks_shot(g, aim_x, aim_y);
     if (firing) {
+        float muzzle_x = 320.0f;
+        float muzzle_y = 248.0f;
+        float dx;
+        float dy;
+        float length;
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = gunner ? 1750 : 1500;
+        if (gunner) gunner_muzzle_position(g, &muzzle_x, &muzzle_y);
+        dx = (float)aim_x - muzzle_x;
+        dy = (float)aim_y - muzzle_y;
+        length = sqrtf(dx * dx + dy * dy);
+        if (length < 1.0f) length = 1.0f;
+        /* Every round is visible, including an unsafe round stopped by our
+         * own tail.  The tracer starts at the painted muzzle and passes
+         * through the authoritative crosshair. */
+        new_bullet(g, muzzle_x, muzzle_y,
+                   dx / length * 900.0f, dy / length * 900.0f,
+                   0, 0, 0.65f);
+        if (tail_strike) {
+            g->tail_integrity -= 9;
+            if (g->tail_integrity < 0) g->tail_integrity = 0;
+            g->health -= 2;
+            if (g->health < 0) g->health = 0;
+            new_explosion(g, (float)aim_x, (float)aim_y, 0);
+            g->audio.blast = 1700;
+            /* The round stops in our airframe; it cannot also hit an enemy. */
+            firing = 0;
+        }
     }
     g->scroll += g->airspeed * dt * 1.16f;
     g->fuel -= dt * 1.2f;
@@ -1491,16 +1686,42 @@ static void update_perspective_sortie(Game *g, float dt,
             fabsf(b->x - 320.0f) < 28.0f &&
             fabsf(b->y - 190.0f) < 28.0f &&
             now - g->last_damage > 520u) {
+            if (gunner) {
+                BulletHole *hole = &g->bullet_holes[g->next_bullet_hole];
+                uint32_t scatter = scene_hash(now ^
+                    (uint32_t)g->next_bullet_hole * 2654435761u);
+                hole->x = 190.0f + (float)(scatter % 261u);
+                hole->y = 205.0f + (float)((scatter >> 9) % 126u);
+                hole->active = 1;
+                g->next_bullet_hole =
+                    (g->next_bullet_hole + 1) % MAX_BULLET_HOLES;
+            }
             if (!g->qa_hold) g->health -= 4 + g->chapter / 2;
             g->last_damage = now;
             b->active = 0;
-            new_explosion(g, 320.0f, 190.0f, 0);
+            /* A bullet strike damages the airframe; it is not a mid-air
+             * explosion.  The normal damage-smoke renderer shows the result. */
         }
     }
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
         Enemy *enemy = &g->enemies[i];
         float depth = enemy_depth_3d(g, enemy, i);
         int sx, sy, size;
+        if (enemy->crashing) {
+            ++crashing_enemies;
+            enemy->crash_angle += dt * (2.8f + (float)(i & 3) * 0.32f);
+            enemy->crash_vy += 34.0f * dt;
+            enemy->crash_x += (enemy->crash_vx +
+                cosf(enemy->crash_angle) * 72.0f) * dt;
+            enemy->crash_y += (enemy->crash_vy +
+                sinf(enemy->crash_angle) * 22.0f) * dt;
+            if (enemy->crash_y > SCREEN_H + 70.0f ||
+                enemy->crash_x < -150.0f || enemy->crash_x > SCREEN_W + 150.0f) {
+                enemy->active = 0;
+                --crashing_enemies;
+            }
+            continue;
+        }
         if (depth < -520.0f || ((i & 3) == 3 && depth > 3300.0f)) {
             enemy->active = 0;
             continue;
@@ -1510,15 +1731,22 @@ static void update_perspective_sortie(Game *g, float dt,
         if (firing) {
             if (abs(aim_x - sx) < size / 2 + 10 &&
                 abs(aim_y - sy) < size / 3 + 9) {
-                if (--enemy->hp <= 0) {
-                    enemy->active = 0;
+                --enemy->hp;
+                if (enemy->hp <= 0) {
+                    enemy->crashing = 1;
+                    enemy->crash_x = (float)sx;
+                    enemy->crash_y = (float)sy;
+                    enemy->crash_vx = (i & 1) ? -42.0f : 42.0f;
+                    enemy->crash_vy = 24.0f;
+                    enemy->crash_angle = enemy->phase;
+                    enemy->crash_size = size;
                     --active_enemies;
+                    ++crashing_enemies;
                     g->score += 250;
-                    new_explosion(g, (float)sx, (float)sy, 1);
-                    g->audio.blast = 6500;
                 }
             }
         }
+        if (enemy->crashing) continue;
         if (depth < 1250.0f && depth > 140.0f &&
             now >= enemy->last_shot &&
             now - enemy->last_shot >
@@ -1541,15 +1769,23 @@ static void update_perspective_sortie(Game *g, float dt,
             }
         }
     }
-    if (g->qa_hold && active_enemies == 0 && g->scroll > 520.0f) {
+    if (gunner && g->tail_integrity <= 0) {
+        finish_alternate_sortie(g);
+    } else if (g->qa_hold && active_enemies == 0 && crashing_enemies == 0 &&
+               g->scroll > 520.0f) {
         float view_x = g->player_x;
         float view_y = g->player_y;
+        float camera_x = g->gunner_view_x;
+        float camera_y = g->gunner_view_y;
         int hold = g->qa_hold;
         reset_sortie(g);
         g->player_x = view_x;
         g->player_y = view_y;
+        g->gunner_view_x = camera_x;
+        g->gunner_view_y = camera_y;
         g->qa_hold = hold;
-    } else if (!g->qa_hold && ((active_enemies == 0 && g->scroll > 520.0f) ||
+    } else if (!g->qa_hold && ((active_enemies == 0 && crashing_enemies == 0 &&
+        g->scroll > 520.0f) ||
         g->scroll > chapters[g->chapter].distance ||
         g->fuel <= 0.0f || g->health <= 0))
         finish_alternate_sortie(g);
@@ -2500,7 +2736,7 @@ static void draw_top_down_sortie(Game *g)
 }
 
 static void draw_perspective_plane(Game *g, int x, int y, int size,
-                                   int enemy)
+                                   int enemy, float bank)
 {
     SDL_Surface *s = g->screen;
     uint32_t body = enemy ? rgb(s, 132, 38, 32) : rgb(s, 63, 91, 58);
@@ -2510,19 +2746,33 @@ static void draw_perspective_plane(Game *g, int x, int y, int size,
     int half, wing, strut;
     if (size < 8) size = 8;
     if (size > 58) size = 58;
-    if (enemy && g->dogfight_enemy) {
+    /* At long range, downsampling the detailed painted sprite leaves isolated
+     * propeller and undercarriage pixels which read as screen corruption.
+     * Use the clean vector silhouette until the aircraft is large enough for
+     * its painted detail to survive. */
+    if (enemy && g->dogfight_enemy && size >= 56) {
         SDL_Surface *sprite = g->dogfight_enemy;
         int draw_w = size * 2;
         int draw_h = size;
         int dx, dy;
+        float cosine = cosf(bank);
+        float sine = sinf(bank);
         if (SDL_MUSTLOCK(sprite)) SDL_LockSurface(sprite);
-        for (dy = 0; dy < draw_h; ++dy) {
-            int sy = dy * sprite->h / draw_h;
-            int ty = y - draw_h / 2 + dy;
-            for (dx = 0; dx < draw_w; ++dx) {
-                int sx = dx * sprite->w / draw_w;
-                int tx = x - draw_w / 2 + dx;
+        for (dy = -draw_w / 2; dy <= draw_w / 2; ++dy) {
+            for (dx = -draw_w / 2; dx <= draw_w / 2; ++dx) {
+                float ux = cosine * (float)dx + sine * (float)dy;
+                float uy = -sine * (float)dx + cosine * (float)dy;
+                int sx, sy;
+                int tx = x + dx;
+                int ty = y + dy;
                 uint8_t r, green, b;
+                if (ux < -(float)draw_w * 0.5f ||
+                    ux >= (float)draw_w * 0.5f ||
+                    uy < -(float)draw_h * 0.5f ||
+                    uy >= (float)draw_h * 0.5f)
+                    continue;
+                sx = (int)((ux + draw_w * 0.5f) * sprite->w / draw_w);
+                sy = (int)((uy + draw_h * 0.5f) * sprite->h / draw_h);
                 SDL_GetRGB(surface_pixel(sprite, sx, sy), sprite->format,
                            &r, &green, &b);
                 /* SDL2.module's scaled blit does not preserve colour keys on
@@ -2540,16 +2790,22 @@ static void draw_perspective_plane(Game *g, int x, int y, int size,
     strut = size / 3;
     if (enemy) {
         int radius = size / 5;
+        int left_y = y - size / 4 - (int)(bank * wing);
+        int right_y = y - size / 4 + (int)(bank * wing);
+        int lower_left_y = y + size / 8 - (int)(bank * wing * 0.8f);
+        int lower_right_y = y + size / 8 + (int)(bank * wing * 0.8f);
+        int thickness;
         if (radius < 2) radius = 2;
         /* Head-on attacker: the cowling and propeller face the rear gunner.
          * This deliberately differs from the rear-quarter allied silhouette. */
-        rect(s, x - wing, y - size / 4, wing * 2, size / 6 + 2, dark);
-        rect(s, x - wing + 2, y - size / 4 + 1,
-             wing * 2 - 4, size / 6, cloth);
-        rect(s, x - wing + size / 8, y + size / 8,
-             (wing - size / 8) * 2, size / 7 + 2, dark);
-        rect(s, x - wing + size / 8 + 2, y + size / 8 + 1,
-             (wing - size / 8) * 2 - 4, size / 7, cloth);
+        for (thickness = -2; thickness <= 2; ++thickness) {
+            line(s, x - wing, left_y + thickness,
+                 x + wing, right_y + thickness,
+                 thickness == -2 || thickness == 2 ? dark : cloth);
+            line(s, x - wing + size / 8, lower_left_y + thickness,
+                 x + wing - size / 8, lower_right_y + thickness,
+                 thickness == -2 || thickness == 2 ? dark : cloth);
+        }
         line(s, x - strut, y - size / 5, x - strut + 2,
              y + size / 6, dark);
         line(s, x + strut, y - size / 5, x + strut - 2,
@@ -2589,6 +2845,21 @@ static void draw_perspective_plane(Game *g, int x, int y, int size,
         circle(s, x - size / 7, y + half - 1, 2, dark);
         circle(s, x + size / 7, y + half - 1, 2, dark);
     }
+}
+
+static void draw_spiralling_enemy(Game *g, const Enemy *enemy, int index)
+{
+    int size = enemy->crash_size;
+    if (size < 10) size = 10;
+    if (size > 62) size = 62;
+    draw_aircraft_smoke(g, (int)enemy->crash_x, (int)enemy->crash_y,
+                        0, 1, 0x43524153u + (uint32_t)index * 97u);
+    /* Keep the aeroplane visually intact while its trajectory spirals.  A
+     * rotating resample at this scale broke the wings and propeller into
+     * disconnected fragments which looked like screen corruption. */
+    draw_perspective_plane(g, (int)enemy->crash_x,
+                           (int)enemy->crash_y, size, 1,
+                           sinf(enemy->crash_angle) * 0.95f);
 }
 
 static void draw_flight_background(Game *g)
@@ -2645,6 +2916,7 @@ static void draw_gunner_airframe(Game *g)
     float scale = 1.0f - fabsf(look) * 0.14f;
     float centre_shift = -look * 104.0f;
     float vertical_shift = elevation * 34.0f + g->view_pitch * 22.0f;
+    const int foreground_drop = 40;
     uint32_t key;
     int x, y;
     int source_locked = 0;
@@ -2669,7 +2941,8 @@ static void draw_gunner_airframe(Game *g)
         for (x = 0; x < SCREEN_W; ++x) {
             float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
             float shear = look * (float)(y - 215) * 0.20f;
-            int sy = (int)((float)y - vertical_shift - roll);
+            int sy = (int)((float)y - vertical_shift - roll -
+                           (float)foreground_drop);
             int sx = (int)(SCREEN_W * 0.5f +
                      ((float)x - SCREEN_W * 0.5f - centre_shift - shear) /
                      scale);
@@ -2682,6 +2955,29 @@ static void draw_gunner_airframe(Game *g)
     }
     if (dest_locked) SDL_UnlockSurface(dest);
     if (source_locked) SDL_UnlockSurface(source);
+}
+
+static void draw_gunner_bullet_holes(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    float look = gunner_traverse(g);
+    float elevation = gunner_elevation(g);
+    float scale = 1.0f - fabsf(look) * 0.14f;
+    float centre_shift = -look * 104.0f;
+    float vertical_shift = elevation * 34.0f + g->view_pitch * 22.0f;
+    int i;
+    for (i = 0; i < MAX_BULLET_HOLES; ++i) if (g->bullet_holes[i].active) {
+        float source_x = g->bullet_holes[i].x;
+        float source_y = g->bullet_holes[i].y;
+        float shear = look * (source_y - 215.0f) * 0.20f;
+        int x = (int)(SCREEN_W * 0.5f +
+                (source_x - SCREEN_W * 0.5f) * scale + centre_shift + shear);
+        float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
+        int y = (int)(source_y + vertical_shift + roll + 40.0f);
+        circle(s, x, y, 3, rgb(s, 187, 150, 95));
+        circle(s, x, y, 2, rgb(s, 35, 27, 22));
+        pixel(s, x - 1, y - 1, rgb(s, 232, 198, 135));
+    }
 }
 
 static void draw_dogfight_3d_sortie(Game *g)
@@ -2710,37 +3006,54 @@ static void draw_dogfight_3d_sortie(Game *g)
     }
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
         int sx, sy, size;
+        if (g->enemies[i].crashing) {
+            draw_spiralling_enemy(g, &g->enemies[i], i);
+            continue;
+        }
         if (project_enemy_3d(g, &g->enemies[i], i, &sx, &sy, &size)) {
             if (g->enemies[i].hp < g->enemies[i].max_hp) {
                 int health = g->enemies[i].hp * 100 / g->enemies[i].max_hp;
                 draw_aircraft_smoke(g, sx, sy, health, 1,
                                     0x3344454eu + (uint32_t)i * 79u);
             }
-            draw_perspective_plane(g, sx, sy, size, 1);
+            {
+                float phase = g->enemies[i].phase +
+                              g->scroll * (0.0025f + i * 0.00035f);
+                float bank = cosf(phase) * (0.20f +
+                             (size > 48 ? 0.30f : 0.14f));
+                if (i & 1) bank = -bank;
+                draw_perspective_plane(g, sx, sy, size, 1, bank);
+            }
         }
     }
     /* Eccles, Gridpipe Thyne and Bluebottle hold a loose formation around us. */
     for (i = 0; i < 3; ++i) if (g->wingman_health[i] > 0) {
         int wx = i == 0 ? 175 : (i == 1 ? 455 : 110);
         int wy = i == 2 ? 252 : 278;
-        draw_perspective_plane(g, wx, wy, i == 2 ? 20 : 27, 0);
+        draw_perspective_plane(g, wx, wy, i == 2 ? 20 : 27, 0, 0.0f);
         typewriter_text(g, wx - 25, wy + 20, allied_pilot_names[i], 7, 11,
                         rgb(s, 228, 214, 173));
     }
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];
-        line(s, (int)b->x, (int)b->y,
-             (int)b->x - (int)(b->vx * 0.045f),
-             (int)b->y - (int)(b->vy * 0.045f),
-             rgb(s, 255, 127, 61));
+        uint32_t tracer = b->enemy ? rgb(s, 255, 113, 57) :
+                                     rgb(s, 255, 239, 157);
+        int tail_x = (int)b->x - (int)(b->vx * (b->enemy ? 0.045f : 0.095f));
+        int tail_y = (int)b->y - (int)(b->vy * (b->enemy ? 0.045f : 0.095f));
+        line(s, (int)b->x, (int)b->y, tail_x, tail_y, tracer);
+        if (!b->enemy)
+            line(s, (int)b->x, (int)b->y + 1, tail_x, tail_y + 1, tracer);
     }
     draw_explosions(g);
-    if (gunner) draw_gunner_airframe(g);
-    if (gunner && g->gunner_ring && g->gunner_moving_guns) {
+    if (gunner) {
+        draw_gunner_airframe(g);
+        draw_gunner_bullet_holes(g);
+    }
+    if (gunner && g->gunner_moving_guns) {
         SDL_Rect gun_source;
         SDL_Rect gun_position;
-        float traverse = (g->player_x - 145.0f) / 350.0f;
-        float elevation = gunner_elevation(g);
+        float traverse = gunner_aim_traverse(g);
+        float elevation = gunner_aim_elevation(g);
         int column;
         int row;
         int carriage_x;
@@ -2754,8 +3067,8 @@ static void draw_dogfight_3d_sortie(Game *g)
         /* The single Lewis gun remains anchored to the Scarff rail.  Most of
          * the 90-degree traverse is now expressed by the moving viewpoint;
          * this smaller carriage shift shows the physical mount following it. */
-        carriage_x = 320 + (int)((traverse - 0.5f) * 82.0f);
-        carriage_y = 94 + (int)(fabsf(traverse - 0.5f) * 10.0f);
+        carriage_x = 320 + (int)((traverse - 0.5f) * 74.0f);
+        carriage_y = 176 + (int)(fabsf(traverse - 0.5f) * 8.0f);
         gun_source.x = column * 420;
         gun_source.y = row * 220;
         gun_source.w = 420;
@@ -2764,7 +3077,9 @@ static void draw_dogfight_3d_sortie(Game *g)
         gun_position.y = carriage_y;
         gun_position.w = gun_position.h = 0;
         SDL_BlitSurface(g->gunner_moving_guns, &gun_source, s, &gun_position);
-        SDL_BlitSurface(g->gunner_ring, NULL, s, NULL);
+        /* The rail is already painted into the airframe foreground.  The old
+         * full-screen ring overlay belonged to the abandoned twin-gun mockup
+         * and would duplicate the mount around the single Lewis. */
     } else if (gunner && g->gunner_cockpit)
         SDL_BlitSurface(g->gunner_cockpit, NULL, s, NULL);
     else if (!gunner && g->pilot_cockpit)
@@ -2775,11 +3090,13 @@ static void draw_dogfight_3d_sortie(Game *g)
         rect(s, 312, 318, 16, 82, rgb(s, 45, 44, 39));
     }
     if (gunner) {
-        /* The sight remains central because the whole observer view now
-         * swivels and elevates with the gun. */
-        int ax = 320;
-        int ay = 190;
-        uint32_t sight = rgb(s, 226, 206, 151);
+        int ax = (int)g->player_x;
+        int ay = (int)g->player_y;
+        int blocked = gunner_tail_blocks_shot(g, ax, ay);
+        uint32_t sight = blocked ? rgb(s, 242, 72, 45) :
+                                   rgb(s, 239, 221, 164);
+        /* The open crosshair is separate from the gun.  It is the real hit
+         * point; red warns that the line of fire intersects our own tail. */
         line(s, ax - 24, ay, ax - 8, ay, sight);
         line(s, ax + 8, ay, ax + 24, ay, sight);
         line(s, ax, ay - 24, ax, ay - 8, sight);
@@ -2791,16 +3108,18 @@ static void draw_dogfight_3d_sortie(Game *g)
     }
     snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
              current_mission_goal(g));
-    draw_field_sign(g, 8, 8, 130, buf);
+    draw_field_sign(g, 8, 342, 130, buf);
     snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
-    draw_field_sign(g, 8, 39, 130, buf);
-    snprintf(buf, sizeof(buf), gunner ? "PILOT %03d" : "SPEED %03d",
-             (int)g->airspeed);
-    draw_field_sign(g, 264, 8, 108, buf);
+    draw_field_sign(g, 8, 371, 130, buf);
+    if (gunner)
+        snprintf(buf, sizeof(buf), "TAIL %03d", g->tail_integrity);
+    else
+        snprintf(buf, sizeof(buf), "SPEED %03d", (int)g->airspeed);
+    draw_field_sign(g, 266, 371, 108, buf);
     snprintf(buf, sizeof(buf), "FUEL %02d", (int)g->fuel);
-    draw_field_sign(g, 526, 8, 106, buf);
+    draw_field_sign(g, 526, 342, 106, buf);
     snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
-    draw_field_sign(g, 502, 39, 130, buf);
+    draw_field_sign(g, 502, 371, 130, buf);
 }
 
 static void draw_sortie(Game *g)
@@ -3358,6 +3677,9 @@ static void handle_event(Game *g, SDL_Event *ev)
         g->last_action_key && SDL_GetTicks() - g->last_action_key < 450u)
         return;
     switch (ev->key.keysym.sym) {
+    case SDLK_F9:
+        toggle_fullscreen(g);
+        break;
     case SDLK_ESCAPE:
         if (g->scene == SCENE_TITLE) g->running = 0;
         else set_scene(g, SCENE_TITLE);

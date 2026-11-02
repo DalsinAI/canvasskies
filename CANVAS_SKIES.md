@@ -73,9 +73,17 @@ The first vertical slice contains:
   magenta edge contamination;
 - the rear observer's whole viewpoint pans across a 90-degree arc. The wide
   battlefield panorama, incoming aircraft and visible tail geometry move in
-  opposition to the view, while Tom's independent bank and pitch roll and
-  shear the horizon. Enemy aircraft close toward the camera using head-on art
-  and varied approach rates before crossing the fixed central sight;
+  opposition to the view with damped follow, while Tom's independent bank and
+  pitch roll and shear the horizon. A freely moving open crosshair is the real
+  hit point; the lower Scarff gun follows it. The crosshair turns red over the
+  fin or tailplane, and firing there damages the tail controls and progressively
+  removes Tom's ability to steer. Visible tracers leave the lower gun and pass
+  through the crosshair. Enemy aircraft close toward the camera using dedicated
+  nose-on art and varied approach rates; defeated aircraft smoke, roll into a
+  widening spiral and descend rather than exploding in mid-air;
+- perspective-mode score, ammunition, fuel, tail/airframe condition and speed
+  plaques live on the lower cockpit/instrument area so the combat sky remains
+  unobstructed;
 - terrain impacts are retained in mission-world coordinates. Top-down blasts
   advance with the vertically scrolling map and side-on blasts move with the
   horizontal landscape rather than remaining attached to the player or screen;
@@ -86,14 +94,16 @@ The first vertical slice contains:
 
 - Side/top-down: arrow keys move the aircraft in all four directions
 - Single-seat dogfight: arrow keys bank and pitch; X/Z control throttle
-- Two-seat gunner: Left/Right swivels the rear view and Scarff-ring gun through
-  90 degrees; Up/Down elevates the single Lewis gun from level to about 75
-  degrees while Tom flies an independent evasive course
+- Two-seat gunner: arrow keys move the open crosshair; the lower Scarff-ring
+  gun points at it while the rear view follows smoothly through a 90-degree
+  arc and up to about 75 degrees of elevation. A red crosshair means the tail
+  blocks the shot
 - On the title campaign board, Up/Down selects the full campaign or a 1914,
   1915, 1916, 1917 or 1918 starting commission
 - X: increase throttle
 - Z: reduce throttle
 - Space: fire
+- F9: toggle real 640x400 fullscreen (F10 remains unused)
 - Enter: open/accept the campaign board and advance through story screens
 - Escape: return to title; Escape again exits
 

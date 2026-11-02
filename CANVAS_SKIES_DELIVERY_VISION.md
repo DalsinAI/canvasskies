@@ -152,14 +152,18 @@ Rear-gunner missions are mechanically separate from dogfights. Tom flies a
 scripted but visibly evasive course while Neddy swivels on the observer's stool
 and operates one Lewis gun on a Scarff ring.
 
-The arrow keys move the observer's complete viewpoint through a 90-degree rear
-arc and elevate the gun to roughly 75 degrees. The wide landscape, enemy
-aircraft, visible rear fuselage and tailplane all respond to that movement;
-Tom's evasive banking remains a separate motion. The gun, drum magazine, sight
-and upper mount visibly follow the view while the yoke stays attached to the
-Scarff rail. Firing produces recoil, muzzle flash, tracers and the correct
-mechanical report. The central aiming marker remains open so it never obscures
-the target.
+The arrow keys move a clear open crosshair through a 90-degree rear arc and up
+to roughly 75 degrees of elevation. That crosshair is the authoritative hit
+point. The Lewis gun sits visibly lower in the cockpit and points toward it;
+the wide landscape, enemy aircraft, visible rear fuselage and tailplane follow
+with damped movement rather than snapping to the gun. Tom's evasive banking
+remains a separate motion. The gun, drum magazine and upper mount visibly
+follow the aim while the yoke stays attached to the Scarff rail. The crosshair
+turns red when the tail blocks the line of fire. Firing anyway damages the tail
+controls, reduces Tom's steering authority and can end the sortie. Every burst
+produces visible tracers from the lower gun through the crosshair. A defeated
+aircraft does not become a mid-air fireball: it smokes, rolls out of control and
+spirals down until it leaves the combat view.
 
 Enemy aircraft use true depth choreography: distant approach, increasing
 apparent size, lateral attack, close break, overhead pass and departure behind
