@@ -23,6 +23,16 @@ included here:
 * FAQ - Frequently asked questions about SDL Sopwith
 * NEWS - What's new, ChangeLog
 
+## Canvas Skies
+
+This repository also contains the in-development Amiga game *Canvas Skies*, an
+original First World War campaign that grew from the Sopwith porting work.
+
+* [Story and design bible](docs/CANVAS_SKIES_STORY_AND_DESIGN.md)
+* [Implementation status and resumable handoff](docs/CANVAS_SKIES_STATUS.md)
+* Campaign data: `src/modern/canvas_campaign.h`
+* Amiga build: `make -f ports/amigaos3/Makefile.canvas -j2`
+
 You can find lots more information about the original Sopwith here:
 
 * http://www.sopwith.org/
