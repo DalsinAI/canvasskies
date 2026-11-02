@@ -662,6 +662,18 @@ static void circle(SDL_Surface *s, int cx, int cy, int radius, uint32_t c)
                 pixel(s, cx + x, cy + y, c);
 }
 
+static void ellipse(SDL_Surface *s, int cx, int cy, int radius_x,
+                    int radius_y, uint32_t c)
+{
+    int y;
+    if (radius_x < 1 || radius_y < 1) return;
+    for (y = -radius_y; y <= radius_y; ++y) {
+        float n = (float)(y * y) / (float)(radius_y * radius_y);
+        int span = (int)((float)radius_x * sqrtf(1.0f - n));
+        line(s, cx - span, cy + y, cx + span, cy + y, c);
+    }
+}
+
 static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
                        uint8_t r, uint8_t g, uint8_t b, uint8_t alpha)
 {
@@ -3676,25 +3688,19 @@ static void draw_simulator_terrain(Game *g)
     /* The atmosphere is tied to the projected horizon, not the monitor.  The
      * broad bands are deliberately subtle, but they stop a banked landscape
      * looking pasted over an upright photographic sky. */
-    gradient(s, 25, 52, 91, 154, 145, 126);
+    gradient(s, 23, 48, 86, 70, 94, 119);
     {
-        static const int band_y[5] = {-128, -82, -48, -22, 1};
-        static const uint8_t band_colour[4][3] = {
-            {72, 101, 132}, {103, 124, 143},
-            {145, 145, 137}, {192, 163, 126}
-        };
-        int band;
-        for (band = 0; band < 4; ++band) {
-            int l0 = horizon_left + band_y[band];
-            int r0 = horizon_right + band_y[band];
-            int l1 = horizon_left + band_y[band + 1];
-            int r1 = horizon_right + band_y[band + 1];
-            uint32_t colour = rgb(s, band_colour[band][0],
-                                  band_colour[band][1],
-                                  band_colour[band][2]);
-            fill_triangle(s, 0, l0, SCREEN_W - 1, r0,
-                          SCREEN_W - 1, r1, colour);
-            fill_triangle(s, 0, l0, SCREEN_W - 1, r1, 0, l1, colour);
+        int distance;
+        /* One-pixel bands are cheaper than alpha blending on a 68040 and
+         * produce a continuous horizon-relative aerial perspective. */
+        for (distance = 150; distance >= 0; --distance) {
+            float t = 1.0f - (float)distance / 150.0f;
+            uint8_t red = (uint8_t)(59.0f + 133.0f * t);
+            uint8_t green = (uint8_t)(87.0f + 74.0f * t);
+            uint8_t blue = (uint8_t)(121.0f + 3.0f * t);
+            line(s, 0, horizon_left - distance,
+                 SCREEN_W - 1, horizon_right - distance,
+                 rgb(s, red, green, blue));
         }
     }
     fill_triangle(s, 0, horizon_left, SCREEN_W - 1, horizon_right,
@@ -3824,23 +3830,32 @@ static void draw_simulator_clouds(Game *g)
         radius = (int)((26000.0f + (float)(seed & 8191u)) / p.depth);
         if (radius < 3) radius = 3;
         if (radius > 38) radius = 38;
-        puffs = 5 + (int)((seed >> 5) & 3u);
-        /* A broad underside joins the puffs into a bank instead of a row of
-         * identical cotton balls. */
-        rect(s, p.x - radius, p.y, radius * 2, radius / 3 + 1,
-             rgb(s, 113, 124, 132));
+        puffs = 4 + (int)((seed >> 5) & 3u);
+        /* The wind-stretched base joins the rising cells.  Varying ellipses
+         * read as a bank of vapour where equal circles read as bubbles. */
+        ellipse(s, p.x, p.y + radius / 5, radius * 6 / 5,
+                radius / 3 + 1, rgb(s, 111, 122, 132));
+        ellipse(s, p.x - radius / 8, p.y, radius,
+                radius / 3 + 1, rgb(s, 160, 167, 168));
         for (puff = 0; puff < puffs; ++puff) {
             uint32_t ps = scene_hash(seed + (uint32_t)puff * 2654435761u);
-            int px = p.x - radius +
-                     (int)(ps % (uint32_t)(radius * 2 + 1));
-            int py = p.y - (int)((ps >> 9) % (uint32_t)(radius + 1)) / 2;
-            int pr = radius / 3 +
-                     (int)((ps >> 17) % (uint32_t)(radius / 3 + 1));
+            int px = p.x - radius * 3 / 4 +
+                     puff * (radius * 3 / 2) / (puffs - 1) +
+                     (int)(ps % 7u) - 3;
+            int py = p.y - radius / 7 -
+                     (int)((ps >> 9) % (uint32_t)(radius / 2 + 1));
+            int pr = radius / 3 + (int)((ps >> 17) %
+                     (uint32_t)(radius / 4 + 1));
+            int pry;
             uint8_t shade = (uint8_t)(184 + ((ps >> 25) & 23u));
             if (pr < 2) pr = 2;
-            circle(s, px, py + pr / 4, pr, rgb(s, 126, 134, 139));
-            circle(s, px - pr / 6, py - pr / 5, pr * 4 / 5,
-                   rgb(s, shade, shade, shade - 5));
+            pry = pr * (3 + (int)((ps >> 22) & 1u)) / 5;
+            if (pry < 2) pry = 2;
+            ellipse(s, px, py + pry / 3, pr, pry,
+                    rgb(s, 123, 132, 138));
+            ellipse(s, px - pr / 8, py - pry / 5,
+                    pr * 4 / 5, pry * 4 / 5,
+                    rgb(s, shade, shade, shade - 5));
         }
     }
     }
