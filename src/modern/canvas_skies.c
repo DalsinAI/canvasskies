@@ -91,7 +91,7 @@
 #define CANVAS_TOPDOWN_PLAYER_BMP "assets/canvas-skies/topdown-player.bmp"
 #endif
 #ifndef CANVAS_DOGFIGHT_BACKGROUND_BMP
-#define CANVAS_DOGFIGHT_BACKGROUND_BMP "assets/canvas-skies/dogfight-background-flight.bmp"
+#define CANVAS_DOGFIGHT_BACKGROUND_BMP "assets/canvas-skies/dogfight-panorama-v2.bmp"
 #endif
 #ifndef CANVAS_DOGFIGHT_ENEMY_BMP
 #define CANVAS_DOGFIGHT_ENEMY_BMP "assets/canvas-skies/dogfight-enemy.bmp"
@@ -105,8 +105,11 @@
 #ifndef CANVAS_GUNNER_RING_BMP
 #define CANVAS_GUNNER_RING_BMP "assets/canvas-skies/gunner-ring-empty-v2.bmp"
 #endif
+#ifndef CANVAS_GUNNER_AIRFRAME_BMP
+#define CANVAS_GUNNER_AIRFRAME_BMP "assets/canvas-skies/gunner-airframe-tail.bmp"
+#endif
 #ifndef CANVAS_GUNNER_MOVING_BMP
-#define CANVAS_GUNNER_MOVING_BMP "assets/canvas-skies/gunner-final-atlas.bmp"
+#define CANVAS_GUNNER_MOVING_BMP "assets/canvas-skies/gunner-single-atlas.bmp"
 #endif
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
@@ -321,6 +324,7 @@ typedef struct {
     SDL_Surface *pilot_cockpit;
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
+    SDL_Surface *gunner_airframe;
     SDL_Surface *gunner_moving_guns;
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
@@ -338,6 +342,7 @@ typedef struct {
     int running;
     int fullscreen;
     int redraw_static;
+    int qa_hold;
     int success;
     uint8_t key_latched[SDL_NUM_SCANCODES];
     uint32_t last_action_key;
@@ -371,6 +376,22 @@ typedef struct {
 static int is_perspective_mode(MissionMode mode)
 {
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
+}
+
+static float gunner_traverse(const Game *g)
+{
+    float value = (g->player_x - 320.0f) / 175.0f;
+    if (value < -1.0f) value = -1.0f;
+    if (value > 1.0f) value = 1.0f;
+    return value;
+}
+
+static float gunner_elevation(const Game *g)
+{
+    float value = (235.0f - g->player_y) / 90.0f;
+    if (value < 0.0f) value = 0.0f;
+    if (value > 1.0f) value = 1.0f;
+    return value;
 }
 
 static uint32_t scene_hash(uint32_t value)
@@ -1269,6 +1290,13 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
     }
     *sx -= (int)(g->view_bank * 185.0f);
     *sy += (int)(g->view_pitch * 150.0f);
+    if (campaign_missions[g->chapter][g->mission].mode == MISSION_GUNNER_3D) {
+        /* The observer swivels through the aft 90-degree arc.  Moving the
+         * view must move the world, rather than sliding a sight over a fixed
+         * postcard.  Elevation likewise pitches the view with the Lewis gun. */
+        *sx -= (int)(gunner_traverse(g) * 306.0f);
+        *sy += (int)(gunner_elevation(g) * 118.0f);
+    }
     return 1;
 }
 
@@ -1400,8 +1428,9 @@ static void update_perspective_sortie(Game *g, float dt,
                  g->ammunition > 0 &&
                  now - g->last_shot >= (gunner ? 95u : 115u);
     if (gunner) {
-        /* The pilot flies a gentle evasive course; the player works the
-         * Scarff ring through its broad rear arc. */
+        /* Tom flies a gentle evasive course.  The player swivels Neddy's
+         * whole rear-seat view through a 90-degree aft arc and elevates the
+         * single Lewis gun from level to about 75 degrees. */
         g->airspeed = 112.0f + sinf(g->scroll * 0.006f) * 8.0f;
         if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 205.0f * dt;
         if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 205.0f * dt;
@@ -1435,8 +1464,10 @@ static void update_perspective_sortie(Game *g, float dt,
         g->player_x = 320.0f;
         g->player_y = 190.0f;
     }
-    aim_x = (int)g->player_x;
-    aim_y = (int)g->player_y;
+    /* In the gunner view the sight stays with the observer's eyes while the
+     * landscape, tail and aircraft move around it. */
+    aim_x = gunner ? 320 : (int)g->player_x;
+    aim_y = gunner ? 190 : (int)g->player_y;
     if (firing) {
         g->last_shot = now;
         --g->ammunition;
@@ -1460,7 +1491,7 @@ static void update_perspective_sortie(Game *g, float dt,
             fabsf(b->x - 320.0f) < 28.0f &&
             fabsf(b->y - 190.0f) < 28.0f &&
             now - g->last_damage > 520u) {
-            g->health -= 4 + g->chapter / 2;
+            if (!g->qa_hold) g->health -= 4 + g->chapter / 2;
             g->last_damage = now;
             b->active = 0;
             new_explosion(g, 320.0f, 190.0f, 0);
@@ -1510,9 +1541,17 @@ static void update_perspective_sortie(Game *g, float dt,
             }
         }
     }
-    if ((active_enemies == 0 && g->scroll > 520.0f) ||
+    if (g->qa_hold && active_enemies == 0 && g->scroll > 520.0f) {
+        float view_x = g->player_x;
+        float view_y = g->player_y;
+        int hold = g->qa_hold;
+        reset_sortie(g);
+        g->player_x = view_x;
+        g->player_y = view_y;
+        g->qa_hold = hold;
+    } else if (!g->qa_hold && ((active_enemies == 0 && g->scroll > 520.0f) ||
         g->scroll > chapters[g->chapter].distance ||
-        g->fuel <= 0.0f || g->health <= 0)
+        g->fuel <= 0.0f || g->health <= 0))
         finish_alternate_sortie(g);
 }
 
@@ -2556,6 +2595,7 @@ static void draw_flight_background(Game *g)
 {
     SDL_Surface *s = g->screen;
     SDL_Surface *bg = g->dogfight_background;
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     int y;
     int bpp;
     int base_x;
@@ -2566,6 +2606,15 @@ static void draw_flight_background(Game *g)
     if (bg->format->BytesPerPixel != bpp) return;
     base_x = (bg->w - SCREEN_W) / 2;
     base_y = (bg->h - SCREEN_H) / 2 - (int)(g->view_pitch * 58.0f);
+    if (mode == MISSION_GUNNER_3D) {
+        /* The generated panorama is twice the viewport width.  Spend all of
+         * that width on the observer's 90-degree rear arc, and use the spare
+         * vertical field for the gun's 0..75-degree elevation. */
+        base_x += (int)(gunner_traverse(g) *
+                        (float)(bg->w - SCREEN_W) * 0.5f);
+        base_y -= (int)(gunner_elevation(g) *
+                        (float)(bg->h - SCREEN_H));
+    }
     if (base_y < 0) base_y = 0;
     if (base_y + SCREEN_H > bg->h) base_y = bg->h - SCREEN_H;
     if (SDL_MUSTLOCK(bg)) {
@@ -2585,6 +2634,54 @@ static void draw_flight_background(Game *g)
         memcpy(dst, src, (size_t)SCREEN_W * (size_t)bpp);
     }
     if (locked) SDL_UnlockSurface(bg);
+}
+
+static void draw_gunner_airframe(Game *g)
+{
+    SDL_Surface *source = g->gunner_airframe;
+    SDL_Surface *dest = g->screen;
+    float look = gunner_traverse(g);
+    float elevation = gunner_elevation(g);
+    float scale = 1.0f - fabsf(look) * 0.14f;
+    float centre_shift = -look * 104.0f;
+    float vertical_shift = elevation * 34.0f + g->view_pitch * 22.0f;
+    uint32_t key;
+    int x, y;
+    int source_locked = 0;
+    int dest_locked = 0;
+    if (!source || source->w != SCREEN_W || source->h != SCREEN_H) return;
+    key = SDL_MapRGB(source->format, 255, 0, 255);
+    if (SDL_MUSTLOCK(source)) {
+        if (SDL_LockSurface(source) != 0) return;
+        source_locked = 1;
+    }
+    if (SDL_MUSTLOCK(dest)) {
+        if (SDL_LockSurface(dest) != 0) {
+            if (source_locked) SDL_UnlockSurface(source);
+            return;
+        }
+        dest_locked = 1;
+    }
+    /* Row-wise inverse mapping keeps the CPU surface authoritative and gives
+     * the tail a convincing parallax/shear as the observer turns on the
+     * swivelling stool.  Pilot bank rolls the structure independently. */
+    for (y = 72; y < SCREEN_H; ++y) {
+        for (x = 0; x < SCREEN_W; ++x) {
+            float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
+            float shear = look * (float)(y - 215) * 0.20f;
+            int sy = (int)((float)y - vertical_shift - roll);
+            int sx = (int)(SCREEN_W * 0.5f +
+                     ((float)x - SCREEN_W * 0.5f - centre_shift - shear) /
+                     scale);
+            uint32_t colour;
+            if (sx < 0 || sx >= source->w || sy < 0 || sy >= source->h)
+                continue;
+            colour = surface_pixel(source, sx, sy);
+            if (colour != key) pixel(dest, x, y, colour);
+        }
+    }
+    if (dest_locked) SDL_UnlockSurface(dest);
+    if (source_locked) SDL_UnlockSurface(source);
 }
 
 static void draw_dogfight_3d_sortie(Game *g)
@@ -2638,11 +2735,12 @@ static void draw_dogfight_3d_sortie(Game *g)
              rgb(s, 255, 127, 61));
     }
     draw_explosions(g);
+    if (gunner) draw_gunner_airframe(g);
     if (gunner && g->gunner_ring && g->gunner_moving_guns) {
         SDL_Rect gun_source;
         SDL_Rect gun_position;
         float traverse = (g->player_x - 145.0f) / 350.0f;
-        float elevation = (g->player_y - 145.0f) / 90.0f;
+        float elevation = gunner_elevation(g);
         int column;
         int row;
         int carriage_x;
@@ -2653,10 +2751,11 @@ static void draw_dogfight_3d_sortie(Game *g)
         if (elevation > 1.0f) elevation = 1.0f;
         column = (int)(traverse * 4.999f);
         row = (int)(elevation * 4.999f);
-        /* The common carriage runs around the Scarff rail.  Elevation changes
-         * only the barrels; it must never lift the yoke off the rail. */
-        carriage_x = 320 + (int)((traverse - 0.5f) * 170.0f);
-        carriage_y = 96 + (int)(fabsf(traverse - 0.5f) * 13.0f);
+        /* The single Lewis gun remains anchored to the Scarff rail.  Most of
+         * the 90-degree traverse is now expressed by the moving viewpoint;
+         * this smaller carriage shift shows the physical mount following it. */
+        carriage_x = 320 + (int)((traverse - 0.5f) * 82.0f);
+        carriage_y = 94 + (int)(fabsf(traverse - 0.5f) * 10.0f);
         gun_source.x = column * 420;
         gun_source.y = row * 220;
         gun_source.w = 420;
@@ -2676,9 +2775,10 @@ static void draw_dogfight_3d_sortie(Game *g)
         rect(s, 312, 318, 16, 82, rgb(s, 45, 44, 39));
     }
     if (gunner) {
-        /* Traverse marker for the Lewis-gun ring. */
-        int ax = (int)g->player_x;
-        int ay = (int)g->player_y;
+        /* The sight remains central because the whole observer view now
+         * swivels and elevates with the gun. */
+        int ax = 320;
+        int ay = 190;
         uint32_t sight = rgb(s, 226, 206, 151);
         line(s, ax - 24, ay, ax - 8, ay, sight);
         line(s, ax + 8, ay, ax + 24, ay, sight);
@@ -3169,6 +3269,7 @@ static int game_init(Game *g)
     g->pilot_cockpit = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_BMP);
     g->gunner_cockpit = SDL_LoadBMP(CANVAS_GUNNER_COCKPIT_BMP);
     g->gunner_ring = SDL_LoadBMP(CANVAS_GUNNER_RING_BMP);
+    g->gunner_airframe = SDL_LoadBMP(CANVAS_GUNNER_AIRFRAME_BMP);
     g->gunner_moving_guns = SDL_LoadBMP(CANVAS_GUNNER_MOVING_BMP);
     g->explosion_atlas = SDL_LoadBMP(CANVAS_EXPLOSION_ATLAS_BMP);
     g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
@@ -3177,11 +3278,12 @@ static int game_init(Game *g)
             &g->topdown_battlefield, &g->topdown_player,
             &g->dogfight_background, &g->dogfight_enemy,
             &g->pilot_cockpit, &g->gunner_cockpit,
-            &g->gunner_ring, &g->gunner_moving_guns,
+            &g->gunner_ring, &g->gunner_airframe,
+            &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas
         };
         int i;
-        for (i = 0; i < 10; ++i) if (*convert[i]) {
+        for (i = 0; i < 11; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -3193,16 +3295,17 @@ static int game_init(Game *g)
     {
         SDL_Surface *keyed[] = {g->topdown_player, g->dogfight_enemy,
                                 g->pilot_cockpit, g->gunner_cockpit,
-                                g->gunner_ring, g->gunner_moving_guns};
+                                g->gunner_ring, g->gunner_airframe,
+                                g->gunner_moving_guns};
         int i;
-        for (i = 0; i < 6; ++i) if (keyed[i])
+        for (i = 0; i < 7; ++i) if (keyed[i])
             SDL_SetColorKey(keyed[i], SDL_TRUE,
                             SDL_MapRGB(keyed[i]->format, 255, 0, 255));
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
         !g->dogfight_background || !g->dogfight_enemy ||
         !g->pilot_cockpit || !g->gunner_cockpit || !g->gunner_ring ||
-        !g->gunner_moving_guns || !g->explosion_atlas)
+        !g->gunner_airframe || !g->gunner_moving_guns || !g->explosion_atlas)
         fprintf(stderr, "One or more alternate-view art assets are unavailable\n");
     g->font_display_36x42 = SDL_LoadBMP(CANVAS_DISPLAY_36X42_BMP);
     g->font_display_22x28 = SDL_LoadBMP(CANVAS_DISPLAY_22X28_BMP);
@@ -3327,9 +3430,12 @@ int main(int argc, char **argv)
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "DOGFIGHT") == 0) {
-        g.chapter = 2;
+        /* Use a durable late-war squadron for visual QA so the direct test
+         * remains playable instead of completing before the window appears. */
+        g.chapter = 6;
         g.mission = 5;
         reset_sortie(&g);
+        g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "GUNNER") == 0) {
         /* Late-war QA keeps more durable attackers in view long enough to
@@ -3337,6 +3443,7 @@ int main(int argc, char **argv)
         g.chapter = 6;
         g.mission = 2;
         reset_sortie(&g);
+        g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "DEBRIEF") == 0) {
         g.chapter = 2;
@@ -3402,6 +3509,7 @@ int main(int argc, char **argv)
     if (g.pilot_cockpit) SDL_FreeSurface(g.pilot_cockpit);
     if (g.gunner_cockpit) SDL_FreeSurface(g.gunner_cockpit);
     if (g.gunner_ring) SDL_FreeSurface(g.gunner_ring);
+    if (g.gunner_airframe) SDL_FreeSurface(g.gunner_airframe);
     if (g.gunner_moving_guns) SDL_FreeSurface(g.gunner_moving_guns);
     if (g.explosion_atlas) SDL_FreeSurface(g.explosion_atlas);
     if (g.topdown_explosion_atlas) SDL_FreeSurface(g.topdown_explosion_atlas);

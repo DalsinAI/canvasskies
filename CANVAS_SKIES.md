@@ -15,8 +15,8 @@ The first vertical slice contains:
   two rear-gunner missions in every chapter. Side/top-down sorties contain
   only Neddy's aircraft; dogfights add persistent allied pilots Eccles,
   Gridpipe Thyne and Bluebottle against increasingly capable formations.
-  Rear-gunner sorties put Tom at the controls while Neddy traverses the twin
-  Lewis guns in the observer's cockpit;
+  Rear-gunner sorties put Tom at the controls while Neddy swivels through a
+  90-degree rear observation arc with a single Lewis gun on the Scarff ring;
 - an original painted title screen with an animated field-made canvas banner;
   its lettering is visibly embroidered into the cloth rather than overlaid as
   a font, so the seams, thread and fabric ripple together. A brass Victorian
@@ -66,13 +66,16 @@ The first vertical slice contains:
   and a separate two-seat defensive-gunner view with a traversable Scarff ring;
 - original painted top-down Western Front terrain, RFC overhead aircraft,
   dawn battlefield perspective and separate pilot/gunner cockpit overlays;
-- a rear-gunner Scarff-ring presenter built from a clean static cockpit rail
-  and a separate 25-pose, angle-redrawn twin Lewis-gun carriage. The complete
-  yoke travels around the rail, elevation never lifts its carriage, and exact
-  chroma-key cleanup prevents magenta edge contamination;
-- pilot bank and pitch move and shear the perspective horizon behind the
-  fixed cockpit. Enemy aircraft close toward the camera using head-on art and
-  varied approach rates before crossing the sight;
+- a rear-gunner Scarff-ring presenter built from a clean cockpit rail, a
+  visible DH.4-style rear fuselage and tailplane, and a separate 25-pose
+  single-Lewis-gun carriage. The gun stays anchored to the rail while rising
+  from near-horizontal to roughly 75 degrees; exact chroma-key cleanup prevents
+  magenta edge contamination;
+- the rear observer's whole viewpoint pans across a 90-degree arc. The wide
+  battlefield panorama, incoming aircraft and visible tail geometry move in
+  opposition to the view, while Tom's independent bank and pitch roll and
+  shear the horizon. Enemy aircraft close toward the camera using head-on art
+  and varied approach rates before crossing the fixed central sight;
 - terrain impacts are retained in mission-world coordinates. Top-down blasts
   advance with the vertically scrolling map and side-on blasts move with the
   horizontal landscape rather than remaining attached to the player or screen;
@@ -83,7 +86,9 @@ The first vertical slice contains:
 
 - Side/top-down: arrow keys move the aircraft in all four directions
 - Single-seat dogfight: arrow keys bank and pitch; X/Z control throttle
-- Two-seat gunner: arrow keys traverse the gun ring while Tom flies
+- Two-seat gunner: Left/Right swivels the rear view and Scarff-ring gun through
+  90 degrees; Up/Down elevates the single Lewis gun from level to about 75
+  degrees while Tom flies an independent evasive course
 - On the title campaign board, Up/Down selects the full campaign or a 1914,
   1915, 1916, 1917 or 1918 starting commission
 - X: increase throttle

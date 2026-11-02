@@ -149,14 +149,17 @@ smoke columns and changing weather extend to the horizon.
 ## Mission format 4: two-seat rear-gunner defence
 
 Rear-gunner missions are mechanically separate from dogfights. Tom flies a
-scripted but visibly evasive course while Neddy operates the twin Lewis guns on
-a Scarff ring.
+scripted but visibly evasive course while Neddy swivels on the observer's stool
+and operates one Lewis gun on a Scarff ring.
 
-The arrow keys traverse and elevate the heavy gun assembly. The guns, drum
-magazines, sights and upper mount visibly move with the player's aim; the fixed
-cockpit and lower ring do not. Firing produces recoil, muzzle flash, tracers and
-the correct mechanical report. The aiming marker remains open so it never
-obscures the target.
+The arrow keys move the observer's complete viewpoint through a 90-degree rear
+arc and elevate the gun to roughly 75 degrees. The wide landscape, enemy
+aircraft, visible rear fuselage and tailplane all respond to that movement;
+Tom's evasive banking remains a separate motion. The gun, drum magazine, sight
+and upper mount visibly follow the view while the yoke stays attached to the
+Scarff rail. Firing produces recoil, muzzle flash, tracers and the correct
+mechanical report. The central aiming marker remains open so it never obscures
+the target.
 
 Enemy aircraft use true depth choreography: distant approach, increasing
 apparent size, lateral attack, close break, overhead pass and departure behind

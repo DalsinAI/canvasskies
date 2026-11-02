@@ -47,6 +47,16 @@ be mined for dramatic plots.
 - [First World War personal experiences — RAF Museum](https://www.rafmuseum.org.uk/research/online-exhibitions/taking-flight/personal-experiences/first-world-war/): James McCudden's progression from mechanic and observer to fighter pilot, useful for technical confidence, training and the changing air war.
 - [Personal papers in the RAF Museum archive](https://www.rafmuseum.org.uk/our-collection/collections/archive-collection/personal-papers/): diaries, letters, memoirs, log books, reports and training notebooks that can support later fact-checking without treating one exceptional pilot as typical.
 
+## Aircraft-layout reference
+
+- [Flying an Airco DH.4 from the rear seat — Historical Aviation Film Unit](https://www.youtube.com/watch?v=-m1uYFwo1gU), especially from 2:57. The
+  rear position uses a backless swivelling stool and exposes the observer to the
+  surrounding aircraft structure. Canvas Skies therefore treats rear defence
+  as a moving observer viewpoint rather than a sight sliding over one fixed
+  cockpit picture: a 90-degree rear arc pans the landscape and incoming
+  aircraft, keeps the tailplane and rear fuselage visible, and carries one
+  Scarff-ring Lewis gun through roughly 75 degrees of elevation.
+
 ## Journal grammar
 
 Each pre-mission entry should normally contain four beats, in this order:
