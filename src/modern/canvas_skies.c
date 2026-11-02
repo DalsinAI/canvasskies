@@ -156,6 +156,7 @@
 #define ART_H 360
 #define GAMEPLAY_Y_OFFSET (SCREEN_H - ART_H)
 #define MAX_BULLETS 80
+#define MAX_DOGFIGHT_PARTICLES 48
 #define MAX_ENEMIES 10
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
@@ -252,6 +253,13 @@ typedef struct {
 } Bullet;
 
 typedef struct {
+    float x, y, vx, vy;
+    float life, initial_life;
+    int kind; /* 0 player tracer, 1 enemy tracer, 2 ejected case */
+    int active;
+} DogfightParticle;
+
+typedef struct {
     float x, y, age, duration;
     int large;
     int world_axis; /* 0 screen, 1 top-down forward axis, 2 side-on x axis */
@@ -326,6 +334,8 @@ typedef struct {
     volatile int shot;
     volatile int blast;
     volatile int crash;
+    volatile int hit;
+    volatile int hit_player;
     volatile float engine_speed;
     volatile float engine_load;
     volatile float other_engine;
@@ -427,6 +437,7 @@ typedef struct {
     uint32_t last_damage;
     uint32_t mission_clear_at;
     Bullet bullets[MAX_BULLETS];
+    DogfightParticle dogfight_particles[MAX_DOGFIGHT_PARTICLES];
     Explosion explosions[MAX_EXPLOSIONS];
     Enemy enemies[MAX_ENEMIES];
     Target targets[MAX_TARGETS];
@@ -1122,6 +1133,20 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 sample += ((elapsed & 24) ? 0.28f : -0.24f) * impact;
             --a->crash;
         }
+        if (a->hit > 0) {
+            float env = (float)a->hit / (a->hit_player ? 1400.0f : 950.0f);
+            float strike = (float)((a->noise >> 15) & 0x1ffff) /
+                           65536.0f - 1.0f;
+            if (env > 1.0f) env = 1.0f;
+            if (a->hit_player) {
+                sample += sinf(2.0f * (float)M_PI * t * 73.0f) * env * 0.27f;
+                sample += strike * env * 0.30f;
+            } else {
+                sample += sinf(2.0f * (float)M_PI * t * 186.0f) * env * 0.18f;
+                sample += strike * env * 0.22f;
+            }
+            --a->hit;
+        }
         if (sample > 1.0f) sample = 1.0f;
         if (sample < -1.0f) sample = -1.0f;
         out[i * 2] = (int16_t)(sample * 18000.0f);
@@ -1303,6 +1328,7 @@ static void reset_sortie(Game *g)
     g->last_damage = 0;
     g->mission_clear_at = 0;
     memset(g->bullets, 0, sizeof(g->bullets));
+    memset(g->dogfight_particles, 0, sizeof(g->dogfight_particles));
     memset(g->explosions, 0, sizeof(g->explosions));
     memset(g->bullet_holes, 0, sizeof(g->bullet_holes));
     g->next_bullet_hole = 0;
@@ -1312,6 +1338,8 @@ static void reset_sortie(Game *g)
     g->audio.other_pitch = 0.0f;
     g->audio.vehicle_engine = 0.0f;
     g->audio.crash = 0;
+    g->audio.hit = 0;
+    g->audio.hit_player = 0;
     perspective_enemy_count = chapter->enemy_count;
     if (mode == MISSION_GUNNER_3D && perspective_enemy_count > 2)
         perspective_enemy_count = 2;
@@ -1391,6 +1419,51 @@ static Bullet *new_bullet(Game *g, float x, float y, float vx, float vy,
         }
     }
     return NULL;
+}
+
+static void new_dogfight_particle(Game *g, float x, float y,
+                                  float vx, float vy, float life, int kind)
+{
+    int i;
+    for (i = 0; i < MAX_DOGFIGHT_PARTICLES; ++i) {
+        DogfightParticle *p = &g->dogfight_particles[i];
+        if (!p->active) {
+            p->x = x; p->y = y; p->vx = vx; p->vy = vy;
+            p->life = life; p->initial_life = life;
+            p->kind = kind; p->active = 1;
+            return;
+        }
+    }
+}
+
+static void launch_dogfight_tracer(Game *g, float x, float y,
+                                   float target_x, float target_y,
+                                   float speed, int kind)
+{
+    float dx = target_x - x;
+    float dy = target_y - y;
+    float distance = sqrtf(dx * dx + dy * dy);
+    float life;
+    if (distance < 1.0f) distance = 1.0f;
+    life = distance / speed + 0.055f;
+    new_dogfight_particle(g, x, y, dx / distance * speed,
+                          dy / distance * speed, life, kind);
+}
+
+static void update_dogfight_particles(Game *g, float dt)
+{
+    int i;
+    for (i = 0; i < MAX_DOGFIGHT_PARTICLES; ++i) {
+        DogfightParticle *p = &g->dogfight_particles[i];
+        if (!p->active) continue;
+        p->x += p->vx * dt;
+        p->y += p->vy * dt;
+        if (p->kind == 2) p->vy += 250.0f * dt;
+        p->life -= dt;
+        if (p->life <= 0.0f || p->x < -20.0f || p->x > SCREEN_W + 20.0f ||
+            p->y < -20.0f || p->y > SCREEN_H + 24.0f)
+            p->active = 0;
+    }
 }
 
 static void new_explosion_at(Game *g, float x, float y, int large, int ground)
@@ -2260,6 +2333,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     float elevator_command = 0.0f;
     Vec3 position;
     age_explosions(g, dt);
+    update_dogfight_particles(g, dt);
     if (g->flight_crashed) {
         g->audio.engine_speed = 0.0f;
         g->audio.engine_load = 0.0f;
@@ -2311,10 +2385,18 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     g->audio.other_engine = 0.0f;
 
     if (keys[SDL_SCANCODE_SPACE] && chapters[g->chapter].armed &&
-        g->ammunition > 0 && now - g->last_shot >= 105u) {
+        g->ammunition > 0 && now - g->last_shot >= 160u) {
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = 1500;
+        launch_dogfight_tracer(g, 292.0f, 231.0f,
+                               320.0f, 210.0f, 300.0f, 0);
+        launch_dogfight_tracer(g, 350.0f, 231.0f,
+                               320.0f, 210.0f, 300.0f, 0);
+        new_dogfight_particle(g, 298.0f, 245.0f,
+                              -54.0f, -68.0f, 0.42f, 2);
+        new_dogfight_particle(g, 344.0f, 245.0f,
+                               58.0f, -62.0f, 0.42f, 2);
         for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active &&
                                                   !g->enemies[i].crashing) {
             Projected3D p = project_world_point(g, (Vec3){
@@ -2327,6 +2409,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             if (radius > 48) radius = 48;
             if (abs(p.x - 320) <= radius && abs(p.y - 218) <= radius) {
                 --g->enemies[i].hp;
+                g->audio.hit_player = 0;
+                g->audio.hit = 950;
                 if (g->enemies[i].hp <= 0) {
                     g->enemies[i].crashing = 1;
                     g->score += 250;
@@ -2426,8 +2510,13 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                 now >= enemy->last_shot && now - enemy->last_shot >
                 (uint32_t)(1550 - g->chapter * 45 + (i * 173) % 520)) {
                 enemy->last_shot = now;
+                launch_dogfight_tracer(g, (float)attack_view.x,
+                                       (float)attack_view.y,
+                                       320.0f, 218.0f, 390.0f, 1);
                 if (!g->qa_hold || g->health > 30)
                     g->health -= 2 + g->chapter / 4;
+                g->audio.hit_player = 1;
+                g->audio.hit = 1400;
                 g->last_damage = now;
             }
         }
@@ -4261,6 +4350,37 @@ static void draw_player_crash_overlay(Game *g)
         draw_field_sign(g, 226, 270, 188, "AIRCRAFT DESTROYED");
 }
 
+static void draw_dogfight_particles(Game *g, int foreground)
+{
+    SDL_Surface *s = g->screen;
+    int i;
+    for (i = 0; i < MAX_DOGFIGHT_PARTICLES; ++i) {
+        DogfightParticle *p = &g->dogfight_particles[i];
+        if (!p->active) continue;
+        if (foreground != (p->kind == 2)) continue;
+        if (p->kind == 2) {
+            uint32_t brass = rgb(s, 191, 139, 61);
+            line(s, (int)p->x, (int)p->y,
+                 (int)p->x + (p->vx < 0.0f ? -2 : 2),
+                 (int)p->y + 1, brass);
+        } else {
+            float speed = sqrtf(p->vx * p->vx + p->vy * p->vy);
+            int length = p->kind == 0 ? 6 : 5;
+            int tx, ty;
+            uint32_t edge = p->kind == 0 ? rgb(s, 185, 116, 48) :
+                                            rgb(s, 176, 61, 37);
+            uint32_t core = p->kind == 0 ? rgb(s, 255, 225, 143) :
+                                            rgb(s, 255, 153, 78);
+            if (speed < 1.0f) speed = 1.0f;
+            tx = (int)(p->x - p->vx / speed * length);
+            ty = (int)(p->y - p->vy / speed * length);
+            line(s, tx, ty, (int)p->x, (int)p->y, edge);
+            line(s, tx + 1, ty, (int)p->x + 1, (int)p->y, core);
+            pixel(s, (int)p->x, (int)p->y, rgb(s, 255, 244, 199));
+        }
+    }
+}
+
 static void draw_dogfight_simulator(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -4289,20 +4409,26 @@ static void draw_dogfight_simulator(Game *g)
         Projected3D p = project_world_point(g, (Vec3){enemy->world_x,
             enemy->world_y, enemy->world_z});
         draw_enemy_aircraft_3d(g, enemy);
-        if (now >= enemy->last_shot && now - enemy->last_shot < 115u &&
+        if (now >= enemy->last_shot && now - enemy->last_shot < 42u &&
             p.visible && p.x >= 0 && p.x < SCREEN_W &&
             p.y >= 0 && p.y < SCREEN_H) {
-            line(s, p.x, p.y, 318, 216, rgb(s, 255, 103, 53));
-            line(s, p.x, p.y + 1, 322, 220, rgb(s, 255, 184, 92));
+            circle(s, p.x, p.y, 3, rgb(s, 255, 124, 53));
+            pixel(s, p.x, p.y, rgb(s, 255, 236, 164));
         }
     }
     draw_explosions(g);
-    if (now >= g->last_shot && now - g->last_shot < 95u) {
-        line(s, 286, 322, 318, 218, rgb(s, 255, 235, 142));
-        line(s, 354, 322, 322, 218, rgb(s, 255, 235, 142));
-    }
+    draw_dogfight_particles(g, 0);
     if (g->pilot_cockpit)
         SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
+    draw_dogfight_particles(g, 1);
+    if (now >= g->last_shot && now - g->last_shot < 45u) {
+        fill_triangle(s, 288, 232, 292, 222, 297, 232,
+                      rgb(s, 255, 140, 45));
+        fill_triangle(s, 345, 232, 350, 222, 354, 232,
+                      rgb(s, 255, 140, 45));
+        circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
+        circle(s, 350, 228, 2, rgb(s, 255, 238, 157));
+    }
     snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
              current_mission_goal(g));
     draw_field_sign(g, 8, 342, 130, buf);
