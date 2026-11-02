@@ -421,6 +421,8 @@ typedef struct {
     FlightState flight;
     float flight_alpha;
     int flight_stalled;
+    int flight_doomed;
+    uint32_t flight_doomed_started;
     int flight_crashed;
     uint32_t flight_crash_started;
     float airspeed;
@@ -1310,6 +1312,8 @@ static void reset_sortie(Game *g)
                       g->flight_throttle);
     g->flight_alpha = 0.0f;
     g->flight_stalled = 0;
+    g->flight_doomed = 0;
+    g->flight_doomed_started = 0;
     g->flight_crashed = 0;
     g->flight_crash_started = 0;
     g->airspeed = 98.0f;
@@ -2338,16 +2342,29 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.engine_speed = 0.0f;
         g->audio.engine_load = 0.0f;
         g->audio.other_engine = 0.0f;
+        if (now - g->flight_crash_started > 1750u)
+            finish_alternate_sortie(g);
         return;
     }
     /* Conventional stick: left/right roll the matching wing down; pulling
      * back (Down) raises the nose and pushing forward (Up) lowers it. */
-    if (keys[SDL_SCANCODE_LEFT]) aileron_command = -1.0f;
-    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
-    if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
-    if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
-    if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
-    if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
+    if (g->flight_doomed) {
+        aileron_command = 0.72f;
+        elevator_command = -0.32f;
+        g->flight_throttle = flight_approach(g->flight_throttle,
+                                             0.12f, 0.34f * dt);
+        /* A collision tears lift away.  The normal six-axis integrator still
+         * supplies forward motion and rotation; this growing sink guarantees
+         * that the damaged player aircraft reaches the same physical ground
+         * as its opponent. */
+    } else {
+        if (keys[SDL_SCANCODE_LEFT]) aileron_command = -1.0f;
+        if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
+        if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
+        if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
+        if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
+        if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
+    }
     if (g->flight_throttle < 0.12f) g->flight_throttle = 0.12f;
     if (g->flight_throttle > 1.0f) g->flight_throttle = 1.0f;
     g->flight.throttle = g->flight_throttle;
@@ -2356,6 +2373,12 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     position.z = g->flight_z;
     ww1_flight_advance(&g->flight, &position, dt,
                        aileron_command, elevator_command);
+    if (g->flight_doomed) {
+        float doomed_age = (float)(now - g->flight_doomed_started) / 1000.0f;
+        float sink = 14.0f + doomed_age * 9.0f;
+        if (sink > 82.0f) sink = 82.0f;
+        position.y -= sink * dt;
+    }
     g->flight_x = position.x;
     g->flight_y = position.y;
     g->flight_z = position.z;
@@ -2375,6 +2398,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->flight_crashed = 1;
         g->flight_crash_started = now;
         g->audio.blast = 7000;
+        g->audio.crash = 7200;
     }
     g->scroll += g->airspeed * dt;
     g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f);
@@ -2384,7 +2408,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         fabsf(g->flight_alpha) + (g->flight_stalled ? 0.45f : 0.0f);
     g->audio.other_engine = 0.0f;
 
-    if (keys[SDL_SCANCODE_SPACE] && chapters[g->chapter].armed &&
+    if (!g->flight_doomed && keys[SDL_SCANCODE_SPACE] &&
+        chapters[g->chapter].armed &&
         g->ammunition > 0 && now - g->last_shot >= 160u) {
         g->last_shot = now;
         --g->ammunition;
@@ -2457,8 +2482,35 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         dz = g->flight_z - enemy->world_z;
         horizontal = sqrtf(dx * dx + dz * dz);
         distance = sqrtf(horizontal * horizontal + dy * dy);
+        if (distance < 34.0f) {
+            /* A failed break-away damages both machines.  The enemy enters
+             * the same physical spiral used for gun damage; the player loses
+             * control and descends through the flight model until ground
+             * contact, rather than exploding or disappearing in mid-air. */
+            enemy->crashing = 1;
+            enemy->hp = 0;
+            if (enemy->vy > -16.0f) enemy->vy = -16.0f;
+            if (!g->flight_doomed) {
+                g->flight_doomed = 1;
+                g->flight_doomed_started = now;
+                g->health = 0;
+                g->audio.hit_player = 1;
+                g->audio.hit = 1400;
+                g->audio.blast = 2400;
+            }
+            ++active;
+            continue;
+        }
         desired_heading = atan2f(dx, dz) +
             sinf(g->scroll * 0.0021f + enemy->phase) * 0.12f;
+        if (distance < 360.0f) {
+            float urgency = (360.0f - distance) / 360.0f;
+            float break_side = (i & 1) ? 1.0f : -1.0f;
+            /* Stop pointing at the player's centre and cross clear of the
+             * collision cone.  Alternating sides prevent several attackers
+             * choosing the same escape path. */
+            desired_heading += break_side * (0.48f + urgency * 0.72f);
+        }
         heading_error = wrap_angle(desired_heading - enemy->heading);
         desired_bank = heading_error * 1.18f;
         if (desired_bank < -0.70f) desired_bank = -0.70f;
@@ -2530,17 +2582,17 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         }
         ++active;
     }
-    if (active == 0) {
+    if (active == 0 && !g->flight_doomed) {
         /* Hold the last impact for one beat so its explosion and crash sound
          * are seen and heard, then end both campaign and direct-test sorties. */
         if (!g->mission_clear_at) g->mission_clear_at = now;
         if (now - g->mission_clear_at >= 900u)
             finish_alternate_sortie(g);
-    } else {
+    } else if (active > 0) {
         g->mission_clear_at = 0;
     }
     if (!g->qa_hold && active > 0 &&
-        (g->fuel <= 0.0f || g->health <= 0)) {
+        (g->fuel <= 0.0f || (g->health <= 0 && !g->flight_doomed))) {
         finish_alternate_sortie(g);
     }
 }
@@ -3784,7 +3836,6 @@ static void draw_simulator_terrain(Game *g)
     SDL_Surface *s = g->screen;
     int horizon_left, horizon_right;
     float horizon_dx, horizon_dy, horizon_length;
-    float sky_normal_x, sky_normal_y;
     int ground_positive = 1;
     int tx, tz, pass;
     {
@@ -3811,8 +3862,6 @@ static void draw_simulator_terrain(Game *g)
     horizon_length = sqrtf(horizon_dx * horizon_dx +
                            horizon_dy * horizon_dy);
     if (horizon_length < 1.0f) horizon_length = 1.0f;
-    sky_normal_x = -horizon_dy / horizon_length;
-    sky_normal_y = horizon_dx / horizon_length;
     {
         float sh = sinf(g->flight_heading), ch = cosf(g->flight_heading);
         Projected3D ground_probe = project_world_point(g, (Vec3){
@@ -3825,53 +3874,33 @@ static void draw_simulator_terrain(Game *g)
             ground_positive = side >= 0.0f;
         }
     }
-    /* (-dy, dx) points to the positive half-plane.  Haze belongs on the
-     * opposite side from the projected ground probe. */
-    if (ground_positive) {
-        sky_normal_x = -sky_normal_x;
-        sky_normal_y = -sky_normal_y;
-    }
-    /* The atmosphere is tied to the projected horizon, not the monitor. */
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 23, 48, 86));
     {
-        int distance;
-        /* One-pixel bands are cheaper than alpha blending on a 68040 and
-         * produce a continuous horizon-relative aerial perspective.  Start
-         * at the exact upper-sky colour so there is no horizontal join. */
-        for (distance = 260; distance >= 0; --distance) {
+        uint32_t sky_colour[261];
+        uint32_t ground = rgb(s, 70, 74, 45);
+        int distance, x, y;
+        for (distance = 0; distance <= 260; ++distance) {
             float t = 1.0f - (float)distance / 260.0f;
             uint8_t red = (uint8_t)(23.0f + 169.0f * t);
             uint8_t green = (uint8_t)(48.0f + 113.0f * t);
             uint8_t blue = (uint8_t)(86.0f + 38.0f * t);
-            float centre_x = (SCREEN_W - 1) * 0.5f +
-                             sky_normal_x * distance;
-            float centre_y = (horizon_left + horizon_right) * 0.5f +
-                             sky_normal_y * distance;
-            float tangent_x = horizon_dx / horizon_length;
-            float tangent_y = horizon_dy / horizon_length;
-            const float span = 1100.0f;
-            line(s, (int)(centre_x - tangent_x * span),
-                 (int)(centre_y - tangent_y * span),
-                 (int)(centre_x + tangent_x * span),
-                 (int)(centre_y + tangent_y * span),
-                 rgb(s, red, green, blue));
+            sky_colour[distance] = rgb(s, red, green, blue);
         }
-    }
-    {
-        int x;
-        uint32_t ground = rgb(s, 70, 74, 45);
-        for (x = 0; x < SCREEN_W; ++x) {
-            int horizon_y = horizon_left +
-                (int)(horizon_dy * (float)x / horizon_dx);
-            if (ground_positive) {
-                int start = horizon_y;
-                if (start < 0) start = 0;
-                if (start < SCREEN_H)
-                    line(s, x, start, x, SCREEN_H - 1, ground);
-            } else {
-                int end = horizon_y;
-                if (end >= SCREEN_H) end = SCREEN_H - 1;
-                if (end >= 0) line(s, x, 0, x, end, ground);
+        /* Signed perpendicular distance gives a solid sky and ground at any
+         * bank angle.  Parallel raster lines left the regular pinholes seen
+         * in the steep-bank screenshots. */
+        for (y = 0; y < SCREEN_H; ++y) {
+            uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
+            for (x = 0; x < SCREEN_W; ++x) {
+                float side = (horizon_dx * ((float)y - horizon_left) -
+                              horizon_dy * (float)x) / horizon_length;
+                int is_ground = ground_positive ? side >= 0.0f : side <= 0.0f;
+                if (is_ground) {
+                    row[x] = ground;
+                } else {
+                    int haze_distance = (int)fabsf(side);
+                    if (haze_distance > 260) haze_distance = 260;
+                    row[x] = sky_colour[haze_distance];
+                }
             }
         }
     }
