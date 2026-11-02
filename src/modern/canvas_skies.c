@@ -1643,8 +1643,11 @@ static void ww1_flight_step(FlightState *f, Vec3 *position, float dt,
     float dw, dx, dy, dz, norm;
     Vec3 gravity_body, velocity_ned;
 
-    f->aileron = flight_approach(f->aileron, aileron_command, 1.55f * dt);
-    f->elevator = flight_approach(f->elevator, elevator_command, 1.35f * dt);
+    /* The Camel's controls are direct cable runs.  Keyboard input therefore
+     * reaches the requested surface position quickly (about 0.13 s), while
+     * the aeroplane's angular momentum remains in p/q/r after release. */
+    f->aileron = flight_approach(f->aileron, aileron_command, 7.5f * dt);
+    f->elevator = flight_approach(f->elevator, elevator_command, 7.5f * dt);
 
     speed = sqrtf(f->u * f->u + f->v * f->v + f->w * f->w);
     if (speed < 1.0f) speed = 1.0f;
@@ -2233,8 +2236,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     /* Conventional stick: left/right roll the matching wing down; pulling
      * back (Down) raises the nose and pushing forward (Up) lowers it. */
-    if (keys[SDL_SCANCODE_LEFT]) aileron_command = 1.0f;
-    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = -1.0f;
+    if (keys[SDL_SCANCODE_LEFT]) aileron_command = -1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
     if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
     if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
     if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
