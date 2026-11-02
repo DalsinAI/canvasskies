@@ -29,6 +29,12 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_NEAR_MOUND_BMP=\"PROGDIR:assets/canvas-skies/near-mound.bmp\" \
 	-DCANVAS_MACHINE_GUN_BMP=\"PROGDIR:assets/canvas-skies/ground-machine-gun.bmp\" \
 	-DCANVAS_AA_GUN_BMP=\"PROGDIR:assets/canvas-skies/ground-aa-gun.bmp\" \
+	-DCANVAS_TOPDOWN_BATTLEFIELD_BMP=\"PROGDIR:assets/canvas-skies/topdown-battlefield.bmp\" \
+	-DCANVAS_TOPDOWN_PLAYER_BMP=\"PROGDIR:assets/canvas-skies/topdown-player.bmp\" \
+	-DCANVAS_DOGFIGHT_BACKGROUND_BMP=\"PROGDIR:assets/canvas-skies/dogfight-background.bmp\" \
+	-DCANVAS_DOGFIGHT_ENEMY_BMP=\"PROGDIR:assets/canvas-skies/dogfight-enemy.bmp\" \
+	-DCANVAS_PILOT_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit.bmp\" \
+	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_DISPLAY_36X42_BMP=\"PROGDIR:assets/canvas-skies/font-display-36x42.bmp\" \
 	-DCANVAS_DISPLAY_22X28_BMP=\"PROGDIR:assets/canvas-skies/font-display-22x28.bmp\" \
 	-DCANVAS_DISPLAY_16X23_BMP=\"PROGDIR:assets/canvas-skies/font-display-16x23.bmp\" \

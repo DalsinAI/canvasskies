@@ -11,12 +11,12 @@ The first vertical slice contains:
 - a continuous first-person story lived by pilot Neddy Seagoon: every mission
   opens on his physical journal, followed by formal General Headquarters
   orders issued by the Commander-in-Chief;
-- campaign data for four side-on, four top-down and four perspective 3D
-  dogfight missions in every chapter. Side/top-down sorties contain only
-  Neddy's aircraft; 3D sorties add persistent allied pilots Eccles, Gridpipe
-  Thyne and Bluebottle against increasingly capable enemy formations. The
-  opening side-on mission is playable in this vertical slice; the dedicated
-  top-down and 3D gameplay/rendering loops remain to be built;
+- campaign data for four side-on, four top-down, two single-seat dogfights and
+  two rear-gunner missions in every chapter. Side/top-down sorties contain
+  only Neddy's aircraft; dogfights add persistent allied pilots Eccles,
+  Gridpipe Thyne and Bluebottle against increasingly capable formations.
+  Rear-gunner sorties put Tom at the controls while Neddy traverses the twin
+  Lewis guns in the observer's cockpit;
 - an original painted title screen with an animated field-made canvas banner;
   its lettering is visibly embroidered into the cloth rather than overlaid as
   a font, so the seams, thread and fabric ripple together. A brass Victorian
@@ -58,21 +58,26 @@ The first vertical slice contains:
   The same chapter and mission always rebuild the same landscape while later
   missions can select different arrangements; interactive gun emplacements
   remain separately anchored in gameplay space;
-- a fixed 640x400 logical canvas in both windowed and F10 full-screen modes;
-  presentation is aspect-fitted with black bars where required, never
-  stretched to the host display;
-- keyboard flight controls and an F10 full-screen test toggle.
+- a fixed 640x400 logical canvas presented as the complete game scene without
+  host-display stretching;
+- dedicated playable render/update paths for the side-on battlefield, a
+  painted vertically scrolling top-down attack view, a single-seat flight-sim
+  dogfight with fixed Vickers sight, bank/pitch/throttle and allied formation,
+  and a separate two-seat defensive-gunner view with a traversable Scarff ring;
+- original painted top-down Western Front terrain, RFC overhead aircraft,
+  dawn battlefield perspective and separate pilot/gunner cockpit overlays.
 
 ## Controls
 
-- Arrow keys: move the aircraft in all four directions
+- Side/top-down: arrow keys move the aircraft in all four directions
+- Single-seat dogfight: arrow keys bank and pitch; X/Z control throttle
+- Two-seat gunner: arrow keys traverse the gun ring while Tom flies
 - On the title campaign board, Up/Down selects the full campaign or a 1914,
   1915, 1916, 1917 or 1918 starting commission
 - X: increase throttle
 - Z: reduce throttle
 - Space: fire
 - Enter: open/accept the campaign board and advance through story screens
-- F10: toggle full screen
 - Escape: return to title; Escape again exits
 
 ## AmigaOS 3 build
@@ -84,6 +89,10 @@ make -f ports/amigaos3/Makefile.canvas
 The executable is written to `build-canvas-skies/CanvasSkies`. It expects the
 `assets` drawer beside it, preserving the path
 `assets/canvas-skies/title.bmp`.
+
+For hardware QA without changing campaign progression, launch `CanvasSkies
+TOPDOWN`, `CanvasSkies DOGFIGHT` or `CanvasSkies GUNNER` to enter each alternate
+renderer directly. A normal launch always opens the title and commission board.
 
 `ports/amigaos3/package` contains a clearly labelled IconX launcher and an
 original GlowIcon for the game drawer. Put `Drawer.info` beside the installed
