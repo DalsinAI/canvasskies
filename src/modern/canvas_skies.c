@@ -258,12 +258,28 @@ typedef struct {
     int active;
 } Explosion;
 
+/* Compact six-degree-of-freedom aircraft state.  Body axes follow the usual
+ * aircraft convention: u points through the propeller, v through the right
+ * wing and w down through the wheels.  The quaternion rotates those axes into
+ * a north/east/down world; the renderer converts that world to x/up/z. */
+typedef struct {
+    float u, v, w;
+    float p, q, r;
+    float qw, qx, qy, qz;
+    float aileron, elevator, rudder;
+    float throttle;
+    float accumulator;
+    float alpha, beta, speed;
+    int stalled;
+} FlightState;
+
 typedef struct {
     float x, y, phase;
     float world_x, world_y, world_z;
     float heading, pitch, bank, speed;
     float vx, vy, vz;
     float roll_rate, pitch_rate, throttle;
+    FlightState flight;
     float crash_x, crash_y, crash_vx, crash_vy, crash_angle;
     int crash_size;
     int crashing;
@@ -391,6 +407,7 @@ typedef struct {
     float flight_vy;
     float flight_vz;
     float flight_throttle;
+    FlightState flight;
     float flight_alpha;
     int flight_stalled;
     int flight_crashed;
@@ -414,6 +431,9 @@ typedef struct {
     BulletHole bullet_holes[MAX_BULLET_HOLES];
     int next_bullet_hole;
 } Game;
+
+static void flight_state_init(FlightState *f, float heading, float pitch,
+                              float bank, float speed, float throttle);
 
 static int is_perspective_mode(MissionMode mode)
 {
@@ -1228,8 +1248,10 @@ static void reset_sortie(Game *g)
     g->flight_pitch_rate = 0.0f;
     g->flight_vx = 0.0f;
     g->flight_vy = 0.0f;
-    g->flight_vz = 56.84f;
+    g->flight_vz = 43.81f;
     g->flight_throttle = 0.68f;
+    flight_state_init(&g->flight, 0.0f, 0.0f, 0.0f, 43.81f,
+                      g->flight_throttle);
     g->flight_alpha = 0.0f;
     g->flight_stalled = 0;
     g->flight_crashed = 0;
@@ -1289,6 +1311,10 @@ static void reset_sortie(Game *g)
         g->enemies[i].roll_rate = 0.0f;
         g->enemies[i].pitch_rate = 0.0f;
         g->enemies[i].throttle = 0.67f + (float)(i & 1) * 0.08f;
+        flight_state_init(&g->enemies[i].flight, g->enemies[i].heading,
+                          g->enemies[i].pitch, g->enemies[i].bank,
+                          g->enemies[i].speed * 0.44704f,
+                          g->enemies[i].throttle);
         /* Even the earliest aircraft must first show visible battle damage.
          * Later years add durability, but nothing goes straight from pristine
          * to a crash on the first round. */
@@ -1491,84 +1517,232 @@ static Vec3 enemy_model_point(const Enemy *enemy, float x, float y, float z)
     return out;
 }
 
-/* A deliberately small, deterministic WWI flight model.  It keeps the two
- * useful ideas from Airstrike (velocity-relative drag and airflow aligning the
- * airframe) and the force/moment separation used by JSBSim, without importing
- * either engine.  The constants describe a low-powered, high-drag biplane or
- * early monoplane; all work is scalar float math suitable for 68k hardware. */
-static void ww1_integrate_motion(float dt, float heading, float pitch,
-                                 float bank, float throttle,
-                                 float *x, float *y, float *z,
-                                 float *vx, float *vy, float *vz,
-                                 float *display_speed, float *alpha_out,
-                                 int *stalled_out)
+static float flight_clamp(float value, float low, float high)
 {
-    const float velocity_scale = 0.58f;
-    const float trim_speed = 98.0f * velocity_scale;
-    const float gravity = 9.2f;
-    float speed = sqrtf(*vx * *vx + *vy * *vy + *vz * *vz);
-    float cb = cosf(bank), sb = sinf(bank);
-    float horizontal = sqrtf(*vx * *vx + *vz * *vz);
-    float flight_path, alpha, qratio, lift_coefficient;
-    float lift_accel, drag_accel, thrust_accel;
-    float speed_accel, path_accel;
-    int stalled;
+    if (value < low) return low;
+    if (value > high) return high;
+    return value;
+}
 
-    if (speed < 1.0f) speed = 1.0f;
-    flight_path = atan2f(*vy, horizontal > 0.01f ? horizontal : 0.01f);
-    alpha = pitch - flight_path;
-    while (alpha > (float)M_PI) alpha -= (float)(2.0 * M_PI);
-    while (alpha < (float)-M_PI) alpha += (float)(2.0 * M_PI);
-    qratio = (speed * speed) / (trim_speed * trim_speed);
-
-    /* Broad, fabric-covered WWI wings produce useful lift at low speed but
-     * lose it abruptly at a large angle of attack. */
-    stalled = speed < 34.0f || fabsf(alpha) > 0.34f;
-    lift_coefficient = 1.0f + alpha * 3.25f;
-    if (lift_coefficient < -0.45f) lift_coefficient = -0.45f;
-    if (lift_coefficient > 1.95f) lift_coefficient = 1.95f;
-    if (stalled) {
-        float excess = fabsf(alpha) - 0.34f;
-        float remaining = 0.43f - excess * 0.9f;
-        if (remaining < 0.18f) remaining = 0.18f;
-        lift_coefficient *= remaining;
+static float flight_approach(float value, float target, float amount)
+{
+    if (value < target) {
+        value += amount;
+        if (value > target) value = target;
+    } else if (value > target) {
+        value -= amount;
+        if (value < target) value = target;
     }
-    lift_accel = gravity * qratio * lift_coefficient;
-    /* A pilot naturally feeds in some back-pressure while banking.  Keep
-     * this compensation partial: a hard turn still costs height and speed,
-     * but an ordinary patrol turn is not an uncontrolled spiral dive. */
-    lift_accel *= 1.0f + sb * sb * 0.48f;
+    return value;
+}
 
-    /* Parasite and induced drag are deliberately high.  A steep bank or
-     * high-alpha pull therefore sheds energy, as these aircraft should. */
-    drag_accel = 0.42f + qratio * (0.72f + alpha * alpha * 5.8f +
-                                  sb * sb * 0.62f);
-    if (stalled) drag_accel += 2.25f * qratio;
-    thrust_accel = 2.15f * throttle;
+static void flight_quaternion_from_euler(FlightState *f, float bank,
+                                         float pitch, float heading)
+{
+    float cr = cosf(bank * 0.5f), sr = sinf(bank * 0.5f);
+    float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
+    float cy = cosf(heading * 0.5f), sy = sinf(heading * 0.5f);
+    f->qw = cr * cp * cy + sr * sp * sy;
+    f->qx = sr * cp * cy - cr * sp * sy;
+    f->qy = cr * sp * cy + sr * cp * sy;
+    f->qz = cr * cp * sy - sr * sp * cy;
+}
 
-    /* Three-degree-of-freedom point-mass integration.  Airspeed is always
-     * forward; the flight path can lag the nose (angle of attack), but the
-     * aeroplane can never slide backwards while pointing elsewhere. */
-    speed_accel = thrust_accel - drag_accel - gravity * sinf(flight_path);
-    speed += speed_accel * dt;
-    if (speed < 8.0f) speed = 8.0f;
-    path_accel = (lift_accel * cb - gravity * cosf(flight_path)) /
-                 (speed > 18.0f ? speed : 18.0f);
-    flight_path += path_accel * dt;
-    if (flight_path < -1.25f) flight_path = -1.25f;
-    if (flight_path > 1.25f) flight_path = 1.25f;
+static Vec3 flight_rotate_to_ned(const FlightState *f, float x, float y,
+                                 float z)
+{
+    Vec3 out;
+    float xx = f->qx * f->qx, yy = f->qy * f->qy, zz = f->qz * f->qz;
+    float xy = f->qx * f->qy, xz = f->qx * f->qz, yz = f->qy * f->qz;
+    float wx = f->qw * f->qx, wy = f->qw * f->qy, wz = f->qw * f->qz;
+    out.x = (1.0f - 2.0f * (yy + zz)) * x +
+            2.0f * (xy - wz) * y + 2.0f * (xz + wy) * z;
+    out.y = 2.0f * (xy + wz) * x +
+            (1.0f - 2.0f * (xx + zz)) * y +
+            2.0f * (yz - wx) * z;
+    out.z = 2.0f * (xz - wy) * x + 2.0f * (yz + wx) * y +
+            (1.0f - 2.0f * (xx + yy)) * z;
+    return out;
+}
 
-    *vx = sinf(heading) * cosf(flight_path) * speed;
-    *vy = sinf(flight_path) * speed;
-    *vz = cosf(heading) * cosf(flight_path) * speed;
+static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
+                                   float east, float down)
+{
+    Vec3 out;
+    float xx = f->qx * f->qx, yy = f->qy * f->qy, zz = f->qz * f->qz;
+    float xy = f->qx * f->qy, xz = f->qx * f->qz, yz = f->qy * f->qz;
+    float wx = f->qw * f->qx, wy = f->qw * f->qy, wz = f->qw * f->qz;
+    out.x = (1.0f - 2.0f * (yy + zz)) * north +
+            2.0f * (xy + wz) * east + 2.0f * (xz - wy) * down;
+    out.y = 2.0f * (xy - wz) * north +
+            (1.0f - 2.0f * (xx + zz)) * east +
+            2.0f * (yz + wx) * down;
+    out.z = 2.0f * (xz + wy) * north + 2.0f * (yz - wx) * east +
+            (1.0f - 2.0f * (xx + yy)) * down;
+    return out;
+}
 
-    *x += *vx * dt;
-    *y += *vy * dt;
-    *z += *vz * dt;
-    speed = sqrtf(*vx * *vx + *vy * *vy + *vz * *vz);
-    *display_speed = speed / velocity_scale;
-    *alpha_out = alpha;
-    *stalled_out = stalled;
+static void flight_euler(const FlightState *f, float *bank, float *pitch,
+                         float *heading)
+{
+    float sin_pitch = 2.0f * (f->qw * f->qy - f->qz * f->qx);
+    *bank = atan2f(2.0f * (f->qw * f->qx + f->qy * f->qz),
+                   1.0f - 2.0f * (f->qx * f->qx + f->qy * f->qy));
+    *pitch = asinf(flight_clamp(sin_pitch, -1.0f, 1.0f));
+    *heading = atan2f(2.0f * (f->qw * f->qz + f->qx * f->qy),
+                     1.0f - 2.0f * (f->qy * f->qy + f->qz * f->qz));
+}
+
+static void flight_state_init(FlightState *f, float heading, float pitch,
+                              float bank, float speed, float throttle)
+{
+    memset(f, 0, sizeof(*f));
+    f->u = speed;
+    f->throttle = throttle;
+    f->speed = speed;
+    flight_quaternion_from_euler(f, bank, pitch, heading);
+}
+
+/* One 50 Hz step of the compact six-degree-of-freedom model.  This is the
+ * JSBSim force/moment/state pipeline reduced to the terms which matter to a
+ * fabric-covered WWI aeroplane.  Nothing writes an angle or a direction of
+ * travel directly: control surfaces make moments, moments make body rates,
+ * and the tilted lift vector makes the turn. */
+static void ww1_flight_step(FlightState *f, Vec3 *position, float dt,
+                            float aileron_command, float elevator_command)
+{
+    const float mass = 430.0f;
+    const float ixx = 1050.0f, iyy = 1350.0f, izz = 1900.0f;
+    const float wing_area = 21.46f, span = 8.53f, chord = 2.52f;
+    const float rho = 1.10f, gravity = 9.80665f;
+    const float stall_alpha = 0.285f;
+    float speed, alpha, beta, dynamic_pressure, phat, qhat, rhat;
+    float cl, cd, cy, roll_c, pitch_c, yaw_c, effectiveness = 1.0f;
+    float lift, drag, side, fx, fy, fz, roll_m, pitch_m, yaw_m;
+    float pdot, qdot, rdot, udot, vdot, wdot;
+    float dw, dx, dy, dz, norm;
+    Vec3 gravity_body, velocity_ned;
+
+    f->aileron = flight_approach(f->aileron, aileron_command, 1.55f * dt);
+    f->elevator = flight_approach(f->elevator, elevator_command, 1.35f * dt);
+
+    speed = sqrtf(f->u * f->u + f->v * f->v + f->w * f->w);
+    if (speed < 1.0f) speed = 1.0f;
+    alpha = atan2f(f->w, f->u);
+    beta = asinf(flight_clamp(f->v / speed, -1.0f, 1.0f));
+    /* A small coordinated-rudder assist replaces the pedals which do not fit
+     * the four-key control scheme.  It counters adverse yaw; it never turns
+     * the aeroplane by changing heading. */
+    f->rudder = flight_approach(f->rudder,
+        flight_clamp(0.38f * f->aileron - 1.8f * beta - 0.16f * f->r,
+                     -1.0f, 1.0f), 1.65f * dt);
+
+    dynamic_pressure = 0.5f * rho * speed * speed;
+    phat = f->p * span / (2.0f * speed);
+    qhat = f->q * chord / (2.0f * speed);
+    rhat = f->r * span / (2.0f * speed);
+    if (fabsf(alpha) > stall_alpha) {
+        float excess = fabsf(alpha) - stall_alpha;
+        effectiveness = flight_clamp(1.0f - excess * 2.1f, 0.16f, 1.0f);
+    }
+
+    cl = 0.18f + 4.35f * alpha + 0.18f * f->elevator * effectiveness;
+    if (fabsf(alpha) > stall_alpha) {
+        float sign = alpha < 0.0f ? -1.0f : 1.0f;
+        float peak = 0.18f + 4.35f * stall_alpha * sign +
+                     0.18f * f->elevator * effectiveness;
+        float decay = flight_clamp(1.0f -
+                      (fabsf(alpha) - stall_alpha) * 1.45f, 0.18f, 1.0f);
+        cl = peak * decay;
+    }
+    cd = 0.052f + 0.078f * cl * cl + 0.22f * beta * beta +
+         0.018f * (fabsf(f->aileron) + fabsf(f->elevator));
+    if (fabsf(alpha) > stall_alpha)
+        cd += 0.95f * (fabsf(alpha) - stall_alpha);
+    cy = -0.72f * beta + 0.16f * f->rudder;
+
+    roll_c = -0.075f * beta - 0.19f * phat +
+             0.009f * f->aileron * effectiveness + 0.012f * f->rudder;
+    pitch_c = -0.58f * alpha - 5.8f * qhat +
+              0.095f * f->elevator * effectiveness;
+    yaw_c = 0.115f * beta - 0.24f * rhat +
+            0.065f * f->rudder - 0.018f * f->aileron * effectiveness;
+
+    lift = dynamic_pressure * wing_area * cl;
+    drag = dynamic_pressure * wing_area * cd;
+    side = dynamic_pressure * wing_area * cy;
+    fx = f->throttle * 2050.0f - drag * cosf(alpha) + lift * sinf(alpha);
+    fy = side;
+    fz = -drag * sinf(alpha) - lift * cosf(alpha);
+    roll_m = dynamic_pressure * wing_area * span * roll_c;
+    pitch_m = dynamic_pressure * wing_area * chord * pitch_c;
+    yaw_m = dynamic_pressure * wing_area * span * yaw_c;
+
+    pdot = (roll_m + (iyy - izz) * f->q * f->r) / ixx;
+    qdot = (pitch_m + (izz - ixx) * f->p * f->r) / iyy;
+    rdot = (yaw_m + (ixx - iyy) * f->p * f->q) / izz;
+    f->p += pdot * dt;
+    f->q += qdot * dt;
+    f->r += rdot * dt;
+
+    gravity_body = flight_rotate_from_ned(f, 0.0f, 0.0f, gravity);
+    udot = fx / mass + gravity_body.x - (f->q * f->w - f->r * f->v);
+    vdot = fy / mass + gravity_body.y - (f->r * f->u - f->p * f->w);
+    wdot = fz / mass + gravity_body.z - (f->p * f->v - f->q * f->u);
+    f->u += udot * dt;
+    f->v += vdot * dt;
+    f->w += wdot * dt;
+
+    dw = -0.5f * (f->qx * f->p + f->qy * f->q + f->qz * f->r);
+    dx =  0.5f * (f->qw * f->p + f->qy * f->r - f->qz * f->q);
+    dy =  0.5f * (f->qw * f->q + f->qz * f->p - f->qx * f->r);
+    dz =  0.5f * (f->qw * f->r + f->qx * f->q - f->qy * f->p);
+    f->qw += dw * dt;
+    f->qx += dx * dt;
+    f->qy += dy * dt;
+    f->qz += dz * dt;
+    norm = sqrtf(f->qw * f->qw + f->qx * f->qx +
+                 f->qy * f->qy + f->qz * f->qz);
+    if (norm > 0.0001f) {
+        f->qw /= norm; f->qx /= norm; f->qy /= norm; f->qz /= norm;
+    }
+
+    velocity_ned = flight_rotate_to_ned(f, f->u, f->v, f->w);
+    position->x += velocity_ned.y * dt;
+    position->y -= velocity_ned.z * dt;
+    position->z += velocity_ned.x * dt;
+    f->speed = sqrtf(f->u * f->u + f->v * f->v + f->w * f->w);
+    f->alpha = atan2f(f->w, f->u);
+    f->beta = asinf(flight_clamp(f->v / (f->speed > 1.0f ? f->speed : 1.0f),
+                                 -1.0f, 1.0f));
+    f->stalled = f->speed < 20.0f || fabsf(f->alpha) > stall_alpha;
+}
+
+static void ww1_flight_advance(FlightState *f, Vec3 *position, float frame_dt,
+                               float aileron_command,
+                               float elevator_command)
+{
+    const float step = 0.02f;
+    int iterations = 0;
+    if (frame_dt > 0.10f) frame_dt = 0.10f;
+    f->accumulator += frame_dt;
+    while (f->accumulator >= step && iterations < 5) {
+        ww1_flight_step(f, position, step, aileron_command, elevator_command);
+        f->accumulator -= step;
+        ++iterations;
+    }
+}
+
+static void flight_outputs(const FlightState *f, float *heading, float *pitch,
+                           float *bank, float *vx, float *vy, float *vz,
+                           float *speed_mph)
+{
+    Vec3 velocity_ned = flight_rotate_to_ned(f, f->u, f->v, f->w);
+    flight_euler(f, bank, pitch, heading);
+    *vx = velocity_ned.y;
+    *vy = -velocity_ned.z;
+    *vz = velocity_ned.x;
+    *speed_mph = f->speed * 2.23694f;
 }
 
 static float enemy_depth_3d(const Game *g, const Enemy *enemy, int index)
@@ -2028,8 +2202,9 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     uint32_t now = SDL_GetTicks();
     int i;
     int active = 0;
-    float bank_input = 0.0f;
-    float pitch_input = 0.0f;
+    float aileron_command = 0.0f;
+    float elevator_command = 0.0f;
+    Vec3 position;
     if (g->flight_crashed) {
         g->audio.engine_speed = 0.0f;
         g->audio.engine_load = 0.0f;
@@ -2038,62 +2213,30 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     /* Conventional stick: left/right roll the matching wing down; pulling
      * back (Down) raises the nose and pushing forward (Up) lowers it. */
-    if (keys[SDL_SCANCODE_LEFT]) bank_input = 1.0f;
-    if (keys[SDL_SCANCODE_RIGHT]) bank_input = -1.0f;
-    if (keys[SDL_SCANCODE_DOWN]) pitch_input = 1.0f;
-    if (keys[SDL_SCANCODE_UP]) pitch_input = -1.0f;
+    if (keys[SDL_SCANCODE_LEFT]) aileron_command = -1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
+    if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
+    if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
     if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
     if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
     if (g->flight_throttle < 0.12f) g->flight_throttle = 0.12f;
     if (g->flight_throttle > 1.0f) g->flight_throttle = 1.0f;
-    /* The keys deflect controls; they do not directly set a camera angle.
-     * Angular momentum makes a bank or climb continue after the key is
-     * released, while aerodynamic damping arrests the rate. */
-    {
-        float authority = (g->airspeed - 34.0f) / 64.0f;
-        if (authority < 0.18f) authority = 0.18f;
-        if (authority > 1.08f) authority = 1.08f;
-        g->flight_roll_rate += bank_input * 1.72f * authority * dt;
-        g->flight_pitch_rate += pitch_input * 1.08f * authority * dt;
-    }
-    g->flight_roll_rate *= powf(bank_input != 0.0f ? 0.27f : 0.12f, dt);
-    g->flight_pitch_rate *= powf(pitch_input != 0.0f ? 0.32f : 0.15f, dt);
-    if (g->flight_roll_rate < -1.35f) g->flight_roll_rate = -1.35f;
-    if (g->flight_roll_rate > 1.35f) g->flight_roll_rate = 1.35f;
-    if (g->flight_pitch_rate < -0.82f) g->flight_pitch_rate = -0.82f;
-    if (g->flight_pitch_rate > 0.82f) g->flight_pitch_rate = 0.82f;
-    g->view_bank += g->flight_roll_rate * dt;
-    g->view_pitch += g->flight_pitch_rate * dt;
-    /* A lightly stable WWI airframe slowly seeks level flight, but never
-     * snaps there.  The pilot must actively reverse the controls to level
-     * quickly after a manoeuvre. */
-    if (bank_input == 0.0f) {
-        g->flight_roll_rate -= g->view_bank * 0.42f * dt;
-        g->view_bank *= powf(0.68f, dt);
-    }
-    if (pitch_input == 0.0f) {
-        g->flight_pitch_rate -= g->view_pitch * 0.26f * dt;
-        g->view_pitch *= powf(0.78f, dt);
-    }
-    g->view_bank = wrap_angle(g->view_bank);
-    g->view_pitch = wrap_angle(g->view_pitch);
-    /* Coordinated turn: bank supplies the horizontal component of lift.
-     * Early aircraft roll slowly and require sustained speed to tighten it. */
-    g->flight_heading = wrap_angle(g->flight_heading +
-        sinf(g->view_bank) * (98.0f / (g->airspeed > 34.0f ?
-        g->airspeed : 34.0f)) * 0.48f * dt);
-    ww1_integrate_motion(dt, g->flight_heading, g->view_pitch,
-                         g->view_bank, g->flight_throttle,
-                         &g->flight_x, &g->flight_y, &g->flight_z,
-                         &g->flight_vx, &g->flight_vy, &g->flight_vz,
-                         &g->airspeed, &g->flight_alpha,
-                         &g->flight_stalled);
-    if (g->flight_stalled) {
-        /* A stall drops the nose and adds a small deterministic wing-rock;
-         * recovery comes from reducing alpha and regaining speed. */
-        g->flight_pitch_rate -= 0.46f * dt;
-        g->flight_roll_rate += sinf(g->scroll * 0.035f) * 0.18f * dt;
-    }
+    g->flight.throttle = g->flight_throttle;
+    position.x = g->flight_x;
+    position.y = g->flight_y;
+    position.z = g->flight_z;
+    ww1_flight_advance(&g->flight, &position, dt,
+                       aileron_command, elevator_command);
+    g->flight_x = position.x;
+    g->flight_y = position.y;
+    g->flight_z = position.z;
+    flight_outputs(&g->flight, &g->flight_heading, &g->view_pitch,
+                   &g->view_bank, &g->flight_vx, &g->flight_vy,
+                   &g->flight_vz, &g->airspeed);
+    g->flight_roll_rate = g->flight.p;
+    g->flight_pitch_rate = g->flight.q;
+    g->flight_alpha = g->flight.alpha;
+    g->flight_stalled = g->flight.stalled;
     /* No invisible altitude rails in the simulator.  The ground is a real
      * consequence and the sky remains open, so a long climb can genuinely
      * run out of energy and stall. */
@@ -2142,8 +2285,6 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         Enemy *enemy = &g->enemies[i];
         float dx, dy, dz, horizontal, distance;
         float desired_heading, heading_error, desired_bank, desired_pitch;
-        float enemy_alpha;
-        int enemy_stalled;
         if (enemy->crashing) {
             enemy->bank += dt * (1.7f + 0.16f * i);
             enemy->pitch -= 0.72f * dt;
@@ -2165,31 +2306,37 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         desired_bank = heading_error * 1.18f;
         if (desired_bank < -0.70f) desired_bank = -0.70f;
         if (desired_bank > 0.70f) desired_bank = 0.70f;
-        enemy->roll_rate += (desired_bank - enemy->bank) * 1.15f * dt;
-        enemy->roll_rate *= powf(0.18f, dt);
-        if (enemy->roll_rate < -0.82f) enemy->roll_rate = -0.82f;
-        if (enemy->roll_rate > 0.82f) enemy->roll_rate = 0.82f;
-        enemy->bank += enemy->roll_rate * dt;
-        enemy->heading = wrap_angle(enemy->heading +
-            tanf(enemy->bank) * (98.0f / (enemy->speed > 34.0f ?
-            enemy->speed : 34.0f)) * 0.34f * dt);
         desired_pitch = atan2f(dy, horizontal > 1.0f ? horizontal : 1.0f);
         if (desired_pitch < -0.30f) desired_pitch = -0.30f;
         if (desired_pitch > 0.30f) desired_pitch = 0.30f;
-        enemy->pitch_rate += (desired_pitch - enemy->pitch) * 0.92f * dt;
-        enemy->pitch_rate *= powf(0.22f, dt);
-        if (enemy->pitch_rate < -0.55f) enemy->pitch_rate = -0.55f;
-        if (enemy->pitch_rate > 0.55f) enemy->pitch_rate = 0.55f;
-        enemy->pitch += enemy->pitch_rate * dt;
-        ww1_integrate_motion(dt, enemy->heading, enemy->pitch, enemy->bank,
-                             enemy->throttle, &enemy->world_x,
-                             &enemy->world_y, &enemy->world_z,
-                             &enemy->vx, &enemy->vy, &enemy->vz,
-                             &enemy->speed, &enemy_alpha, &enemy_stalled);
-        if (enemy_stalled) enemy->pitch_rate -= 0.34f * dt;
-        if (enemy->world_y < 55.0f) {
-            enemy->world_y = 55.0f;
-            if (enemy->vy < 0.0f) enemy->vy = 0.0f;
+        {
+            Vec3 enemy_position = {enemy->world_x, enemy->world_y,
+                                   enemy->world_z};
+            float enemy_aileron = flight_clamp(
+                (desired_bank - enemy->bank) * 2.2f - enemy->flight.p * 0.32f,
+                -1.0f, 1.0f);
+            float enemy_elevator = flight_clamp(
+                (desired_pitch - enemy->pitch) * 2.4f - enemy->flight.q * 0.28f,
+                -1.0f, 1.0f);
+            enemy->flight.throttle = enemy->throttle;
+            ww1_flight_advance(&enemy->flight, &enemy_position, dt,
+                               enemy_aileron, enemy_elevator);
+            enemy->world_x = enemy_position.x;
+            enemy->world_y = enemy_position.y;
+            enemy->world_z = enemy_position.z;
+            flight_outputs(&enemy->flight, &enemy->heading, &enemy->pitch,
+                           &enemy->bank, &enemy->vx, &enemy->vy, &enemy->vz,
+                           &enemy->speed);
+            enemy->roll_rate = enemy->flight.p;
+            enemy->pitch_rate = enemy->flight.q;
+        }
+        if (enemy->world_y <= 0.0f) {
+            enemy->world_y = 0.0f;
+            enemy->crashing = 1;
+            enemy->crash_x = 320.0f;
+            enemy->crash_y = 300.0f;
+            enemy->crash_size = 18;
+            continue;
         }
         {
             Projected3D attack_view = project_world_point(g, (Vec3){
@@ -2224,14 +2371,20 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     if (g->qa_hold && active == 0) {
         float px = g->flight_x, py = g->flight_y, pz = g->flight_z;
         float heading = g->flight_heading;
+        float bank = g->view_bank, pitch = g->view_pitch;
         float vx = g->flight_vx, vy = g->flight_vy, vz = g->flight_vz;
         float throttle = g->flight_throttle;
+        float speed = g->airspeed;
+        FlightState flight = g->flight;
         int hold = g->qa_hold;
         reset_sortie(g);
         g->flight_x = px; g->flight_y = py; g->flight_z = pz;
         g->flight_heading = heading;
+        g->view_bank = bank; g->view_pitch = pitch;
         g->flight_vx = vx; g->flight_vy = vy; g->flight_vz = vz;
         g->flight_throttle = throttle;
+        g->airspeed = speed;
+        g->flight = flight;
         g->qa_hold = hold;
     } else if (!g->qa_hold &&
                (active == 0 || g->fuel <= 0.0f || g->health <= 0)) {
