@@ -260,6 +260,10 @@ typedef struct {
 
 typedef struct {
     float x, y, phase;
+    float world_x, world_y, world_z;
+    float heading, pitch, bank, speed;
+    float vx, vy, vz;
+    float roll_rate, pitch_rate, throttle;
     float crash_x, crash_y, crash_vx, crash_vy, crash_angle;
     int crash_size;
     int crashing;
@@ -275,6 +279,16 @@ typedef struct {
     uint32_t next_round;
     int burst_left;
 } Target;
+
+typedef struct {
+    float x, y, z;
+} Vec3;
+
+typedef struct {
+    int x, y;
+    float depth;
+    int visible;
+} Projected3D;
 
 typedef struct {
     float x, y; /* source-airframe coordinates */
@@ -367,6 +381,18 @@ typedef struct {
     float gunner_view_y;
     float view_bank;
     float view_pitch;
+    float flight_x;
+    float flight_y;
+    float flight_z;
+    float flight_heading;
+    float flight_roll_rate;
+    float flight_pitch_rate;
+    float flight_vx;
+    float flight_vy;
+    float flight_vz;
+    float flight_throttle;
+    float flight_alpha;
+    int flight_stalled;
     float airspeed;
     float scroll;
     float fuel;
@@ -568,6 +594,37 @@ static void line(SDL_Surface *s, int x0, int y0, int x1, int y1, uint32_t c)
             int e2 = err * 2;
             if (e2 >= dy) { err += dy; x0 += sx; }
             if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    }
+}
+
+static int edge2d(int ax, int ay, int bx, int by, int px, int py)
+{
+    return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+}
+
+static void fill_triangle(SDL_Surface *s, int x0, int y0, int x1, int y1,
+                          int x2, int y2, uint32_t colour)
+{
+    int min_x = x0 < x1 ? (x0 < x2 ? x0 : x2) : (x1 < x2 ? x1 : x2);
+    int max_x = x0 > x1 ? (x0 > x2 ? x0 : x2) : (x1 > x2 ? x1 : x2);
+    int min_y = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
+    int max_y = y0 > y1 ? (y0 > y2 ? y0 : y2) : (y1 > y2 ? y1 : y2);
+    int area = edge2d(x0, y0, x1, y1, x2, y2);
+    int x, y;
+    if (area == 0) return;
+    if (min_x < 0) min_x = 0;
+    if (max_x >= s->w) max_x = s->w - 1;
+    if (min_y < 0) min_y = 0;
+    if (max_y >= s->h) max_y = s->h - 1;
+    for (y = min_y; y <= max_y; ++y) {
+        for (x = min_x; x <= max_x; ++x) {
+            int w0 = edge2d(x1, y1, x2, y2, x, y);
+            int w1 = edge2d(x2, y2, x0, y0, x, y);
+            int w2 = edge2d(x0, y0, x1, y1, x, y);
+            if ((area > 0 && w0 >= 0 && w1 >= 0 && w2 >= 0) ||
+                (area < 0 && w0 <= 0 && w1 <= 0 && w2 <= 0))
+                pixel(s, x, y, colour);
         }
     }
 }
@@ -1161,6 +1218,18 @@ static void reset_sortie(Game *g)
     }
     g->view_bank = 0.0f;
     g->view_pitch = 0.0f;
+    g->flight_x = 0.0f;
+    g->flight_y = 620.0f;
+    g->flight_z = 0.0f;
+    g->flight_heading = 0.0f;
+    g->flight_roll_rate = 0.0f;
+    g->flight_pitch_rate = 0.0f;
+    g->flight_vx = 0.0f;
+    g->flight_vy = 0.0f;
+    g->flight_vz = 56.84f;
+    g->flight_throttle = 0.68f;
+    g->flight_alpha = 0.0f;
+    g->flight_stalled = 0;
     g->airspeed = 98.0f;
     g->scroll = 0.0f;
     g->fuel = 100.0f;
@@ -1187,10 +1256,35 @@ static void reset_sortie(Game *g)
     perspective_enemy_count = chapter->enemy_count;
     if (mode == MISSION_GUNNER_3D && perspective_enemy_count > 2)
         perspective_enemy_count = 2;
+    if (mode == MISSION_DOGFIGHT_3D && perspective_enemy_count > 4)
+        perspective_enemy_count = 4;
     for (i = 0; i < MAX_ENEMIES; ++i) {
         g->enemies[i].x = 760.0f + i * 620.0f;
         g->enemies[i].y = 90.0f + (float)((i * 47) % 120);
         g->enemies[i].phase = i * 0.8f;
+        /* Staggered WWI engagements, not a modern fighter formation.  The
+         * first machine approaches nearly head-on, the next crosses our
+         * nose, and the later aircraft enter from wider offsets. */
+        g->enemies[i].world_x = (float)((i & 1) ? 145 + i * 72 : -85 - i * 88);
+        g->enemies[i].world_y = 600.0f + (float)((i * 57) % 150);
+        g->enemies[i].world_z = 820.0f + (float)i * 470.0f;
+        if (i == 0)
+            g->enemies[i].heading = 2.92f;
+        else if (i == 1)
+            g->enemies[i].heading = -2.62f;
+        else
+            g->enemies[i].heading = (i & 1) ? -2.25f : 2.35f;
+        g->enemies[i].pitch = 0.0f;
+        g->enemies[i].bank = 0.0f;
+        g->enemies[i].speed = 84.0f + (float)((i * 13) % 24);
+        g->enemies[i].vx = sinf(g->enemies[i].heading) *
+                           g->enemies[i].speed * 0.58f;
+        g->enemies[i].vy = 0.0f;
+        g->enemies[i].vz = cosf(g->enemies[i].heading) *
+                           g->enemies[i].speed * 0.58f;
+        g->enemies[i].roll_rate = 0.0f;
+        g->enemies[i].pitch_rate = 0.0f;
+        g->enemies[i].throttle = 0.67f + (float)(i & 1) * 0.08f;
         /* Even the earliest aircraft must first show visible battle damage.
          * Later years add durability, but nothing goes straight from pristine
          * to a crash on the first round. */
@@ -1338,6 +1432,139 @@ static void top_down_target_position(const Game *g, int index,
         *sx = 320.0f + sinf(phase) * 226.0f;
         *sy += cosf(phase * 0.73f) * 14.0f;
     }
+}
+
+static float wrap_angle(float angle)
+{
+    while (angle > (float)M_PI) angle -= (float)(M_PI * 2.0);
+    while (angle < (float)-M_PI) angle += (float)(M_PI * 2.0);
+    return angle;
+}
+
+static Projected3D project_world_point(const Game *g, Vec3 point)
+{
+    Projected3D out;
+    float dx = point.x - g->flight_x;
+    float dy = point.y - g->flight_y;
+    float dz = point.z - g->flight_z;
+    float ch = cosf(g->flight_heading);
+    float sh = sinf(g->flight_heading);
+    float cp = cosf(g->view_pitch);
+    float sp = sinf(g->view_pitch);
+    float cr = cosf(g->view_bank);
+    float sr = sinf(g->view_bank);
+    float camera_x = ch * dx - sh * dz;
+    float forward = sh * dx + ch * dz;
+    float camera_y = cp * dy - sp * forward;
+    float camera_z = sp * dy + cp * forward;
+    float rolled_x = cr * camera_x + sr * camera_y;
+    float rolled_y = -sr * camera_x + cr * camera_y;
+    const float focal = 330.0f;
+    out.depth = camera_z;
+    out.visible = camera_z > 5.0f;
+    if (out.visible) {
+        out.x = 320 + (int)(rolled_x * focal / camera_z);
+        out.y = 190 - (int)(rolled_y * focal / camera_z);
+    } else {
+        out.x = out.y = -10000;
+    }
+    return out;
+}
+
+static Vec3 enemy_model_point(const Enemy *enemy, float x, float y, float z)
+{
+    Vec3 out;
+    float cr = cosf(enemy->bank), sr = sinf(enemy->bank);
+    float cp = cosf(enemy->pitch), sp = sinf(enemy->pitch);
+    float ch = cosf(enemy->heading), sh = sinf(enemy->heading);
+    float rolled_x = cr * x - sr * y;
+    float rolled_y = sr * x + cr * y;
+    float pitched_y = cp * rolled_y - sp * z;
+    float pitched_z = sp * rolled_y + cp * z;
+    out.x = enemy->world_x + ch * rolled_x + sh * pitched_z;
+    out.y = enemy->world_y + pitched_y;
+    out.z = enemy->world_z - sh * rolled_x + ch * pitched_z;
+    return out;
+}
+
+/* A deliberately small, deterministic WWI flight model.  It keeps the two
+ * useful ideas from Airstrike (velocity-relative drag and airflow aligning the
+ * airframe) and the force/moment separation used by JSBSim, without importing
+ * either engine.  The constants describe a low-powered, high-drag biplane or
+ * early monoplane; all work is scalar float math suitable for 68k hardware. */
+static void ww1_integrate_motion(float dt, float heading, float pitch,
+                                 float bank, float throttle,
+                                 float *x, float *y, float *z,
+                                 float *vx, float *vy, float *vz,
+                                 float *display_speed, float *alpha_out,
+                                 int *stalled_out)
+{
+    const float velocity_scale = 0.58f;
+    const float trim_speed = 98.0f * velocity_scale;
+    const float gravity = 9.2f;
+    float speed = sqrtf(*vx * *vx + *vy * *vy + *vz * *vz);
+    float cb = cosf(bank), sb = sinf(bank);
+    float horizontal = sqrtf(*vx * *vx + *vz * *vz);
+    float flight_path, alpha, qratio, lift_coefficient;
+    float lift_accel, drag_accel, thrust_accel;
+    float speed_accel, path_accel;
+    int stalled;
+
+    if (speed < 1.0f) speed = 1.0f;
+    flight_path = atan2f(*vy, horizontal > 0.01f ? horizontal : 0.01f);
+    alpha = pitch - flight_path;
+    while (alpha > (float)M_PI) alpha -= (float)(2.0 * M_PI);
+    while (alpha < (float)-M_PI) alpha += (float)(2.0 * M_PI);
+    qratio = (speed * speed) / (trim_speed * trim_speed);
+
+    /* Broad, fabric-covered WWI wings produce useful lift at low speed but
+     * lose it abruptly at a large angle of attack. */
+    stalled = speed < 34.0f || fabsf(alpha) > 0.34f;
+    lift_coefficient = 1.0f + alpha * 3.25f;
+    if (lift_coefficient < -0.45f) lift_coefficient = -0.45f;
+    if (lift_coefficient > 1.95f) lift_coefficient = 1.95f;
+    if (stalled) {
+        float excess = fabsf(alpha) - 0.34f;
+        float remaining = 0.43f - excess * 0.9f;
+        if (remaining < 0.18f) remaining = 0.18f;
+        lift_coefficient *= remaining;
+    }
+    lift_accel = gravity * qratio * lift_coefficient;
+    /* A pilot naturally feeds in some back-pressure while banking.  Keep
+     * this compensation partial: a hard turn still costs height and speed,
+     * but an ordinary patrol turn is not an uncontrolled spiral dive. */
+    lift_accel *= 1.0f + sb * sb * 0.48f;
+
+    /* Parasite and induced drag are deliberately high.  A steep bank or
+     * high-alpha pull therefore sheds energy, as these aircraft should. */
+    drag_accel = 0.42f + qratio * (0.72f + alpha * alpha * 5.8f +
+                                  sb * sb * 0.62f);
+    if (stalled) drag_accel += 2.25f * qratio;
+    thrust_accel = 2.15f * throttle;
+
+    /* Three-degree-of-freedom point-mass integration.  Airspeed is always
+     * forward; the flight path can lag the nose (angle of attack), but the
+     * aeroplane can never slide backwards while pointing elsewhere. */
+    speed_accel = thrust_accel - drag_accel - gravity * sinf(flight_path);
+    speed += speed_accel * dt;
+    if (speed < 8.0f) speed = 8.0f;
+    path_accel = (lift_accel * cb - gravity * cosf(flight_path)) /
+                 (speed > 18.0f ? speed : 18.0f);
+    flight_path += path_accel * dt;
+    if (flight_path < -1.25f) flight_path = -1.25f;
+    if (flight_path > 1.25f) flight_path = 1.25f;
+
+    *vx = sinf(heading) * cosf(flight_path) * speed;
+    *vy = sinf(flight_path) * speed;
+    *vz = cosf(heading) * cosf(flight_path) * speed;
+
+    *x += *vx * dt;
+    *y += *vy * dt;
+    *z += *vz * dt;
+    speed = sqrtf(*vx * *vx + *vy * *vy + *vz * *vz);
+    *display_speed = speed / velocity_scale;
+    *alpha_out = alpha;
+    *stalled_out = stalled;
 }
 
 static float enemy_depth_3d(const Game *g, const Enemy *enemy, int index)
@@ -1794,7 +2021,210 @@ static void update_perspective_sortie(Game *g, float dt,
 static void update_dogfight_3d_sortie(Game *g, float dt,
                                       const uint8_t *keys)
 {
-    update_perspective_sortie(g, dt, keys, 0);
+    uint32_t now = SDL_GetTicks();
+    int i;
+    int active = 0;
+    float bank_input = 0.0f;
+    float pitch_input = 0.0f;
+    /* Conventional stick: left/right roll the matching wing down; pulling
+     * back (Down) raises the nose and pushing forward (Up) lowers it. */
+    if (keys[SDL_SCANCODE_LEFT]) bank_input = 1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) bank_input = -1.0f;
+    if (keys[SDL_SCANCODE_DOWN]) pitch_input = 1.0f;
+    if (keys[SDL_SCANCODE_UP]) pitch_input = -1.0f;
+    if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
+    if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
+    if (g->flight_throttle < 0.12f) g->flight_throttle = 0.12f;
+    if (g->flight_throttle > 1.0f) g->flight_throttle = 1.0f;
+    /* The keys deflect controls; they do not directly set a camera angle.
+     * Angular momentum makes a bank or climb continue after the key is
+     * released, while aerodynamic damping arrests the rate. */
+    {
+        float authority = (g->airspeed - 34.0f) / 64.0f;
+        if (authority < 0.18f) authority = 0.18f;
+        if (authority > 1.08f) authority = 1.08f;
+        g->flight_roll_rate += bank_input * 1.72f * authority * dt;
+        g->flight_pitch_rate += pitch_input * 1.08f * authority * dt;
+    }
+    g->flight_roll_rate *= powf(bank_input != 0.0f ? 0.27f : 0.12f, dt);
+    g->flight_pitch_rate *= powf(pitch_input != 0.0f ? 0.32f : 0.15f, dt);
+    if (g->flight_roll_rate < -1.35f) g->flight_roll_rate = -1.35f;
+    if (g->flight_roll_rate > 1.35f) g->flight_roll_rate = 1.35f;
+    if (g->flight_pitch_rate < -0.82f) g->flight_pitch_rate = -0.82f;
+    if (g->flight_pitch_rate > 0.82f) g->flight_pitch_rate = 0.82f;
+    g->view_bank += g->flight_roll_rate * dt;
+    g->view_pitch += g->flight_pitch_rate * dt;
+    /* A lightly stable WWI airframe slowly seeks level flight, but never
+     * snaps there.  The pilot must actively reverse the controls to level
+     * quickly after a manoeuvre. */
+    if (bank_input == 0.0f) {
+        g->flight_roll_rate -= g->view_bank * 0.42f * dt;
+        g->view_bank *= powf(0.68f, dt);
+    }
+    if (pitch_input == 0.0f) {
+        g->flight_pitch_rate -= g->view_pitch * 0.26f * dt;
+        g->view_pitch *= powf(0.78f, dt);
+    }
+    g->view_bank = wrap_angle(g->view_bank);
+    g->view_pitch = wrap_angle(g->view_pitch);
+    /* Coordinated turn: bank supplies the horizontal component of lift.
+     * Early aircraft roll slowly and require sustained speed to tighten it. */
+    g->flight_heading = wrap_angle(g->flight_heading +
+        sinf(g->view_bank) * (98.0f / (g->airspeed > 34.0f ?
+        g->airspeed : 34.0f)) * 0.48f * dt);
+    ww1_integrate_motion(dt, g->flight_heading, g->view_pitch,
+                         g->view_bank, g->flight_throttle,
+                         &g->flight_x, &g->flight_y, &g->flight_z,
+                         &g->flight_vx, &g->flight_vy, &g->flight_vz,
+                         &g->airspeed, &g->flight_alpha,
+                         &g->flight_stalled);
+    if (g->flight_stalled) {
+        /* A stall drops the nose and adds a small deterministic wing-rock;
+         * recovery comes from reducing alpha and regaining speed. */
+        g->flight_pitch_rate -= 0.46f * dt;
+        g->flight_roll_rate += sinf(g->scroll * 0.035f) * 0.18f * dt;
+    }
+    /* No invisible altitude rails in the simulator.  The ground is a real
+     * consequence and the sky remains open, so a long climb can genuinely
+     * run out of energy and stall. */
+    if (g->flight_y <= 0.0f) {
+        g->flight_y = 0.0f;
+        g->health = 0;
+        g->audio.blast = 3200;
+    }
+    g->scroll += g->airspeed * dt;
+    g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f);
+    if (g->fuel < 0.0f) g->fuel = 0.0f;
+    g->audio.engine_speed = g->airspeed;
+    g->audio.engine_load = g->flight_throttle * 0.55f +
+        fabsf(g->flight_alpha) + (g->flight_stalled ? 0.45f : 0.0f);
+    g->audio.other_engine = 0.0f;
+
+    if (keys[SDL_SCANCODE_SPACE] && chapters[g->chapter].armed &&
+        g->ammunition > 0 && now - g->last_shot >= 105u) {
+        g->last_shot = now;
+        --g->ammunition;
+        g->audio.shot = 1500;
+        for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active &&
+                                                  !g->enemies[i].crashing) {
+            Projected3D p = project_world_point(g, (Vec3){
+                g->enemies[i].world_x, g->enemies[i].world_y,
+                g->enemies[i].world_z});
+            int radius;
+            if (!p.visible) continue;
+            radius = (int)(1300.0f / p.depth);
+            if (radius < 7) radius = 7;
+            if (radius > 48) radius = 48;
+            if (abs(p.x - 320) <= radius && abs(p.y - 218) <= radius) {
+                --g->enemies[i].hp;
+                if (g->enemies[i].hp <= 0) {
+                    g->enemies[i].crashing = 1;
+                    g->score += 250;
+                }
+                break;
+            }
+        }
+    }
+
+    for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
+        Enemy *enemy = &g->enemies[i];
+        float dx, dy, dz, horizontal, distance;
+        float desired_heading, heading_error, desired_bank, desired_pitch;
+        float enemy_alpha;
+        int enemy_stalled;
+        if (enemy->crashing) {
+            enemy->bank += dt * (1.7f + 0.16f * i);
+            enemy->pitch -= 0.72f * dt;
+            enemy->world_y -= (34.0f + (620.0f - enemy->world_y) * 0.10f) * dt;
+            enemy->world_x += sinf(enemy->heading) * enemy->speed * 0.42f * dt;
+            enemy->world_z += cosf(enemy->heading) * enemy->speed * 0.42f * dt;
+            if (enemy->world_y < 15.0f) enemy->active = 0;
+            else ++active;
+            continue;
+        }
+        dx = g->flight_x - enemy->world_x;
+        dy = g->flight_y - enemy->world_y;
+        dz = g->flight_z - enemy->world_z;
+        horizontal = sqrtf(dx * dx + dz * dz);
+        distance = sqrtf(horizontal * horizontal + dy * dy);
+        desired_heading = atan2f(dx, dz) +
+            sinf(g->scroll * 0.0021f + enemy->phase) * 0.12f;
+        heading_error = wrap_angle(desired_heading - enemy->heading);
+        desired_bank = heading_error * 1.18f;
+        if (desired_bank < -0.70f) desired_bank = -0.70f;
+        if (desired_bank > 0.70f) desired_bank = 0.70f;
+        enemy->roll_rate += (desired_bank - enemy->bank) * 1.15f * dt;
+        enemy->roll_rate *= powf(0.18f, dt);
+        if (enemy->roll_rate < -0.82f) enemy->roll_rate = -0.82f;
+        if (enemy->roll_rate > 0.82f) enemy->roll_rate = 0.82f;
+        enemy->bank += enemy->roll_rate * dt;
+        enemy->heading = wrap_angle(enemy->heading +
+            tanf(enemy->bank) * (98.0f / (enemy->speed > 34.0f ?
+            enemy->speed : 34.0f)) * 0.34f * dt);
+        desired_pitch = atan2f(dy, horizontal > 1.0f ? horizontal : 1.0f);
+        if (desired_pitch < -0.30f) desired_pitch = -0.30f;
+        if (desired_pitch > 0.30f) desired_pitch = 0.30f;
+        enemy->pitch_rate += (desired_pitch - enemy->pitch) * 0.92f * dt;
+        enemy->pitch_rate *= powf(0.22f, dt);
+        if (enemy->pitch_rate < -0.55f) enemy->pitch_rate = -0.55f;
+        if (enemy->pitch_rate > 0.55f) enemy->pitch_rate = 0.55f;
+        enemy->pitch += enemy->pitch_rate * dt;
+        ww1_integrate_motion(dt, enemy->heading, enemy->pitch, enemy->bank,
+                             enemy->throttle, &enemy->world_x,
+                             &enemy->world_y, &enemy->world_z,
+                             &enemy->vx, &enemy->vy, &enemy->vz,
+                             &enemy->speed, &enemy_alpha, &enemy_stalled);
+        if (enemy_stalled) enemy->pitch_rate -= 0.34f * dt;
+        if (enemy->world_y < 55.0f) {
+            enemy->world_y = 55.0f;
+            if (enemy->vy < 0.0f) enemy->vy = 0.0f;
+        }
+        {
+            Projected3D attack_view = project_world_point(g, (Vec3){
+                enemy->world_x, enemy->world_y, enemy->world_z});
+            /* An attacker can only hit while it is actually in the player's
+             * forward view and has settled its nose.  This prevents several
+             * unseen aircraft draining the airframe during their entrance. */
+            if (now - g->scene_started > 5200u && distance < 900.0f &&
+                attack_view.visible && attack_view.x > 24 &&
+                attack_view.x < SCREEN_W - 24 && attack_view.y > 18 &&
+                attack_view.y < SCREEN_H - 80 &&
+                fabsf(heading_error) < 0.095f &&
+                fabsf(desired_pitch - enemy->pitch) < 0.085f &&
+                now >= enemy->last_shot && now - enemy->last_shot >
+                (uint32_t)(1550 - g->chapter * 45 + (i * 173) % 520)) {
+                enemy->last_shot = now;
+                if (!g->qa_hold || g->health > 30)
+                    g->health -= 2 + g->chapter / 4;
+                g->last_damage = now;
+            }
+        }
+        {
+            float presence = 1.0f - distance / 1600.0f;
+            if (presence > g->audio.other_engine) {
+                if (presence < 0.0f) presence = 0.0f;
+                g->audio.other_engine = presence;
+                g->audio.other_pitch = 0.55f + presence * 0.5f;
+            }
+        }
+        ++active;
+    }
+    if (g->qa_hold && active == 0) {
+        float px = g->flight_x, py = g->flight_y, pz = g->flight_z;
+        float heading = g->flight_heading;
+        float vx = g->flight_vx, vy = g->flight_vy, vz = g->flight_vz;
+        float throttle = g->flight_throttle;
+        int hold = g->qa_hold;
+        reset_sortie(g);
+        g->flight_x = px; g->flight_y = py; g->flight_z = pz;
+        g->flight_heading = heading;
+        g->flight_vx = vx; g->flight_vy = vy; g->flight_vz = vz;
+        g->flight_throttle = throttle;
+        g->qa_hold = hold;
+    } else if (!g->qa_hold &&
+               (active == 0 || g->fuel <= 0.0f || g->health <= 0)) {
+        finish_alternate_sortie(g);
+    }
 }
 
 static void update_gunner_3d_sortie(Game *g, float dt,
@@ -2877,6 +3307,15 @@ static void draw_flight_background(Game *g)
     if (bg->format->BytesPerPixel != bpp) return;
     base_x = (bg->w - SCREEN_W) / 2;
     base_y = (bg->h - SCREEN_H) / 2 - (int)(g->view_pitch * 58.0f);
+    if (mode == MISSION_DOGFIGHT_3D) {
+        /* Couple the painted world to aircraft heading.  Previously the
+         * physics changed heading but the panorama stayed fixed, so a real
+         * turn looked like nothing more than a banked camera. */
+        base_x += (int)(g->flight_heading * (float)bg->w /
+                        (2.0f * (float)M_PI));
+        base_y = (bg->h - SCREEN_H) / 2 -
+                 (int)(g->view_pitch * 180.0f);
+    }
     if (mode == MISSION_GUNNER_3D) {
         /* The generated panorama is twice the viewport width.  Spend all of
          * that width on the observer's 90-degree rear arc, and use the spare
@@ -2892,17 +3331,59 @@ static void draw_flight_background(Game *g)
         if (SDL_LockSurface(bg) != 0) return;
         locked = 1;
     }
-    /* A scanline shear supplies a cheap but convincing roll: the horizon
-     * tilts around screen centre while pitch moves it vertically. */
-    for (y = 0; y < SCREEN_H; ++y) {
+    if (mode == MISSION_DOGFIGHT_3D) {
+        /* Inverse-map the panorama through the aircraft attitude.  Sampling
+         * one source pixel per 2x2 block keeps the 68040 cost bounded while
+         * making the horizon genuinely bank, climb and dive with the view. */
+        float c = cosf(g->view_bank);
+        float bank_sine = sinf(g->view_bank);
+        float source_cx = (float)(base_x + SCREEN_W / 2);
+        float source_cy = (float)(base_y + SCREEN_H / 2);
+        int x;
+        for (y = 0; y < SCREEN_H; y += 2) {
+            for (x = 0; x < SCREEN_W; x += 2) {
+                float dx = (float)(x - SCREEN_W / 2);
+                float dy = (float)(y - SCREEN_H / 2);
+                int sx = (int)(source_cx + c * dx + bank_sine * dy);
+                int sy = (int)(source_cy - bank_sine * dx + c * dy);
+                const uint8_t *src;
+                uint8_t *dst0;
+                uint8_t *dst1;
+                sx %= bg->w;
+                if (sx < 0) sx += bg->w;
+                if (sy < 0) sy = 0;
+                if (sy >= bg->h) sy = bg->h - 1;
+                src = (const uint8_t *)bg->pixels + sy * bg->pitch + sx * bpp;
+                dst0 = (uint8_t *)s->pixels + y * s->pitch + x * bpp;
+                memcpy(dst0, src, (size_t)bpp);
+                if (x + 1 < SCREEN_W) memcpy(dst0 + bpp, src, (size_t)bpp);
+                if (y + 1 < SCREEN_H) {
+                    dst1 = dst0 + s->pitch;
+                    memcpy(dst1, src, (size_t)bpp);
+                    if (x + 1 < SCREEN_W)
+                        memcpy(dst1 + bpp, src, (size_t)bpp);
+                }
+            }
+        }
+    } else for (y = 0; y < SCREEN_H; ++y) {
+        /* The rear gunner pans around the cockpit rather than banking the
+         * aeroplane, so its cheaper scanline path remains appropriate. */
         int sx = base_x + (int)(g->view_bank * 0.46f * (y - SCREEN_H / 2));
+        int first_pixels;
         const uint8_t *src;
         uint8_t *dst;
-        if (sx < 0) sx = 0;
-        if (sx + SCREEN_W > bg->w) sx = bg->w - SCREEN_W;
+        sx %= bg->w;
+        if (sx < 0) sx += bg->w;
         src = (const uint8_t *)bg->pixels + (base_y + y) * bg->pitch + sx * bpp;
         dst = (uint8_t *)s->pixels + y * s->pitch;
-        memcpy(dst, src, (size_t)SCREEN_W * (size_t)bpp);
+        first_pixels = bg->w - sx;
+        if (first_pixels > SCREEN_W) first_pixels = SCREEN_W;
+        memcpy(dst, src, (size_t)first_pixels * (size_t)bpp);
+        if (first_pixels < SCREEN_W) {
+            src = (const uint8_t *)bg->pixels + (base_y + y) * bg->pitch;
+            memcpy(dst + first_pixels * bpp, src,
+                   (size_t)(SCREEN_W - first_pixels) * (size_t)bpp);
+        }
     }
     if (locked) SDL_UnlockSurface(bg);
 }
@@ -2980,6 +3461,360 @@ static void draw_gunner_bullet_holes(Game *g)
     }
 }
 
+static void draw_simulator_terrain(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    const float tile_size = 520.0f;
+    float bank_cos = cosf(g->view_bank);
+    float horizon_slope;
+    int horizon_centre;
+    int horizon_left, horizon_right;
+    int base_tile_x = (int)floorf(g->flight_x / tile_size);
+    int base_tile_z = (int)floorf(g->flight_z / tile_size);
+    int tx, tz;
+    if (fabsf(bank_cos) < 0.25f)
+        bank_cos = bank_cos < 0.0f ? -0.25f : 0.25f;
+    horizon_slope = sinf(g->view_bank) / bank_cos;
+    if (horizon_slope < -4.0f) horizon_slope = -4.0f;
+    if (horizon_slope > 4.0f) horizon_slope = 4.0f;
+    horizon_centre = 190 + (int)(sinf(g->view_pitch) * 330.0f);
+    horizon_left = horizon_centre - (int)(horizon_slope * 320.0f);
+    horizon_right = horizon_centre + (int)(horizon_slope * 320.0f);
+    /* This is a world-space 360-degree view.  A finite photograph cannot be
+     * wrapped into a flight-sim landscape without seams or backwards motion. */
+    gradient(s, 38, 72, 112, 201, 170, 118);
+    fill_triangle(s, 0, horizon_left, SCREEN_W - 1, horizon_right,
+                  0, SCREEN_H - 1, rgb(s, 78, 78, 48));
+    fill_triangle(s, SCREEN_W - 1, horizon_right, SCREEN_W - 1,
+                  SCREEN_H - 1, 0, SCREEN_H - 1, rgb(s, 67, 69, 42));
+    /* Fixed world tiles surround the aircraft.  Unlike the old camera-local
+     * grid they stay put while heading changes, so a turn is unmistakable
+     * and the same terrain works through a complete 360 degrees. */
+    for (tz = base_tile_z - 5; tz <= base_tile_z + 5; ++tz) {
+        for (tx = base_tile_x - 5; tx <= base_tile_x + 5; ++tx) {
+            float x0 = (float)tx * tile_size;
+            float z0 = (float)tz * tile_size;
+            Projected3D p0 = project_world_point(g, (Vec3){x0, 0.0f, z0});
+            Projected3D p1 = project_world_point(g,
+                (Vec3){x0 + tile_size, 0.0f, z0});
+            Projected3D p2 = project_world_point(g,
+                (Vec3){x0 + tile_size, 0.0f, z0 + tile_size});
+            Projected3D p3 = project_world_point(g,
+                (Vec3){x0, 0.0f, z0 + tile_size});
+            uint32_t seed = scene_hash((uint32_t)(tx * 92821) ^
+                                       (uint32_t)(tz * 68917));
+            uint32_t field;
+            if ((tx % 6) == 0 || (tz % 7) == 0)
+                field = rgb(s, 102, 88, 58);
+            else if (seed & 1u)
+                field = rgb(s, 87, 82, 49);
+            else
+                field = rgb(s, 64, 84, 47);
+            if (p0.visible && p1.visible && p2.visible && p3.visible &&
+                abs(p0.x) < 1800 && abs(p1.x) < 1800 &&
+                abs(p2.x) < 1800 && abs(p3.x) < 1800 &&
+                abs(p0.y) < 1200 && abs(p1.y) < 1200 &&
+                abs(p2.y) < 1200 && abs(p3.y) < 1200) {
+                fill_triangle(s, p0.x, p0.y, p1.x, p1.y,
+                              p2.x, p2.y, field);
+                fill_triangle(s, p0.x, p0.y, p2.x, p2.y,
+                              p3.x, p3.y, field);
+                line(s, p0.x, p0.y, p1.x, p1.y, rgb(s, 49, 61, 37));
+                line(s, p0.x, p0.y, p3.x, p3.y, rgb(s, 57, 64, 39));
+            }
+        }
+    }
+}
+
+static void draw_simulator_clouds(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int i;
+    static const Vec3 cloud_centres[] = {
+        {-820.0f, 820.0f, 620.0f}, {640.0f, 910.0f, 980.0f},
+        {-1300.0f, 1080.0f, 1550.0f}, {1180.0f, 760.0f, 1880.0f},
+        {-380.0f, 1260.0f, 2380.0f}, {1480.0f, 1120.0f, 2920.0f},
+        {-1750.0f, 690.0f, 3350.0f}, {260.0f, 870.0f, 3820.0f}
+    };
+    for (i = 0; i < (int)(sizeof(cloud_centres) / sizeof(cloud_centres[0])); ++i) {
+        Projected3D p = project_world_point(g, cloud_centres[i]);
+        int radius;
+        uint32_t shadow, light;
+        if (!p.visible || p.x < -180 || p.x > SCREEN_W + 180 ||
+            p.y < -100 || p.y > SCREEN_H + 100) continue;
+        radius = (int)(17500.0f / p.depth);
+        if (radius < 4) radius = 4;
+        if (radius > 28) radius = 28;
+        shadow = rgb(s, 116, 126, 136);
+        light = rgb(s, 188, 190, 184);
+        circle(s, p.x - radius / 2, p.y + radius / 4, radius / 2, shadow);
+        circle(s, p.x + radius / 3, p.y + radius / 5, radius * 3 / 5, shadow);
+        circle(s, p.x - radius / 3, p.y, radius * 2 / 3, light);
+        circle(s, p.x + radius / 5, p.y - radius / 5, radius * 3 / 4,
+               rgb(s, 207, 202, 189));
+        circle(s, p.x + radius * 3 / 4, p.y + radius / 8, radius / 2, light);
+    }
+}
+
+static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
+{
+    SDL_Surface *s = g->screen;
+    Projected3D centre = project_world_point(g, (Vec3){enemy->world_x,
+        enemy->world_y, enemy->world_z});
+    Projected3D upper[4], lower[4], tail[4], nose, rear, fin;
+    Projected3D prop_l, prop_r, prop_u, prop_d;
+    Projected3D wheel_l, wheel_r, mark_l, mark_r;
+    Projected3D cockpit, pilot, cowling, gun_l, gun_r;
+    uint32_t outline = rgb(s, 35, 27, 24);
+    uint32_t canvas = rgb(s, 214, 187, 142);
+    uint32_t underside = rgb(s, 172, 148, 111);
+    uint32_t rib = rgb(s, 126, 101, 70);
+    uint32_t body = rgb(s, 143, 39, 31);
+    uint32_t body_light = rgb(s, 194, 66, 45);
+    uint32_t metal = rgb(s, 91, 91, 84);
+    int i;
+    static const float wing[4][3] = {
+        {-17.4f, 2.0f, -3.2f}, {17.4f, 2.0f, -3.2f},
+        {17.4f, 2.0f, 3.6f}, {-17.4f, 2.0f, 3.6f}
+    };
+    static const float low_wing[4][3] = {
+        {-15.7f, -2.0f, -2.9f}, {15.7f, -2.0f, -2.9f},
+        {15.7f, -2.0f, 3.1f}, {-15.7f, -2.0f, 3.1f}
+    };
+    static const float tail_wing[4][3] = {
+        {-7.0f, 0.0f, -15.2f}, {7.0f, 0.0f, -15.2f},
+        {6.0f, 0.0f, -12.5f}, {-6.0f, 0.0f, -12.5f}
+    };
+    if (!centre.visible || centre.x < -180 || centre.x > SCREEN_W + 180 ||
+        centre.y < -180 || centre.y > SCREEN_H + 180) return;
+    if (centre.depth > 2600.0f) {
+        circle(s, centre.x, centre.y, 2, outline);
+        return;
+    }
+    for (i = 0; i < 4; ++i) {
+        upper[i] = project_world_point(g, enemy_model_point(enemy,
+            wing[i][0], wing[i][1], wing[i][2]));
+        lower[i] = project_world_point(g, enemy_model_point(enemy,
+            low_wing[i][0], low_wing[i][1], low_wing[i][2]));
+        tail[i] = project_world_point(g, enemy_model_point(enemy,
+            tail_wing[i][0], tail_wing[i][1], tail_wing[i][2]));
+    }
+    nose = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, 18.5f));
+    rear = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, -16.2f));
+    fin = project_world_point(g, enemy_model_point(enemy, 0.0f, 6.0f, -14.8f));
+    for (i = 0; i < 4; ++i)
+        if (!upper[i].visible || !lower[i].visible || !tail[i].visible) return;
+    fill_triangle(s, upper[0].x, upper[0].y, upper[1].x, upper[1].y,
+                  upper[2].x, upper[2].y, canvas);
+    fill_triangle(s, upper[0].x, upper[0].y, upper[2].x, upper[2].y,
+                  upper[3].x, upper[3].y, canvas);
+    fill_triangle(s, lower[0].x, lower[0].y, lower[1].x, lower[1].y,
+                  lower[2].x, lower[2].y, underside);
+    fill_triangle(s, lower[0].x, lower[0].y, lower[2].x, lower[2].y,
+                  lower[3].x, lower[3].y, underside);
+    fill_triangle(s, tail[0].x, tail[0].y, tail[1].x, tail[1].y,
+                  tail[2].x, tail[2].y, canvas);
+    fill_triangle(s, tail[0].x, tail[0].y, tail[2].x, tail[2].y,
+                  tail[3].x, tail[3].y, canvas);
+    for (i = 0; i < 4; ++i) {
+        int n = (i + 1) & 3;
+        line(s, upper[i].x, upper[i].y, upper[n].x, upper[n].y, outline);
+        line(s, lower[i].x, lower[i].y, lower[n].x, lower[n].y, outline);
+    }
+    /* The ribs and contrasting leading edges keep the two wings readable
+     * when the aeroplane banks.  These disappear naturally with distance,
+     * instead of turning into a noisy sprite-like patch. */
+    if (centre.depth < 1250.0f) {
+        int rib_index;
+        for (rib_index = -3; rib_index <= 3; ++rib_index) {
+            float rx = (float)rib_index * 4.25f;
+            Projected3D rib_a = project_world_point(g,
+                enemy_model_point(enemy, rx, 2.04f, -3.0f));
+            Projected3D rib_b = project_world_point(g,
+                enemy_model_point(enemy, rx, 2.04f, 3.4f));
+            if (rib_a.visible && rib_b.visible)
+                line(s, rib_a.x, rib_a.y, rib_b.x, rib_b.y, rib);
+        }
+        line(s, upper[3].x, upper[3].y, upper[2].x, upper[2].y,
+             rgb(s, 239, 211, 163));
+        line(s, lower[3].x, lower[3].y, lower[2].x, lower[2].y, rib);
+    }
+    if (nose.visible && rear.visible) {
+        int thickness;
+        for (thickness = -3; thickness <= 3; ++thickness)
+            line(s, nose.x + thickness, nose.y, rear.x + thickness, rear.y,
+                 thickness == -3 || thickness == 3 ? outline :
+                 (thickness < 0 ? body : body_light));
+    }
+    if (rear.visible && fin.visible) {
+        fill_triangle(s, rear.x - 1, rear.y, rear.x + 1, rear.y,
+                      fin.x, fin.y, body);
+        line(s, rear.x, rear.y, fin.x, fin.y, outline);
+    }
+    line(s, upper[0].x, upper[0].y, lower[0].x, lower[0].y, outline);
+    line(s, upper[1].x, upper[1].y, lower[1].x, lower[1].y, outline);
+    {
+        Projected3D strut_ul = project_world_point(g,
+            enemy_model_point(enemy, -7.1f, 2.0f, 0.0f));
+        Projected3D strut_ll = project_world_point(g,
+            enemy_model_point(enemy, -7.1f, -2.0f, 0.0f));
+        Projected3D strut_ur = project_world_point(g,
+            enemy_model_point(enemy, 7.1f, 2.0f, 0.0f));
+        Projected3D strut_lr = project_world_point(g,
+            enemy_model_point(enemy, 7.1f, -2.0f, 0.0f));
+        if (strut_ul.visible && strut_ll.visible)
+            line(s, strut_ul.x, strut_ul.y, strut_ll.x, strut_ll.y, outline);
+        if (strut_ur.visible && strut_lr.visible)
+            line(s, strut_ur.x, strut_ur.y, strut_lr.x, strut_lr.y, outline);
+        if (strut_ul.visible && strut_lr.visible)
+            line(s, strut_ul.x, strut_ul.y, strut_lr.x, strut_lr.y,
+                 rgb(s, 91, 80, 66));
+        if (strut_ur.visible && strut_ll.visible)
+            line(s, strut_ur.x, strut_ur.y, strut_ll.x, strut_ll.y,
+                 rgb(s, 91, 80, 66));
+    }
+    /* Engine, open cockpit and pilot are strong recognition cues at combat
+     * range, much more useful than a flat coloured fuselage. */
+    cowling = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, 13.6f));
+    cockpit = project_world_point(g, enemy_model_point(enemy, 0.0f, 1.0f, -3.7f));
+    pilot = project_world_point(g, enemy_model_point(enemy, 0.0f, 3.2f, -4.2f));
+    if (cowling.visible) {
+        int engine_radius = centre.depth < 520.0f ? 4 : 3;
+        circle(s, cowling.x, cowling.y, engine_radius, outline);
+        circle(s, cowling.x, cowling.y, engine_radius - 1, metal);
+    }
+    if (cockpit.visible) circle(s, cockpit.x, cockpit.y,
+                                centre.depth < 650.0f ? 4 : 2, outline);
+    if (pilot.visible) {
+        circle(s, pilot.x, pilot.y, centre.depth < 650.0f ? 3 : 2,
+               rgb(s, 91, 67, 45));
+        if (centre.depth < 700.0f)
+            line(s, pilot.x - 2, pilot.y - 1, pilot.x + 2, pilot.y - 1,
+                 rgb(s, 32, 29, 25));
+    }
+    gun_l = project_world_point(g, enemy_model_point(enemy, -1.5f, 2.0f, 10.0f));
+    gun_r = project_world_point(g, enemy_model_point(enemy, 1.5f, 2.0f, 10.0f));
+    if (centre.depth < 850.0f && cowling.visible) {
+        if (gun_l.visible) line(s, cockpit.x - 1, cockpit.y, gun_l.x, gun_l.y, outline);
+        if (gun_r.visible) line(s, cockpit.x + 1, cockpit.y, gun_r.x, gun_r.y, outline);
+    }
+    prop_l = project_world_point(g, enemy_model_point(enemy, -6.7f, 0.0f, 19.1f));
+    prop_r = project_world_point(g, enemy_model_point(enemy, 6.7f, 0.0f, 19.1f));
+    prop_u = project_world_point(g, enemy_model_point(enemy, 0.0f, 6.7f, 19.1f));
+    prop_d = project_world_point(g, enemy_model_point(enemy, 0.0f, -6.7f, 19.1f));
+    if (prop_l.visible && prop_r.visible)
+        line(s, prop_l.x, prop_l.y, prop_r.x, prop_r.y, rgb(s, 119, 79, 44));
+    if (prop_u.visible && prop_d.visible)
+        line(s, prop_u.x, prop_u.y, prop_d.x, prop_d.y, rgb(s, 119, 79, 44));
+    wheel_l = project_world_point(g, enemy_model_point(enemy, -4.1f, -4.2f, 3.0f));
+    wheel_r = project_world_point(g, enemy_model_point(enemy, 4.1f, -4.2f, 3.0f));
+    if (wheel_l.visible && cowling.visible) {
+        line(s, cowling.x, cowling.y, wheel_l.x, wheel_l.y, outline);
+        circle(s, wheel_l.x, wheel_l.y, centre.depth < 700 ? 4 : 2, outline);
+    }
+    if (wheel_r.visible && cowling.visible) {
+        line(s, cowling.x, cowling.y, wheel_r.x, wheel_r.y, outline);
+        circle(s, wheel_r.x, wheel_r.y, centre.depth < 700 ? 4 : 2, outline);
+    }
+    mark_l = project_world_point(g, enemy_model_point(enemy, -11.0f, 2.08f, 0.0f));
+    mark_r = project_world_point(g, enemy_model_point(enemy, 11.0f, 2.08f, 0.0f));
+    if (centre.depth < 1050.0f) {
+        Projected3D mark_l_v0 = project_world_point(g,
+            enemy_model_point(enemy, -11.0f, 2.10f, -2.1f));
+        Projected3D mark_l_v1 = project_world_point(g,
+            enemy_model_point(enemy, -11.0f, 2.10f, 2.1f));
+        Projected3D mark_l_h0 = project_world_point(g,
+            enemy_model_point(enemy, -13.1f, 2.10f, 0.0f));
+        Projected3D mark_l_h1 = project_world_point(g,
+            enemy_model_point(enemy, -8.9f, 2.10f, 0.0f));
+        Projected3D mark_r_v0 = project_world_point(g,
+            enemy_model_point(enemy, 11.0f, 2.10f, -2.1f));
+        Projected3D mark_r_v1 = project_world_point(g,
+            enemy_model_point(enemy, 11.0f, 2.10f, 2.1f));
+        Projected3D mark_r_h0 = project_world_point(g,
+            enemy_model_point(enemy, 8.9f, 2.10f, 0.0f));
+        Projected3D mark_r_h1 = project_world_point(g,
+            enemy_model_point(enemy, 13.1f, 2.10f, 0.0f));
+        if (mark_l.visible && mark_l_v0.visible && mark_l_v1.visible &&
+            mark_l_h0.visible && mark_l_h1.visible) {
+            line(s, mark_l_v0.x, mark_l_v0.y, mark_l_v1.x, mark_l_v1.y, outline);
+            line(s, mark_l_h0.x, mark_l_h0.y, mark_l_h1.x, mark_l_h1.y, outline);
+        }
+        if (mark_r.visible && mark_r_v0.visible && mark_r_v1.visible &&
+            mark_r_h0.visible && mark_r_h1.visible) {
+            line(s, mark_r_v0.x, mark_r_v0.y, mark_r_v1.x, mark_r_v1.y, outline);
+            line(s, mark_r_h0.x, mark_r_h0.y, mark_r_h1.x, mark_r_h1.y, outline);
+        }
+    } else {
+        if (mark_l.visible) circle(s, mark_l.x, mark_l.y, 1, outline);
+        if (mark_r.visible) circle(s, mark_r.x, mark_r.y, 1, outline);
+    }
+    if (enemy->hp < enemy->max_hp && rear.visible) {
+        int smoke = (enemy->max_hp - enemy->hp) * 2 + 2;
+        for (i = 0; i < smoke; ++i)
+            circle(s, rear.x - i * 3, rear.y + (i & 1), 2 + i / 3,
+                   rgb(s, 69 + i * 5, 66 + i * 5, 61 + i * 5));
+    }
+}
+
+static void draw_dogfight_simulator(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int order[MAX_ENEMIES];
+    float depth[MAX_ENEMIES];
+    int count = 0;
+    int i, j;
+    char buf[64];
+    uint32_t now = SDL_GetTicks();
+    draw_simulator_terrain(g);
+    draw_simulator_clouds(g);
+    for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
+        Projected3D p = project_world_point(g, (Vec3){g->enemies[i].world_x,
+            g->enemies[i].world_y, g->enemies[i].world_z});
+        if (p.visible) { order[count] = i; depth[count++] = p.depth; }
+    }
+    for (i = 0; i < count; ++i) for (j = i + 1; j < count; ++j) {
+        if (depth[i] < depth[j]) {
+            float td = depth[i]; int ti = order[i];
+            depth[i] = depth[j]; order[i] = order[j];
+            depth[j] = td; order[j] = ti;
+        }
+    }
+    for (i = 0; i < count; ++i) {
+        Enemy *enemy = &g->enemies[order[i]];
+        Projected3D p = project_world_point(g, (Vec3){enemy->world_x,
+            enemy->world_y, enemy->world_z});
+        draw_enemy_aircraft_3d(g, enemy);
+        if (now >= enemy->last_shot && now - enemy->last_shot < 115u &&
+            p.visible && p.x >= 0 && p.x < SCREEN_W &&
+            p.y >= 0 && p.y < SCREEN_H) {
+            line(s, p.x, p.y, 318, 216, rgb(s, 255, 103, 53));
+            line(s, p.x, p.y + 1, 322, 220, rgb(s, 255, 184, 92));
+        }
+    }
+    if (now >= g->last_shot && now - g->last_shot < 95u) {
+        line(s, 286, 322, 318, 218, rgb(s, 255, 235, 142));
+        line(s, 354, 322, 322, 218, rgb(s, 255, 235, 142));
+    }
+    if (g->pilot_cockpit)
+        SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
+    snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
+             current_mission_goal(g));
+    draw_field_sign(g, 8, 342, 130, buf);
+    snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+    draw_field_sign(g, 8, 371, 130, buf);
+    snprintf(buf, sizeof(buf), "IAS %03d", (int)g->airspeed);
+    draw_field_sign(g, 266, 342, 108, buf);
+    snprintf(buf, sizeof(buf), "ALT %04d", (int)g->flight_y);
+    draw_field_sign(g, 266, 371, 108, buf);
+    snprintf(buf, sizeof(buf), "FUEL %02d", (int)g->fuel);
+    draw_field_sign(g, 526, 342, 106, buf);
+    snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
+    draw_field_sign(g, 502, 371, 130, buf);
+    if (g->flight_stalled && ((now / 220u) & 1u))
+        draw_field_sign(g, 240, 304, 160, "STALL - NOSE DOWN");
+}
+
 static void draw_dogfight_3d_sortie(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -2988,6 +3823,10 @@ static void draw_dogfight_3d_sortie(Game *g)
     int horizon = 213;
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     int gunner = mode == MISSION_GUNNER_3D;
+    if (!gunner) {
+        draw_dogfight_simulator(g);
+        return;
+    }
     if (g->dogfight_background) {
         draw_flight_background(g);
     } else {
