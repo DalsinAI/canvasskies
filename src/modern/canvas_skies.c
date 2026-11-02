@@ -24,14 +24,20 @@
 #ifndef CANVAS_TITLE_BMP
 #define CANVAS_TITLE_BMP "assets/canvas-skies/title.bmp"
 #endif
+#ifndef CANVAS_TITLE_BANNER_BMP
+#define CANVAS_TITLE_BANNER_BMP "assets/canvas-skies/title-banner.bmp"
+#endif
 #ifndef CANVAS_BOARD_BMP
 #define CANVAS_BOARD_BMP "assets/canvas-skies/mission-board-v2.bmp"
 #endif
 #ifndef CANVAS_JOURNAL_BMP
 #define CANVAS_JOURNAL_BMP "assets/canvas-skies/journal.bmp"
 #endif
+#ifndef CANVAS_SKY_BMP
+#define CANVAS_SKY_BMP "assets/canvas-skies/sky.bmp"
+#endif
 #ifndef CANVAS_BATTLEFIELD_BMP
-#define CANVAS_BATTLEFIELD_BMP "assets/canvas-skies/far-hills.bmp"
+#define CANVAS_BATTLEFIELD_BMP "assets/canvas-skies/hills.bmp"
 #endif
 #ifndef CANVAS_FOREGROUND_BMP
 #define CANVAS_FOREGROUND_BMP "assets/canvas-skies/foreground-panorama.bmp"
@@ -110,22 +116,38 @@
 #endif
 
 #define SCREEN_W 640
-#define SCREEN_H 360
+#define SCREEN_H 400
+#define ART_H 360
+#define GAMEPLAY_Y_OFFSET (SCREEN_H - ART_H)
 #define MAX_BULLETS 80
 #define MAX_ENEMIES 10
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
 #define MIDGROUND_ELEMENT_COUNT 6
 #define NEAR_ELEMENT_COUNT 6
+#define SKY_PARALLAX 0.008f
+#define HILLS_PARALLAX 0.055f
+#define BUILDINGS_PARALLAX 0.22f
+#define FOREGROUND_PARALLAX 1.0f
 
 typedef enum {
     SCENE_TITLE,
+    SCENE_MENU,
     SCENE_STORY,
     SCENE_BRIEFING,
     SCENE_SORTIE,
     SCENE_DEBRIEF,
     SCENE_EPILOGUE
 } Scene;
+
+typedef enum {
+    MUSIC_MARCH,
+    MUSIC_RECON,
+    MUSIC_TENSION,
+    MUSIC_MOURNING,
+    MUSIC_ARMISTICE,
+    MUSIC_MESS
+} MusicMood;
 
 typedef struct {
     const char *date;
@@ -209,6 +231,8 @@ typedef struct {
     int active;
     int type;
     uint32_t last_shot;
+    uint32_t next_round;
+    int burst_left;
 } Target;
 
 typedef struct {
@@ -226,17 +250,26 @@ typedef struct {
     volatile float other_engine;
     volatile float other_pitch;
     volatile float vehicle_engine;
+    volatile int music_mood;
     float engine_phase;
+    float engine_sub_phase;
     float other_phase;
     float vehicle_phase;
+    float synth_phase[5];
+    float gramophone_lp;
+    float gramophone_hp;
+    float gramophone_previous;
 } AudioState;
 
 typedef struct {
     SDL_Window *window;
+    SDL_Surface *window_surface;
     SDL_Surface *screen;
     SDL_Surface *title;
+    SDL_Surface *title_banner;
     SDL_Surface *mission_board;
     SDL_Surface *journal;
+    SDL_Surface *sky;
     SDL_Surface *battlefield;
     SDL_Surface *foreground_panorama;
     SDL_Surface *midground[MIDGROUND_ELEMENT_COUNT];
@@ -258,6 +291,9 @@ typedef struct {
     int fullscreen;
     int redraw_static;
     int success;
+    uint8_t key_latched[SDL_NUM_SCANCODES];
+    uint32_t last_action_key;
+    int menu_selection;
     int chapter;
     int mission;
     int wingman_health[3];
@@ -326,6 +362,31 @@ static void draw_element_layer(Game *g, SDL_Surface **elements, int count,
 static uint32_t rgb(SDL_Surface *s, uint8_t r, uint8_t g, uint8_t b)
 {
     return SDL_MapRGB(s->format, r, g, b);
+}
+
+static void present_frame(Game *g)
+{
+    SDL_Surface *dst = g->window_surface;
+    SDL_Rect dest;
+    uint32_t black;
+    if (!dst) {
+        dst = SDL_GetWindowSurface(g->window);
+        g->window_surface = dst;
+    }
+    if (!dst) return;
+    black = SDL_MapRGB(dst->format, 0, 0, 0);
+    SDL_FillRect(dst, NULL, black);
+    if (dst->w * SCREEN_H < dst->h * SCREEN_W) {
+        dest.w = dst->w;
+        dest.h = dst->w * SCREEN_H / SCREEN_W;
+    } else {
+        dest.h = dst->h;
+        dest.w = dst->h * SCREEN_W / SCREEN_H;
+    }
+    dest.x = (dst->w - dest.w) / 2;
+    dest.y = (dst->h - dest.h) / 2;
+    SDL_BlitScaled(g->screen, NULL, dst, &dest);
+    SDL_UpdateWindowSurface(g->window);
 }
 
 static void rect(SDL_Surface *s, int x, int y, int w, int h, uint32_t c)
@@ -598,14 +659,39 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     AudioState *a = (AudioState *)userdata;
     int16_t *out = (int16_t *)stream;
     int frames = len / (int)(sizeof(int16_t) * 2);
-    static const int chords[8][3] = {
-        {0,3,7}, {-2,3,7}, {-4,0,5}, {-5,-2,3},
-        {0,3,7}, {2,5,9}, {-4,0,5}, {-2,3,7}
+    static const int mood_chords[4][8][3] = {
+        { /* Reconnaissance: measured, curious, unresolved. */
+            {0,4,7}, {-2,2,7}, {-4,0,5}, {-2,2,5},
+            {0,4,7}, {2,5,9}, {-2,2,7}, {-5,0,4}
+        },
+        { /* Tension: minor movement without a triumphant cadence. */
+            {0,3,7}, {1,4,8}, {-1,2,6}, {-2,1,5},
+            {0,3,7}, {-3,0,5}, {-1,2,6}, {-2,1,5}
+        },
+        { /* Mourning: a restrained descending field-hospital cue. */
+            {0,3,7}, {-2,1,5}, {-4,0,3}, {-5,-2,2},
+            {-4,0,3}, {-2,1,5}, {-5,-2,2}, {-7,-4,0}
+        },
+        { /* Armistice: slow open intervals and room for silence. */
+            {0,5,7}, {-5,0,4}, {-2,5,7}, {0,4,7},
+            {-5,0,4}, {-2,2,7}, {0,5,9}, {0,4,7}
+        }
     };
+    static const int mess_melody[32] = {
+         7,  7,  9, 11, 12, 11,  9,  7,
+         4,  4,  7,  9, 11,  9,  7,  4,
+         0,  4,  7, 12, 11,  9,  7,  4,
+         2,  5,  9,  7,  4,  2,  0,  0
+    };
+    static const int mess_bass[8] = {0, 7, 5, 7, 0, 4, 5, 7};
     int i;
     for (i = 0; i < frames; ++i) {
         float t = (float)a->sample_clock / 11025.0f;
-        int beat = (int)(t * 2.2f);
+        int mood_index = a->music_mood - MUSIC_RECON;
+        float tempo = a->music_mood == MUSIC_TENSION ? 2.05f :
+                      a->music_mood == MUSIC_MOURNING ? 0.92f :
+                      a->music_mood == MUSIC_ARMISTICE ? 0.68f : 1.38f;
+        int beat = (int)(t * tempo);
         int bar = (beat / 4) & 7;
         float pad = 0.0f, bass, melody, drums = 0.0f, sample;
         int v;
@@ -620,8 +706,12 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             engine_hz = 46.0f + speed * 38.0f + a->engine_load * 7.0f;
             a->engine_phase += engine_hz / 11025.0f;
             if (a->engine_phase >= 1.0f) a->engine_phase -= 1.0f;
+            a->engine_sub_phase += engine_hz * 0.5f / 11025.0f;
+            if (a->engine_sub_phase >= 1.0f) a->engine_sub_phase -= 1.0f;
             sample = triangle_wave(a->engine_phase) * (0.17f + speed * 0.09f);
-            sample += sinf(2.0f * (float)M_PI * a->engine_phase * 0.5f) * 0.11f;
+            /* This must have its own continuous phase. Deriving a half-cycle
+             * from engine_phase inverted its slope at every wrap: the tick. */
+            sample += sinf(2.0f * (float)M_PI * a->engine_sub_phase) * 0.11f;
             sample += noise_sample * (0.012f + speed * 0.035f); /* slipstream */
             if (a->other_engine > 0.001f) {
                 float hz = 53.0f + a->other_pitch * 31.0f;
@@ -635,35 +725,73 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 sample += triangle_wave(a->vehicle_phase) *
                           a->vehicle_engine * 0.13f;
             }
-        } else if (a->music_data && a->music_len >= 4) {
+        } else if (a->music_mood == MUSIC_MARCH &&
+                   a->music_data && a->music_len >= 4) {
+            uint32_t total_frames = a->music_len / 4;
+            uint32_t frame = a->music_pos / 4;
+            uint32_t fade_frames = total_frames > 8192 ? 2048 : total_frames / 4;
             int16_t *music = (int16_t *)(a->music_data + a->music_pos);
-            float gain = a->scene == SCENE_SORTIE ? 0.64f : 0.48f;
-            sample = ((float)music[0] + (float)music[1]) / 65536.0f * gain;
+            float music_sample = ((float)music[0] + (float)music[1]) / 65536.0f;
+            if (fade_frames > 0 && frame >= total_frames - fade_frames) {
+                uint32_t intro_frame = frame - (total_frames - fade_frames);
+                int16_t *intro = (int16_t *)(a->music_data + intro_frame * 4);
+                float intro_sample = ((float)intro[0] + (float)intro[1]) / 65536.0f;
+                float crossfade = (float)intro_frame / (float)fade_frames;
+                music_sample = music_sample * (1.0f - crossfade) +
+                               intro_sample * crossfade;
+            }
+            sample = music_sample * 0.48f;
             a->music_pos += 4;
             if (a->music_pos + 4 > a->music_len) a->music_pos = 0;
+        } else if (a->music_mood == MUSIC_MESS) {
+            /* An original, jaunty 1910s mess-hall tune: clipped brass melody
+             * over an oom-pah bass.  Shellac colour is applied below without
+             * artificial record clicks, which would mask transport faults. */
+            float position = t * 4.35f;
+            int step = (int)position & 31;
+            int bass_step = ((int)(position * 0.5f)) & 7;
+            float melody_hz = note_hz(mess_melody[step] + 7);
+            float bass_hz = note_hz(mess_bass[bass_step] - 17);
+            float beat_phase = position - floorf(position);
+            float phrase = 0.72f + 0.28f *
+                           sinf((float)M_PI * beat_phase);
+            a->synth_phase[4] += melody_hz / 11025.0f;
+            a->synth_phase[3] += bass_hz / 11025.0f;
+            if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
+            if (a->synth_phase[3] >= 1.0f) a->synth_phase[3] -= 1.0f;
+            sample = (sinf(2.0f * (float)M_PI * a->synth_phase[4]) * 0.14f +
+                      triangle_wave(a->synth_phase[4]) * 0.055f) * phrase;
+            sample += triangle_wave(a->synth_phase[3]) * 0.105f;
         } else {
+            if (mood_index < 0 || mood_index > 3) mood_index = 0;
             for (v = 0; v < 3; ++v) {
-                float f = note_hz(chords[bar][v]);
-                pad += triangle_wave(t * f) * 0.085f;
+                float f = note_hz(mood_chords[mood_index][bar][v]);
+                a->synth_phase[v] += f / 11025.0f;
+                if (a->synth_phase[v] >= 1.0f) a->synth_phase[v] -= 1.0f;
+                pad += triangle_wave(a->synth_phase[v]) * 0.072f;
             }
-            bass = triangle_wave(t * note_hz(chords[bar][0] - 12)) * 0.16f;
-            melody = sinf(2.0f * (float)M_PI * t *
-                          note_hz(chords[bar][(beat / 2) % 3] + 12)) * 0.09f;
-            if ((beat & 1) == 0 && fmodf(t * 2.2f, 1.0f) < 0.09f)
+            {
+                float bass_hz = note_hz(mood_chords[mood_index][bar][0] - 12);
+                float melody_hz = note_hz(
+                    mood_chords[mood_index][bar][(beat / 2) % 3] + 12);
+                a->synth_phase[3] += bass_hz / 11025.0f;
+                a->synth_phase[4] += melody_hz / 11025.0f;
+                if (a->synth_phase[3] >= 1.0f) a->synth_phase[3] -= 1.0f;
+                if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
+            }
+            bass = triangle_wave(a->synth_phase[3]) * 0.13f;
+            melody = sinf(2.0f * (float)M_PI * a->synth_phase[4]) * 0.07f;
+            if (a->music_mood == MUSIC_TENSION && (beat & 1) == 0 &&
+                fmodf(t * tempo, 1.0f) < 0.09f)
                 drums = ((float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f) * 0.08f;
-            if (a->scene == SCENE_TITLE)
-                sample = pad + bass * 0.45f + melody * 0.35f;
-            else if (a->scene == SCENE_STORY || a->scene == SCENE_BRIEFING ||
-                     a->scene == SCENE_EPILOGUE)
-                sample = pad * 0.75f + bass * 0.35f;
-            else
-                sample = pad * 0.65f + bass + melody + drums;
+            sample = pad * (a->music_mood == MUSIC_ARMISTICE ? 0.48f : 0.72f) +
+                     bass * 0.42f + melody * 0.36f + drums;
         }
 
         /* A two-step field-drum line makes the gramophone recording read as
          * a military march. Every hit starts and ends at zero amplitude: the
          * old global-phase bass waveform produced a small click per beat. */
-        if (a->scene != SCENE_SORTIE) {
+        if (a->scene != SCENE_SORTIE && a->music_mood == MUSIC_MARCH) {
             float march = t * 2.18f;
             float phase = march - floorf(march);
             int march_beat = (int)march;
@@ -681,6 +809,18 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                             * env * 0.19f;
                 }
             }
+        }
+        if (a->scene != SCENE_SORTIE) {
+            /* Narrow-band acoustic horn / shellac response.  This is a
+             * continuous filter plus a low bed of surface hiss—not clicks. */
+            float filtered;
+            float hiss = (float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f;
+            a->gramophone_lp += 0.22f * (sample - a->gramophone_lp);
+            filtered = a->gramophone_lp;
+            a->gramophone_hp = 0.985f *
+                (a->gramophone_hp + filtered - a->gramophone_previous);
+            a->gramophone_previous = filtered;
+            sample = a->gramophone_hp * 1.12f + hiss * 0.0045f;
         }
         if (a->shot > 0) {
             int gun_phase = a->shot % 540;
@@ -708,6 +848,22 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     }
 }
 
+static int music_mood_for_scene(const Game *g, Scene scene)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    if (scene == SCENE_TITLE || scene == SCENE_MENU) return MUSIC_MARCH;
+    if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
+    if (scene == SCENE_DEBRIEF)
+        return g->success ? MUSIC_MESS : MUSIC_MOURNING;
+    if (scene == SCENE_SORTIE)
+        return MUSIC_TENSION; /* Muted: player-controlled scenes never score. */
+    if (g->chapter == CHAPTER_COUNT - 1 && g->mission >= 6)
+        return MUSIC_ARMISTICE;
+    if (mode == MISSION_DOGFIGHT_3D || g->chapter >= 2)
+        return MUSIC_TENSION;
+    return MUSIC_RECON;
+}
+
 static void set_scene(Game *g, Scene scene)
 {
     g->scene = scene;
@@ -716,6 +872,8 @@ static void set_scene(Game *g, Scene scene)
     if (g->audio.device) {
         SDL_LockAudioDevice(g->audio.device);
         g->audio.scene = scene;
+        g->audio.music_mood = music_mood_for_scene(g, scene);
+        if (scene == SCENE_TITLE) g->audio.music_pos = 0;
         SDL_UnlockAudioDevice(g->audio.device);
     }
 }
@@ -767,7 +925,7 @@ static void draw_plane(Game *g, int x, int y, int enemy, int pitch_frame)
 
 static int terrain_y(float world_x)
 {
-    return 318 + (int)(8.0f * sinf(world_x * 0.007f)
+    return 358 + (int)(8.0f * sinf(world_x * 0.007f)
                      + 4.0f * sinf(world_x * 0.019f));
 }
 
@@ -789,7 +947,7 @@ static void reset_sortie(Game *g)
     const Chapter *chapter = &chapters[g->chapter];
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     g->player_x = 150.0f;
-    g->player_y = 225.0f;
+    g->player_y = 265.0f;
     g->player_vy = 0.0f;
     g->airspeed = 98.0f;
     g->scroll = 0.0f;
@@ -822,6 +980,8 @@ static void reset_sortie(Game *g)
                                i < chapter->target_count;
         g->targets[i].type = g->chapter == 0 ? 0 : i & 1;
         g->targets[i].last_shot = 0;
+        g->targets[i].next_round = 0;
+        g->targets[i].burst_left = 0;
     }
 }
 
@@ -866,6 +1026,24 @@ static void aimed_fire(Game *g, float x, float y, float speed, int type)
         if (type == 2) g->audio.blast = 5200;
         else g->audio.shot = 1700;
     }
+}
+
+static void artillery_fire(Game *g, Target *target, float x, float y,
+                           uint32_t now)
+{
+    const float gravity = 92.0f;
+    const float flight_time = 1.65f;
+    uint32_t seed = scene_hash((uint32_t)target->world_x ^ now ^
+                               (uint32_t)(g->chapter + 1) * 2654435761u);
+    float error_x = ((float)(seed & 255u) - 127.0f) * 0.34f;
+    float error_y = ((float)((seed >> 8) & 255u) - 127.0f) * 0.18f;
+    float aim_x = g->player_x + error_x;
+    float aim_y = g->player_y + error_y;
+    float vx = (aim_x - x) / flight_time;
+    float vy = (aim_y - y - 0.5f * gravity * flight_time * flight_time) /
+               flight_time;
+    if (new_bullet(g, x, y, vx, vy, 1, 2, flight_time + 0.08f))
+        g->audio.blast = 2600;
 }
 
 static void fire(Game *g)
@@ -936,6 +1114,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];
         if (b->type == 1) b->vy += 105.0f * dt;
+        if (b->type == 2) b->vy += 92.0f * dt;
         b->x += b->vx * dt;
         b->y += b->vy * dt;
         b->life -= dt;
@@ -943,7 +1122,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
             float dx = b->x - g->player_x;
             float dy = b->y - g->player_y;
             float distance = sqrtf(dx * dx + dy * dy);
-            if (distance < 52.0f || b->life < 0.65f) {
+            if (distance < 42.0f || b->life < 0.08f) {
                 new_explosion(g, b->x, b->y, 1);
                 if (distance < 82.0f && now - g->last_damage > 260u) {
                     int damage = distance < 42.0f ? 16 : 9;
@@ -1016,12 +1195,28 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         float sx = g->targets[i].world_x - g->scroll;
         int ty = terrain_y(g->targets[i].world_x) - 12;
-        uint32_t interval = g->targets[i].type ? 1850u : 1020u;
-        if (sx > 20.0f && sx < SCREEN_W - 10.0f &&
-            now - g->targets[i].last_shot > interval + (uint32_t)(i * 61 % 330)) {
-            aimed_fire(g, sx, (float)ty, g->targets[i].type ? 155.0f : 235.0f,
-                       g->targets[i].type ? 2 : 0);
-            g->targets[i].last_shot = now;
+        Target *target = &g->targets[i];
+        if (sx > 20.0f && sx < SCREEN_W - 10.0f) {
+            if (target->type) {
+                if (now - target->last_shot > 2850u + (uint32_t)(i * 83 % 520)) {
+                    artillery_fire(g, target, sx, (float)ty - 38.0f, now);
+                    target->last_shot = now;
+                }
+            } else {
+                /* A ground Vickers fires six-round bursts at about 11 rps.
+                 * Its mounting cannot track an aircraft above this elevation. */
+                if (target->burst_left > 0 && now >= target->next_round) {
+                    aimed_fire(g, sx + 34.0f, (float)ty - 18.0f, 270.0f, 0);
+                    --target->burst_left;
+                    target->next_round = now + 90u;
+                    if (!target->burst_left) target->last_shot = now;
+                } else if (!target->burst_left && g->player_y > 145.0f &&
+                           now - target->last_shot >
+                           2050u + (uint32_t)(i * 61 % 420)) {
+                    target->burst_left = 6;
+                    target->next_round = now;
+                }
+            }
         }
         for (j = 0; j < MAX_BULLETS; ++j) if (g->bullets[j].active) {
             Bullet *b = &g->bullets[j];
@@ -1049,40 +1244,96 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     }
 }
 
+static void draw_victorian_plaque(Game *g, int x, int y, int w,
+                                  const char *label, int selected)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t shadow = rgb(s, 20, 17, 14);
+    uint32_t brass = rgb(s, selected ? 219 : 166,
+                         selected ? 174 : 123,
+                         selected ? 79 : 52);
+    uint32_t enamel = rgb(s, selected ? 66 : 36,
+                          selected ? 50 : 34,
+                          selected ? 34 : 30);
+    uint32_t ink = rgb(s, selected ? 255 : 225,
+                       selected ? 230 : 199,
+                       selected ? 163 : 137);
+    int text_x = x + (w - (int)strlen(label) * 7) / 2;
+    rect(s, x + 3, y + 4, w, 30, shadow);
+    rect(s, x, y, w, 30, brass);
+    rect(s, x + 2, y + 2, w - 4, 26, enamel);
+    rect(s, x + 5, y + 5, w - 10, 20, rgb(s, 55, 41, 31));
+    circle(s, x + 8, y + 8, 2, brass);
+    circle(s, x + w - 9, y + 8, 2, brass);
+    circle(s, x + 8, y + 21, 2, brass);
+    circle(s, x + w - 9, y + 21, 2, brass);
+    typewriter_text(g, text_x, y + 9, label, 7, 11, ink);
+}
+
 static void draw_title(Game *g)
 {
     SDL_Surface *s = g->screen;
     const char *title = "CANVAS SKIES";
     uint32_t now = SDL_GetTicks();
     int i;
-    if (g->title) SDL_BlitScaled(g->title, NULL, s, NULL);
-    else rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 20, 31, 48));
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 20, 31, 48));
+    if (g->title) SDL_BlitSurface(g->title, NULL, s, NULL);
     blend_rect(s, 0, 0, 640, 112, 5, 12, 24, 112);
-    blend_rect(s, 0, 300, 640, 60, 5, 10, 18, 150);
-    /* A canvas squadron pennant whose cloth and lettering share the same
-     * travelling wind wave. The campaign dates belong inside the story. */
-    for (i = 0; i < 506; ++i) {
-        float phase = (float)i * 0.031f + (float)now * 0.0042f;
-        int wave = (int)(4.0f * sinf(phase) + 2.0f * sinf(phase * 0.43f));
-        int shade = (int)(8.0f * sinf(phase + 0.8f));
-        uint32_t cloth = rgb(s, (uint8_t)(202 + shade),
-                            (uint8_t)(181 + shade),
-                            (uint8_t)(132 + shade / 2));
-        rect(s, 18 + i, 17 + wave, 1, 63, cloth);
-        pixel(s, 18 + i, 17 + wave, rgb(s, 75, 55, 34));
-        pixel(s, 18 + i, 79 + wave, rgb(s, 75, 55, 34));
+    blend_rect(s, 0, 300, SCREEN_W, SCREEN_H - 300, 5, 10, 18, 150);
+    /* The lettering is embroidered into the cloth asset, so the complete
+     * banner—thread, seams and fabric—moves as one wind-distorted object. */
+    if (g->title_banner) {
+        for (i = 0; i < g->title_banner->w; ++i) {
+            float phase = (float)i * 0.031f + (float)now * 0.0042f;
+            int wave = (int)(4.0f * sinf(phase) +
+                             2.0f * sinf(phase * 0.43f));
+            SDL_Rect source = {i, 0, 1, g->title_banner->h};
+            SDL_Rect dest = {18 + i, 14 + wave, 1, g->title_banner->h};
+            SDL_BlitSurface(g->title_banner, &source, s, &dest);
+        }
+    } else {
+        for (i = 0; i < 506; ++i) {
+            float phase = (float)i * 0.031f + (float)now * 0.0042f;
+            int wave = (int)(4.0f * sinf(phase) +
+                             2.0f * sinf(phase * 0.43f));
+            rect(s, 18 + i, 17 + wave, 1, 63, rgb(s, 202, 181, 132));
+        }
+        display_text(g, 52, 27, title, 36, 42, rgb(s, 46, 34, 24));
     }
-    for (i = 0; title[i]; ++i) {
-        char glyph[2] = {title[i], '\0'};
-        int gx = 52 + i * 36;
-        float phase = (float)(gx - 18) * 0.031f + (float)now * 0.0042f;
-        int wave = (int)(4.0f * sinf(phase) + 2.0f * sinf(phase * 0.43f));
-        display_text(g, gx, 27 + wave, glyph, 36, 42, rgb(s, 46, 34, 24));
-    }
-    typewriter_text(g, 40, 316, "ENTER  BEGIN CAMPAIGN", 10, 15,
-                    rgb(s, 244, 222, 165));
-    typewriter_text(g, 470, 340, "ORIGINAL PROTOTYPE", 7, 11,
+    draw_victorian_plaque(g, 30, 344, 255, "ENTER  OFFICERS' MENU", 1);
+    typewriter_text(g, 520, 380, "F10 FULL SCREEN", 7, 11,
                     rgb(s, 190, 198, 201));
+}
+
+static void draw_campaign_menu(Game *g)
+{
+    static const char *items[6] = {
+        "BEGIN FULL CAMPAIGN - AUGUST 1914",
+        "JOIN THE CONFLICT - 1914",
+        "JOIN THE CONFLICT - 1915",
+        "JOIN THE CONFLICT - 1916",
+        "JOIN THE CONFLICT - 1917",
+        "JOIN THE CONFLICT - 1918"
+    };
+    SDL_Surface *s = g->screen;
+    int i;
+    draw_title(g);
+    blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 5, 7, 10, 150);
+    rect(s, 93, 62, 454, 286, rgb(s, 24, 18, 14));
+    rect(s, 96, 59, 448, 286, rgb(s, 183, 139, 63));
+    rect(s, 100, 63, 440, 278, rgb(s, 52, 37, 27));
+    rect(s, 106, 69, 428, 266, rgb(s, 74, 51, 31));
+    circle(s, 112, 75, 4, rgb(s, 205, 161, 76));
+    circle(s, 528, 75, 4, rgb(s, 205, 161, 76));
+    circle(s, 112, 328, 4, rgb(s, 205, 161, 76));
+    circle(s, 528, 328, 4, rgb(s, 205, 161, 76));
+    display_text(g, 190, 77, "SELECT COMMISSION", 12, 18,
+                 rgb(s, 239, 215, 155));
+    typewriter_text(g, 205, 101, "UP / DOWN  CHOOSE   ENTER  ACCEPT", 7, 11,
+                    rgb(s, 191, 170, 125));
+    for (i = 0; i < 6; ++i)
+        draw_victorian_plaque(g, 128, 128 + i * 33, 384, items[i],
+                              i == g->menu_selection);
 }
 
 static void gradient(SDL_Surface *s, uint8_t r0, uint8_t g0, uint8_t b0,
@@ -1106,8 +1357,8 @@ static void draw_story(Game *g)
     char buf[48];
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
-    if (g->journal) SDL_BlitScaled(g->journal, NULL, s, NULL);
-    else gradient(s, 39, 27, 18, 88, 56, 31);
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
+    if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
     journal_text(g, 112, journal_line_y(0), "FLIGHT LOG", red);
     journal_text(g, 112, journal_line_y(2), "NEDDY SEAGOON", ink);
     journal_text(g, 112, journal_line_y(3), "ROYAL FLYING CORPS", ink);
@@ -1140,8 +1391,8 @@ static void draw_briefing(Game *g)
     char mission_line[48];
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
-    if (g->mission_board) SDL_BlitScaled(g->mission_board, NULL, s, NULL);
-    else gradient(s, 39, 27, 18, 88, 56, 31);
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
+    if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
     if (mission->mode == MISSION_TOP_DOWN) {
         order0 = "FOLLOW THE MARKED MAP GRID.";
         order1 = "OBSERVE OR BOMB THE ASSIGNED SECTOR.";
@@ -1174,11 +1425,11 @@ static void draw_briefing(Game *g)
         typewriter_text(g, 73, 237, "NO ARMAMENT FITTED", 7, 11, red);
         typewriter_text(g, 73, 253, "OBSERVE AND RETURN", 7, 11, ink);
     }
-    rect(s, 68, 304, 194, 25, rgb(s, 184, 139, 63));
-    rect(s, 70, 306, 190, 21, rgb(s, 57, 39, 27));
-    circle(s, 76, 311, 2, rgb(s, 184, 139, 63));
-    circle(s, 253, 311, 2, rgb(s, 184, 139, 63));
-    typewriter_text(g, 83, 311, "ENTER  FLY THE MISSION", 7, 11,
+    rect(s, 68, 344, 194, 25, rgb(s, 184, 139, 63));
+    rect(s, 70, 346, 190, 21, rgb(s, 57, 39, 27));
+    circle(s, 76, 351, 2, rgb(s, 184, 139, 63));
+    circle(s, 253, 351, 2, rgb(s, 184, 139, 63));
+    typewriter_text(g, 83, 351, "ENTER  FLY THE MISSION", 7, 11,
                     rgb(s, 239, 215, 155));
 }
 
@@ -1190,15 +1441,15 @@ static void draw_ground_gun(Game *g, int sx, int ty, Target *target)
     uint32_t iron = rgb(s, 45, 46, 39);
     uint32_t olive = rgb(s, 72, 75, 57);
     uint32_t sand = rgb(s, 119, 96, 66);
-    int flash = SDL_GetTicks() - target->last_shot < 90;
+    int flash = SDL_GetTicks() - target->last_shot < 180;
     if (sprite) {
         SDL_Rect dst = {sx - sprite->w / 2, ty + 12 - sprite->h, 0, 0};
         SDL_BlitSurface(sprite, NULL, s, &dst);
         if (flash) {
             if (target->type)
-                circle(s, sx + 17, ty - 52, 4, rgb(s, 255, 177, 54));
+                circle(s, sx + 20, ty - 57, 7, rgb(s, 255, 177, 54));
             else
-                circle(s, sx + 37, ty - 31, 3, rgb(s, 255, 196, 72));
+                circle(s, sx + 49, ty - 24, 6, rgb(s, 255, 210, 78));
         }
         return;
     }
@@ -1296,7 +1547,7 @@ static void draw_distant_villages(Game *g)
     int drift = (int)(g->scroll * 0.32f);
     for (i = -1; i < 6; ++i) {
         int x = i * 150 - (drift % 150);
-        int ground = 238 + (int)(12.0f * sinf((x + drift) * 0.012f));
+        int ground = 278 + (int)(12.0f * sinf((x + drift) * 0.012f));
         uint32_t silhouette = rgb(s, 61, 72, 68);
         rect(s, x + 18, ground - 18, 36, 18, silhouette);
         line(s, x + 14, ground - 18, x + 36, ground - 31, silhouette);
@@ -1370,29 +1621,45 @@ static void draw_sortie(Game *g)
     int x, i;
     uint32_t far, near, earth, wire;
     char buf[64];
-    if (g->battlefield) {
+    /* The authored panoramas remain at their native 1280x360.  The taller
+     * 640x400 playfield reveals more vertical world space without scaling
+     * any artwork: sky stays at y=0, world layers are lowered by 40 pixels. */
+    gradient(s, 46, 80, 117, 190, 168, 122);
+    if (g->sky) {
         SDL_Rect source;
-        int limit = g->battlefield->w - SCREEN_W;
-        source.x = (int)(g->scroll * 0.035f);
+        SDL_Rect dest = {0, 0, 0, 0};
+        int limit = g->sky->w - SCREEN_W;
+        source.x = (int)(g->scroll * SKY_PARALLAX);
         if (source.x < 0) source.x = 0;
         if (source.x > limit) source.x = limit;
         source.y = 0;
         source.w = SCREEN_W;
-        source.h = SCREEN_H;
-        SDL_BlitSurface(g->battlefield, &source, s, NULL);
+        source.h = g->sky->h < ART_H ? g->sky->h : ART_H;
+        SDL_BlitSurface(g->sky, &source, s, &dest);
     } else {
-        gradient(s, 46, 80, 117, 190, 168, 122);
         draw_sky_detail(g);
+    }
+    if (g->battlefield) {
+        SDL_Rect source;
+        SDL_Rect dest = {0, GAMEPLAY_Y_OFFSET, 0, 0};
+        int limit = g->battlefield->w - SCREEN_W;
+        source.x = (int)(g->scroll * HILLS_PARALLAX);
+        if (source.x < 0) source.x = 0;
+        if (source.x > limit) source.x = limit;
+        source.y = 0;
+        source.w = SCREEN_W;
+        source.h = g->battlefield->h < ART_H ? g->battlefield->h : ART_H;
+        SDL_BlitSurface(g->battlefield, &source, s, &dest);
     }
     far = rgb(s, 87, 105, 99);
     near = rgb(s, 72, 59, 46);
     earth = rgb(s, 43, 37, 31);
     wire = rgb(s, 43, 39, 34);
     draw_element_layer(g, g->midground, MIDGROUND_ELEMENT_COUNT,
-                       0.16f, 285, 285, 0x4d494431u);
+                       BUILDINGS_PARALLAX, 285, 325, 0x4d494431u);
     if (!g->battlefield) {
         for (x = 0; x < SCREEN_W; ++x) {
-            int fy = 228 + (int)(18 * sinf((x + g->scroll * 0.18f) * 0.012f));
+            int fy = 268 + (int)(18 * sinf((x + g->scroll * 0.18f) * 0.012f));
             rect(s, x, fy, 1, SCREEN_H - fy, far);
         }
         draw_distant_villages(g);
@@ -1418,17 +1685,19 @@ static void draw_sortie(Game *g)
     }
     if (g->foreground_panorama) {
         SDL_Rect source, dest;
-        int position = (int)(g->scroll * 0.52f) % g->foreground_panorama->w;
+        int position = (int)(g->scroll * FOREGROUND_PARALLAX) %
+                       g->foreground_panorama->w;
         int first = g->foreground_panorama->w - position;
         if (first > SCREEN_W) first = SCREEN_W;
         /* Cool atmospheric separation behind the darker near-ground layer. */
-        blend_rect(s, 0, 235, SCREEN_W, 90, 70, 83, 91, 34);
+        blend_rect(s, 0, 275, SCREEN_W, 125, 70, 83, 91, 34);
         source.x = position;
         source.y = 0;
         source.w = first;
-        source.h = SCREEN_H;
+        source.h = g->foreground_panorama->h < ART_H ?
+                   g->foreground_panorama->h : ART_H;
         dest.x = 0;
-        dest.y = 0;
+        dest.y = GAMEPLAY_Y_OFFSET;
         SDL_BlitSurface(g->foreground_panorama, &source, s, &dest);
         if (first < SCREEN_W) {
             source.x = 0;
@@ -1438,7 +1707,7 @@ static void draw_sortie(Game *g)
         }
     }
     draw_element_layer(g, g->near_props, NEAR_ELEMENT_COUNT,
-                       0.52f, 235, 350, 0x4e454152u);
+                       FOREGROUND_PARALLAX, 235, 390, 0x4e454152u);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         int sx = (int)(g->targets[i].world_x - g->scroll);
         if (sx > -20 && sx < SCREEN_W + 20) {
@@ -1459,12 +1728,19 @@ static void draw_sortie(Game *g)
             line(s, (int)b->x - 5, (int)b->y - 5, (int)b->x, (int)b->y,
                  rgb(s, 184, 153, 104));
         } else if (b->type == 2) {
-            circle(s, (int)b->x, (int)b->y, 4, rgb(s, 38, 34, 31));
-            circle(s, (int)b->x, (int)b->y, 2, rgb(s, 236, 119, 45));
+            int tail_x = (int)(b->x - b->vx * 0.035f);
+            int tail_y = (int)(b->y - b->vy * 0.035f);
+            line(s, tail_x, tail_y, (int)b->x, (int)b->y,
+                 rgb(s, 234, 151, 65));
+            circle(s, (int)b->x, (int)b->y, 3, rgb(s, 48, 42, 36));
+            pixel(s, (int)b->x, (int)b->y, rgb(s, 244, 202, 111));
         } else {
             uint32_t tracer = b->enemy ? rgb(s, 255, 113, 57) : rgb(s, 255, 228, 144);
-            int length = b->enemy ? 5 : 8;
-            rect(s, (int)b->x, (int)b->y, length, 2, tracer);
+            int length = b->enemy ? 11 : 9;
+            rect(s, (int)b->x - 2, (int)b->y - 1, length, 3, tracer);
+            if (b->enemy)
+                circle(s, (int)b->x + 8, (int)b->y, 2,
+                       rgb(s, 255, 229, 132));
         }
     }
     draw_explosions(g);
@@ -1498,8 +1774,8 @@ static void draw_debrief(Game *g)
     char buf[64];
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
-    if (g->mission_board) SDL_BlitScaled(g->mission_board, NULL, s, NULL);
-    else gradient(s, 39, 27, 18, 88, 56, 31);
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
+    if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
     display_text(g, 69, 48,
          g->success ? "MISSION ACCOMPLISHED" : "MISSION INCOMPLETE",
          12, 18, red);
@@ -1519,7 +1795,7 @@ static void draw_debrief(Game *g)
     display_text(g, 73, 226,
          g->success ? "THE MESS WILL HEAR." : "WE FLY AGAIN AT DAWN.",
          12, 18, red);
-    typewriter_text(g, 74, 308,
+    typewriter_text(g, 74, 348,
                     g->success ? "ENTER  CONTINUE THE CAMPAIGN" :
                                  "ENTER  FLY THE MISSION AGAIN",
                     7, 11, ink);
@@ -1530,8 +1806,8 @@ static void draw_epilogue(Game *g)
     SDL_Surface *s = g->screen;
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
-    if (g->mission_board) SDL_BlitScaled(g->mission_board, NULL, s, NULL);
-    else gradient(s, 39, 27, 18, 88, 56, 31);
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
+    if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
     display_text(g, 72, 48, "11:00 HOURS", 16, 23, red);
     display_text(g, 72, 82, "ARMISTICE", 22, 28, ink);
     typewriter_text(g, 73, 137, "THE GUNS FALL SILENT.", 7, 11, ink);
@@ -1539,7 +1815,7 @@ static void draw_epilogue(Game *g)
     typewriter_text(g, 73, 179, "THE EMPTY CHAIRS REMAIN.", 7, 11, ink);
     typewriter_text(g, 73, 221, "TOM RINGS THE FIELD BELL.", 7, 11, red);
     typewriter_text(g, 73, 242, "YOU TURN FOR HOME.", 7, 11, red);
-    typewriter_text(g, 73, 308, "ENTER  RETURN TO TITLE", 7, 11, ink);
+    typewriter_text(g, 73, 348, "ENTER  RETURN TO TITLE", 7, 11, ink);
 }
 
 static int init_audio(Game *g)
@@ -1608,14 +1884,24 @@ static int game_init(Game *g)
         fprintf(stderr, "Window creation failed: %s\n", SDL_GetError());
         return 0;
     }
-    g->screen = SDL_GetWindowSurface(g->window);
-    if (!g->screen || g->screen->format->BytesPerPixel != 4) {
-        fprintf(stderr, "Canvas Skies needs a 32-bit SDL window surface\n");
+    g->window_surface = SDL_GetWindowSurface(g->window);
+    g->screen = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32,
+                                               SDL_PIXELFORMAT_ARGB8888);
+    if (!g->window_surface || !g->screen ||
+        g->screen->format->BytesPerPixel != 4) {
+        fprintf(stderr, "Canvas Skies could not create its 32-bit framebuffer\n");
         return 0;
     }
     g->title = SDL_LoadBMP(CANVAS_TITLE_BMP);
     if (!g->title)
         fprintf(stderr, "Title art unavailable (%s): %s\n", CANVAS_TITLE_BMP, SDL_GetError());
+    g->title_banner = SDL_LoadBMP(CANVAS_TITLE_BANNER_BMP);
+    if (g->title_banner)
+        SDL_SetColorKey(g->title_banner, SDL_TRUE,
+                        SDL_MapRGB(g->title_banner->format, 255, 0, 255));
+    else
+        fprintf(stderr, "Stitched title banner unavailable (%s): %s\n",
+                CANVAS_TITLE_BANNER_BMP, SDL_GetError());
     g->mission_board = SDL_LoadBMP(CANVAS_BOARD_BMP);
     if (!g->mission_board)
         fprintf(stderr, "Mission board unavailable (%s): %s\n",
@@ -1624,6 +1910,17 @@ static int game_init(Game *g)
     if (!g->journal)
         fprintf(stderr, "Journal art unavailable (%s): %s\n",
                 CANVAS_JOURNAL_BMP, SDL_GetError());
+    g->sky = SDL_LoadBMP(CANVAS_SKY_BMP);
+    if (g->sky) {
+        SDL_Surface *converted = SDL_ConvertSurface(g->sky, g->screen->format, 0);
+        if (converted) {
+            SDL_FreeSurface(g->sky);
+            g->sky = converted;
+        }
+    } else {
+        fprintf(stderr, "Sky panorama unavailable (%s): %s\n",
+                CANVAS_SKY_BMP, SDL_GetError());
+    }
     g->battlefield = SDL_LoadBMP(CANVAS_BATTLEFIELD_BMP);
     if (g->battlefield) {
         SDL_Surface *converted = SDL_ConvertSurface(g->battlefield,
@@ -1632,6 +1929,8 @@ static int game_init(Game *g)
             SDL_FreeSurface(g->battlefield);
             g->battlefield = converted;
         }
+        SDL_SetColorKey(g->battlefield, SDL_TRUE,
+                        SDL_MapRGB(g->battlefield->format, 255, 0, 255));
     } else {
         fprintf(stderr, "Battlefield panorama unavailable (%s): %s\n",
                 CANVAS_BATTLEFIELD_BMP, SDL_GetError());
@@ -1706,29 +2005,68 @@ static int game_init(Game *g)
 
 static void handle_event(Game *g, SDL_Event *ev)
 {
+    SDL_Scancode scancode;
     if (ev->type == SDL_QUIT) g->running = 0;
     if (ev->type == SDL_WINDOWEVENT &&
         (ev->window.event == SDL_WINDOWEVENT_EXPOSED ||
-         ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+         ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
+        g->window_surface = SDL_GetWindowSurface(g->window);
         g->redraw_static = 1;
-    if (ev->type != SDL_KEYDOWN || ev->key.repeat) return;
+    }
+    if (ev->type == SDL_KEYUP) {
+        scancode = ev->key.keysym.scancode;
+        if (scancode >= 0 && scancode < SDL_NUM_SCANCODES)
+            g->key_latched[scancode] = 0;
+        return;
+    }
+    if (ev->type != SDL_KEYDOWN) return;
+    scancode = ev->key.keysym.scancode;
+    /* SDL2.module may report host-generated repeats with repeat == 0.  Latch
+     * menu/action keys until their physical key-up so one Enter cannot skip
+     * the commission board, journal and briefing in a single press. */
+    if (scancode >= 0 && scancode < SDL_NUM_SCANCODES) {
+        if (g->key_latched[scancode]) return;
+        g->key_latched[scancode] = 1;
+    }
+    if ((ev->key.keysym.sym == SDLK_RETURN ||
+         ev->key.keysym.sym == SDLK_KP_ENTER) &&
+        g->last_action_key && SDL_GetTicks() - g->last_action_key < 450u)
+        return;
     switch (ev->key.keysym.sym) {
     case SDLK_F10:
         g->fullscreen = !g->fullscreen;
         SDL_SetWindowFullscreen(g->window,
             g->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-        g->screen = SDL_GetWindowSurface(g->window);
+        g->window_surface = SDL_GetWindowSurface(g->window);
         g->redraw_static = 1;
         break;
     case SDLK_ESCAPE:
         if (g->scene == SCENE_TITLE) g->running = 0;
         else set_scene(g, SCENE_TITLE);
         break;
+    case SDLK_UP:
+        if (g->scene == SCENE_MENU) {
+            g->menu_selection = (g->menu_selection + 5) % 6;
+            g->redraw_static = 1;
+        }
+        break;
+    case SDLK_DOWN:
+        if (g->scene == SCENE_MENU) {
+            g->menu_selection = (g->menu_selection + 1) % 6;
+            g->redraw_static = 1;
+        }
+        break;
     case SDLK_RETURN:
     case SDLK_KP_ENTER:
+        g->last_action_key = SDL_GetTicks();
         if (g->scene == SCENE_TITLE) {
+            g->menu_selection = 0;
+            set_scene(g, SCENE_MENU);
+        }
+        else if (g->scene == SCENE_MENU) {
+            static const int start_chapter[6] = {0, 0, 1, 2, 3, 5};
             int pilot;
-            g->chapter = 0;
+            g->chapter = start_chapter[g->menu_selection];
             g->mission = 0;
             for (pilot = 0; pilot < 3; ++pilot) g->wingman_health[pilot] = 100;
             set_scene(g, SCENE_STORY);
@@ -1775,11 +2113,13 @@ int main(int argc, char **argv)
         if (dt > 0.05f) dt = 0.05f;
         keys = SDL_GetKeyboardState(NULL);
         if (g.scene == SCENE_SORTIE) update_sortie(&g, dt, keys);
-        if (g.scene == SCENE_TITLE || g.scene == SCENE_SORTIE ||
+        if (g.scene == SCENE_TITLE || g.scene == SCENE_MENU ||
+            g.scene == SCENE_SORTIE ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
             case SCENE_TITLE: draw_title(&g); break;
+            case SCENE_MENU: draw_campaign_menu(&g); break;
             case SCENE_STORY: draw_story(&g); break;
             case SCENE_BRIEFING: draw_briefing(&g); break;
             case SCENE_SORTIE: draw_sortie(&g); break;
@@ -1787,15 +2127,17 @@ int main(int argc, char **argv)
             case SCENE_EPILOGUE: draw_epilogue(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
-            SDL_UpdateWindowSurface(g.window);
+            present_frame(&g);
             g.redraw_static = 0;
         }
         SDL_Delay(8);
     }
     if (g.audio.device) SDL_CloseAudioDevice(g.audio.device);
     if (g.title) SDL_FreeSurface(g.title);
+    if (g.title_banner) SDL_FreeSurface(g.title_banner);
     if (g.mission_board) SDL_FreeSurface(g.mission_board);
     if (g.journal) SDL_FreeSurface(g.journal);
+    if (g.sky) SDL_FreeSurface(g.sky);
     if (g.battlefield) SDL_FreeSurface(g.battlefield);
     if (g.foreground_panorama) SDL_FreeSurface(g.foreground_panorama);
     {
@@ -1817,6 +2159,7 @@ int main(int argc, char **argv)
     if (g.player_sprites) SDL_FreeSurface(g.player_sprites);
     if (g.enemy_sprites) SDL_FreeSurface(g.enemy_sprites);
     if (g.audio.music_data) SDL_free(g.audio.music_data);
+    if (g.screen) SDL_FreeSurface(g.screen);
     SDL_DestroyWindow(g.window);
     SDL_Quit();
     return 0;

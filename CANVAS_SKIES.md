@@ -17,7 +17,11 @@ The first vertical slice contains:
   Thyne and Bluebottle against increasingly capable enemy formations. The
   opening side-on mission is playable in this vertical slice; the dedicated
   top-down and 3D gameplay/rendering loops remain to be built;
-- an original painted title screen;
+- an original painted title screen with an animated field-made canvas banner;
+  its lettering is visibly embroidered into the cloth rather than overlaid as
+  a font, so the seams, thread and fabric ripple together. A brass Victorian
+  plaque opens an overlaid commission board for the full campaign or a direct
+  1914, 1915, 1916, 1917 or 1918 starting year;
 - period serif display and field-typewriter faces, each rasterised into a
   separate atlas at every final pixel size and copied 1:1 with no run-time
   font scaling. The display face is Noto Serif Display; the field face is
@@ -25,6 +29,10 @@ The first vertical slice contains:
 - squadron briefing and debriefing screens;
 - a continuous side-on, Scramble-style mission with fuel, airframe damage,
   armed fighters, machine-gun nests, anti-aircraft guns and ground objectives;
+- distinct ground-fire models: Vickers emplacements fire short rate-limited
+  tracer bursts and cannot track above their mount's elevation ceiling, while
+  artillery launches deliberately inaccurate ballistic shells which arc and
+  detonate;
 - proximity-fused flak bursts, visible progressive airframe smoke/flame and
   a wide parallax battlefield panorama with ruined villages, church tower,
   shell holes, trenches, waterlogged earth and layered dawn haze;
@@ -34,23 +42,32 @@ The first vertical slice contains:
   sound envelopes;
 - music only outside missions; gameplay switches to a continuous-phase engine
   and slipstream sound driven by airspeed and climb/dive load, with channels
-  reserved for relative aircraft and real vehicle movement;
+  reserved for relative aircraft and real vehicle movement. Successful
+  debriefs use a separate jaunty 1910s mess-hall cue through a continuous
+  narrow-band gramophone filter with surface hiss but no artificial clicks;
 - wooden-and-brass squadron boards and separate field-instrument placards;
-- a deterministic modular battlefield composer: distant hills scroll at 3.5%
-  of flight speed, ruined farms, churches, poplars, smoke, telegraph poles and
-  walls at 16%, and trenches, craters, wire, roads and blasted trees at 52%.
+- a deterministic four-plane battlefield composer: the sky drifts at 0.8% of
+  flight speed, distant hills at 5.5%, ruined farms, churches, poplars, smoke,
+  telegraph poles and walls at 22%, and the playable foreground—trenches,
+  craters, wire, roads, blasted trees, guns and bullets—at the full 100% world
+  rate. This keeps collisions and visible scenery in the same coordinate space.
   The same chapter and mission always rebuild the same landscape while later
   missions can select different arrangements; interactive gun emplacements
   remain separately anchored in gameplay space;
+- a fixed 640x400 logical canvas in both windowed and F10 full-screen modes;
+  presentation is aspect-fitted with black bars where required, never
+  stretched to the host display;
 - keyboard flight controls and an F10 full-screen test toggle.
 
 ## Controls
 
 - Arrow keys: move the aircraft in all four directions
+- On the title campaign board, Up/Down selects the full campaign or a 1914,
+  1915, 1916, 1917 or 1918 starting commission
 - X: increase throttle
 - Z: reduce throttle
 - Space: fire
-- Enter: advance through title, briefing and debriefing
+- Enter: open/accept the campaign board and advance through story screens
 - F10: toggle full screen
 - Escape: return to title; Escape again exits
 
@@ -73,6 +90,11 @@ composition is public domain. The MIDI transcription is by Renato Biolcati
 Rinaldi via Mutopia (CC BY-SA 3.0); this project renders and processes it into
 an intentionally narrow-band, shellac-era recording. Full credits are in
 `assets/canvas-skies/MUSIC_LICENSE.md`.
+
+Music is selected by dramatic context rather than by player control: journals,
+briefings, debriefs and chapter transitions use march, reconnaissance, tension,
+mourning or Armistice cues. Every player-controlled mission is deliberately
+unscored; only engine, wind, aircraft, vehicle, gun and artillery sound remains.
 
 The title painting is original generated artwork created for this project. No
 artwork, music, branding or story material from Cinemaware's *Wings* is used.

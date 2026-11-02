@@ -9,9 +9,11 @@ HDR := src/modern/canvas_campaign.h
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
 	-DCANVAS_TITLE_BMP=\"PROGDIR:assets/canvas-skies/title.bmp\" \
+	-DCANVAS_TITLE_BANNER_BMP=\"PROGDIR:assets/canvas-skies/title-banner.bmp\" \
 	-DCANVAS_BOARD_BMP=\"PROGDIR:assets/canvas-skies/mission-board-v2.bmp\" \
 	-DCANVAS_JOURNAL_BMP=\"PROGDIR:assets/canvas-skies/journal.bmp\" \
-	-DCANVAS_BATTLEFIELD_BMP=\"PROGDIR:assets/canvas-skies/far-hills.bmp\" \
+	-DCANVAS_SKY_BMP=\"PROGDIR:assets/canvas-skies/sky.bmp\" \
+	-DCANVAS_BATTLEFIELD_BMP=\"PROGDIR:assets/canvas-skies/hills.bmp\" \
 	-DCANVAS_FOREGROUND_BMP=\"PROGDIR:assets/canvas-skies/foreground-panorama.bmp\" \
 	-DCANVAS_MID_FARM_BMP=\"PROGDIR:assets/canvas-skies/mid-farm.bmp\" \
 	-DCANVAS_MID_CHURCH_BMP=\"PROGDIR:assets/canvas-skies/mid-church.bmp\" \
