@@ -6,7 +6,7 @@ the existing SDL2/OpenGPU module and a CPU-authoritative 32-bit window surface.
 
 The first vertical slice contains:
 
-- an eight-chapter, 96-mission chronological campaign beginning with unarmed
+- an eight-chapter, 96-mission chronological campaign beginning with basic
   observation in August 1914 and ending at 11:00 on Armistice Day;
 - a continuous first-person story lived by pilot Neddy Seagoon: every mission
   opens on his physical journal, followed by formal General Headquarters
@@ -65,7 +65,19 @@ The first vertical slice contains:
   dogfight with fixed Vickers sight, bank/pitch/throttle and allied formation,
   and a separate two-seat defensive-gunner view with a traversable Scarff ring;
 - original painted top-down Western Front terrain, RFC overhead aircraft,
-  dawn battlefield perspective and separate pilot/gunner cockpit overlays.
+  dawn battlefield perspective and separate pilot/gunner cockpit overlays;
+- a rear-gunner Scarff-ring presenter built from a clean static cockpit rail
+  and a separate 25-pose, angle-redrawn twin Lewis-gun carriage. The complete
+  yoke travels around the rail, elevation never lifts its carriage, and exact
+  chroma-key cleanup prevents magenta edge contamination;
+- pilot bank and pitch move and shear the perspective horizon behind the
+  fixed cockpit. Enemy aircraft close toward the camera using head-on art and
+  varied approach rates before crossing the sight;
+- terrain impacts are retained in mission-world coordinates. Top-down blasts
+  advance with the vertically scrolling map and side-on blasts move with the
+  horizontal landscape rather than remaining attached to the player or screen;
+- irregular lantern animation on briefing/debrief boards, with the same warm
+  flicker reflected in both hanging goggle lenses on the opposite side.
 
 ## Controls
 
@@ -91,8 +103,9 @@ The executable is written to `build-canvas-skies/CanvasSkies`. It expects the
 `assets/canvas-skies/title.bmp`.
 
 For hardware QA without changing campaign progression, launch `CanvasSkies
-TOPDOWN`, `CanvasSkies DOGFIGHT` or `CanvasSkies GUNNER` to enter each alternate
-renderer directly. A normal launch always opens the title and commission board.
+SIDE`, `CanvasSkies TOPDOWN`, `CanvasSkies DOGFIGHT`, `CanvasSkies GUNNER` or
+`CanvasSkies DEBRIEF` to enter each renderer directly. A normal launch always
+opens the title and commission board.
 
 `ports/amigaos3/package` contains a clearly labelled IconX launcher and an
 original GlowIcon for the game drawer. Put `Drawer.info` beside the installed
