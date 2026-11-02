@@ -1,0 +1,28 @@
+AMIGA_STOVE ?= $(HOME)/AmiCradle/stoves/os32-gcc16
+PREFIX := $(AMIGA_STOVE)/prefix
+SYSROOT := $(PREFIX)/m68k-amigaos
+CC := $(PREFIX)/bin/m68k-amigaos-gcc
+OUT := build-canvas-skies/CanvasSkies
+SRC := src/modern/canvas_skies.c
+
+CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
+	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
+	-DCANVAS_TITLE_BMP=\"PROGDIR:assets/canvas-skies/title.bmp\" \
+	-DCANVAS_DISPLAY_FONT_BMP=\"PROGDIR:assets/canvas-skies/font-display.bmp\" \
+	-DCANVAS_TYPEWRITER_FONT_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter.bmp\" \
+	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
+	-DCANVAS_ENEMY_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy.bmp\" \
+	-DCANVAS_MARCH_WAV=\"PROGDIR:assets/canvas-skies/washington-post-gramophone.wav\"
+LDFLAGS := -m68040 -m68881 -noixemul -L$(SYSROOT)/lib
+LDLIBS := -lSDL2 -lm -lamiga
+
+.PHONY: all clean
+
+all: $(OUT)
+
+$(OUT): $(SRC)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
+
+clean:
+	rm -rf build-canvas-skies
