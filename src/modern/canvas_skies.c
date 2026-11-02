@@ -325,6 +325,7 @@ typedef struct {
     volatile int scene;
     volatile int shot;
     volatile int blast;
+    volatile int crash;
     volatile float engine_speed;
     volatile float engine_load;
     volatile float other_engine;
@@ -424,6 +425,7 @@ typedef struct {
     uint32_t last_shot;
     uint32_t last_bomb;
     uint32_t last_damage;
+    uint32_t mission_clear_at;
     Bullet bullets[MAX_BULLETS];
     Explosion explosions[MAX_EXPLOSIONS];
     Enemy enemies[MAX_ENEMIES];
@@ -1105,6 +1107,21 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             sample += roar * env * 0.31f;
             --a->blast;
         }
+        if (a->crash > 0) {
+            int elapsed = 7200 - a->crash;
+            float env = (float)a->crash / 7200.0f;
+            float wreck = (float)((a->noise >> 14) & 0x3ffff) /
+                          131072.0f - 1.0f;
+            float impact = elapsed < 520 ?
+                           (float)(520 - elapsed) / 520.0f : 0.0f;
+            /* Ground impact: a short timber/metal crack followed by a low
+             * airframe collapse and rough sliding tail. */
+            sample += sinf(2.0f * (float)M_PI * t * 34.0f) * env * env * 0.43f;
+            sample += wreck * (env * 0.24f + impact * 0.34f);
+            if (elapsed < 180)
+                sample += ((elapsed & 24) ? 0.28f : -0.24f) * impact;
+            --a->crash;
+        }
         if (sample > 1.0f) sample = 1.0f;
         if (sample < -1.0f) sample = -1.0f;
         out[i * 2] = (int16_t)(sample * 18000.0f);
@@ -1284,6 +1301,7 @@ static void reset_sortie(Game *g)
     g->last_shot = 0;
     g->last_bomb = 0;
     g->last_damage = 0;
+    g->mission_clear_at = 0;
     memset(g->bullets, 0, sizeof(g->bullets));
     memset(g->explosions, 0, sizeof(g->explosions));
     memset(g->bullet_holes, 0, sizeof(g->bullet_holes));
@@ -1293,6 +1311,7 @@ static void reset_sortie(Game *g)
     g->audio.other_engine = 0.0f;
     g->audio.other_pitch = 0.0f;
     g->audio.vehicle_engine = 0.0f;
+    g->audio.crash = 0;
     perspective_enemy_count = chapter->enemy_count;
     if (mode == MISSION_GUNNER_3D && perspective_enemy_count > 2)
         perspective_enemy_count = 2;
@@ -2240,6 +2259,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     float aileron_command = 0.0f;
     float elevator_command = 0.0f;
     Vec3 position;
+    age_explosions(g, dt);
     if (g->flight_crashed) {
         g->audio.engine_speed = 0.0f;
         g->audio.engine_load = 0.0f;
@@ -2333,8 +2353,19 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             enemy->world_y += enemy->vy * dt;
             enemy->world_x += sinf(enemy->heading) * enemy->speed * 0.42f * dt;
             enemy->world_z += cosf(enemy->heading) * enemy->speed * 0.42f * dt;
-            if (enemy->world_y < 15.0f) enemy->active = 0;
-            else ++active;
+            if (enemy->world_y < 15.0f) {
+                Projected3D impact = project_world_point(g, (Vec3){
+                    enemy->world_x, 0.0f, enemy->world_z});
+                enemy->world_y = 0.0f;
+                enemy->active = 0;
+                if (impact.visible && impact.x > -90 &&
+                    impact.x < SCREEN_W + 90 && impact.y > -90 &&
+                    impact.y < SCREEN_H + 90)
+                    new_ground_explosion(g, (float)impact.x,
+                                         (float)impact.y, 3);
+                g->audio.blast = 4300;
+                g->audio.crash = 7200;
+            } else ++active;
             continue;
         }
         dx = g->flight_x - enemy->world_x;
@@ -2410,26 +2441,17 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         }
         ++active;
     }
-    if (g->qa_hold && active == 0) {
-        float px = g->flight_x, py = g->flight_y, pz = g->flight_z;
-        float heading = g->flight_heading;
-        float bank = g->view_bank, pitch = g->view_pitch;
-        float vx = g->flight_vx, vy = g->flight_vy, vz = g->flight_vz;
-        float throttle = g->flight_throttle;
-        float speed = g->airspeed;
-        FlightState flight = g->flight;
-        int hold = g->qa_hold;
-        reset_sortie(g);
-        g->flight_x = px; g->flight_y = py; g->flight_z = pz;
-        g->flight_heading = heading;
-        g->view_bank = bank; g->view_pitch = pitch;
-        g->flight_vx = vx; g->flight_vy = vy; g->flight_vz = vz;
-        g->flight_throttle = throttle;
-        g->airspeed = speed;
-        g->flight = flight;
-        g->qa_hold = hold;
-    } else if (!g->qa_hold &&
-               (active == 0 || g->fuel <= 0.0f || g->health <= 0)) {
+    if (active == 0) {
+        /* Hold the last impact for one beat so its explosion and crash sound
+         * are seen and heard, then end both campaign and direct-test sorties. */
+        if (!g->mission_clear_at) g->mission_clear_at = now;
+        if (now - g->mission_clear_at >= 900u)
+            finish_alternate_sortie(g);
+    } else {
+        g->mission_clear_at = 0;
+    }
+    if (!g->qa_hold && active > 0 &&
+        (g->fuel <= 0.0f || g->health <= 0)) {
         finish_alternate_sortie(g);
     }
 }
@@ -3901,8 +3923,33 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
     };
     if (!centre.visible || centre.x < -180 || centre.x > SCREEN_W + 180 ||
         centre.y < -180 || centre.y > SCREEN_H + 180) return;
-    if (centre.depth > 2600.0f) {
-        circle(s, centre.x, centre.y, 2, outline);
+    if (centre.depth > 1650.0f) {
+        Projected3D far_l = project_world_point(g,
+            enemy_model_point(enemy, -17.4f, 2.0f, 0.0f));
+        Projected3D far_r = project_world_point(g,
+            enemy_model_point(enemy, 17.4f, 2.0f, 0.0f));
+        Projected3D far_n = project_world_point(g,
+            enemy_model_point(enemy, 0.0f, 0.0f, 18.5f));
+        Projected3D far_t = project_world_point(g,
+            enemy_model_point(enemy, 0.0f, 0.0f, -16.2f));
+        Projected3D far_tl = project_world_point(g,
+            enemy_model_point(enemy, -7.0f, 0.0f, -14.0f));
+        Projected3D far_tr = project_world_point(g,
+            enemy_model_point(enemy, 7.0f, 0.0f, -14.0f));
+        /* Even the far LOD uses the projected wing, fuselage and tail axes.
+         * A black dot gave no clue which way an attacker was flying. */
+        if (far_l.visible && far_r.visible) {
+            line(s, far_l.x, far_l.y, far_r.x, far_r.y, outline);
+            if (centre.depth < 3000.0f)
+                line(s, far_l.x, far_l.y - 1,
+                     far_r.x, far_r.y - 1, canvas);
+        }
+        if (far_n.visible && far_t.visible)
+            line(s, far_n.x, far_n.y, far_t.x, far_t.y, body);
+        if (far_tl.visible && far_tr.visible)
+            line(s, far_tl.x, far_tl.y, far_tr.x, far_tr.y, outline);
+        if (far_l.x == far_r.x && far_l.y == far_r.y)
+            circle(s, centre.x, centre.y, 1, outline);
         return;
     }
     for (i = 0; i < 4; ++i) {
@@ -3998,9 +4045,23 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
         line(s, nose_b.x, nose_b.y, rear_b.x, rear_b.y, outline);
     }
     if (rear.visible && fin.visible) {
-        fill_triangle(s, rear.x - 1, rear.y, rear.x + 1, rear.y,
-                      fin.x, fin.y, body);
-        line(s, rear.x, rear.y, fin.x, fin.y, outline);
+        Projected3D fin_front = project_world_point(g,
+            enemy_model_point(enemy, 0.0f, 0.2f, -10.2f));
+        Projected3D fin_rear = project_world_point(g,
+            enemy_model_point(enemy, 0.0f, 0.4f, -16.0f));
+        Projected3D fin_top_front = project_world_point(g,
+            enemy_model_point(enemy, 0.0f, 5.8f, -11.5f));
+        if (fin_front.visible && fin_rear.visible && fin_top_front.visible) {
+            fill_triangle(s, fin_front.x, fin_front.y,
+                          fin_rear.x, fin_rear.y, fin.x, fin.y, body);
+            fill_triangle(s, fin_front.x, fin_front.y,
+                          fin.x, fin.y, fin_top_front.x, fin_top_front.y,
+                          body_light);
+            line(s, fin_front.x, fin_front.y,
+                 fin_top_front.x, fin_top_front.y, outline);
+            line(s, fin_top_front.x, fin_top_front.y, fin.x, fin.y, outline);
+            line(s, fin.x, fin.y, fin_rear.x, fin_rear.y, outline);
+        }
     }
     line(s, upper[0].x, upper[0].y, lower[0].x, lower[0].y, outline);
     line(s, upper[1].x, upper[1].y, lower[1].x, lower[1].y, outline);
@@ -4023,6 +4084,32 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
         if (strut_ur.visible && strut_ll.visible)
             line(s, strut_ur.x, strut_ur.y, strut_ll.x, strut_ll.y,
                  rgb(s, 91, 80, 66));
+        if (centre.depth < 1100.0f) {
+            Projected3D cabane_ul = project_world_point(g,
+                enemy_model_point(enemy, -2.8f, 2.0f, 1.2f));
+            Projected3D cabane_ll = project_world_point(g,
+                enemy_model_point(enemy, -1.8f, -0.8f, 1.2f));
+            Projected3D cabane_ur = project_world_point(g,
+                enemy_model_point(enemy, 2.8f, 2.0f, 1.2f));
+            Projected3D cabane_lr = project_world_point(g,
+                enemy_model_point(enemy, 1.8f, -0.8f, 1.2f));
+            Projected3D wire_l = project_world_point(g,
+                enemy_model_point(enemy, -14.0f, 2.0f, 0.0f));
+            Projected3D wire_r = project_world_point(g,
+                enemy_model_point(enemy, 14.0f, 2.0f, 0.0f));
+            if (cabane_ul.visible && cabane_ll.visible)
+                line(s, cabane_ul.x, cabane_ul.y,
+                     cabane_ll.x, cabane_ll.y, outline);
+            if (cabane_ur.visible && cabane_lr.visible)
+                line(s, cabane_ur.x, cabane_ur.y,
+                     cabane_lr.x, cabane_lr.y, outline);
+            if (wire_l.visible && cabane_lr.visible)
+                line(s, wire_l.x, wire_l.y,
+                     cabane_lr.x, cabane_lr.y, rgb(s, 80, 72, 62));
+            if (wire_r.visible && cabane_ll.visible)
+                line(s, wire_r.x, wire_r.y,
+                     cabane_ll.x, cabane_ll.y, rgb(s, 80, 72, 62));
+        }
     }
     /* Engine, open cockpit and pilot are strong recognition cues at combat
      * range, much more useful than a flat coloured fuselage. */
@@ -4067,6 +4154,9 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
         line(s, cowling.x, cowling.y, wheel_r.x, wheel_r.y, outline);
         circle(s, wheel_r.x, wheel_r.y, centre.depth < 700 ? 4 : 2, outline);
     }
+    if (wheel_l.visible && wheel_r.visible)
+        line(s, wheel_l.x, wheel_l.y, wheel_r.x, wheel_r.y,
+             rgb(s, 61, 52, 45));
     mark_l = project_world_point(g, enemy_model_point(enemy, -11.0f, 2.08f, 0.0f));
     mark_r = project_world_point(g, enemy_model_point(enemy, 11.0f, 2.08f, 0.0f));
     if (centre.depth < 1050.0f) {
@@ -4206,6 +4296,7 @@ static void draw_dogfight_simulator(Game *g)
             line(s, p.x, p.y + 1, 322, 220, rgb(s, 255, 184, 92));
         }
     }
+    draw_explosions(g);
     if (now >= g->last_shot && now - g->last_shot < 95u) {
         line(s, 286, 322, 318, 218, rgb(s, 255, 235, 142));
         line(s, 354, 322, 322, 218, rgb(s, 255, 235, 142));
