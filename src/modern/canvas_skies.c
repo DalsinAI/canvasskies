@@ -222,7 +222,7 @@ typedef struct {
 
 typedef struct {
     float x, y, phase;
-    int active, hp;
+    int active, hp, max_hp;
     uint32_t last_shot;
 } Enemy;
 
@@ -238,6 +238,7 @@ typedef struct {
 typedef struct {
     SDL_AudioDeviceID device;
     uint32_t sample_clock;
+    uint32_t cue_clock;
     uint32_t noise;
     uint8_t *music_data;
     uint32_t music_len;
@@ -687,11 +688,12 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     int i;
     for (i = 0; i < frames; ++i) {
         float t = (float)a->sample_clock / 11025.0f;
+        float cue_t = (float)a->cue_clock / 11025.0f;
         int mood_index = a->music_mood - MUSIC_RECON;
         float tempo = a->music_mood == MUSIC_TENSION ? 2.05f :
                       a->music_mood == MUSIC_MOURNING ? 0.92f :
                       a->music_mood == MUSIC_ARMISTICE ? 0.68f : 1.38f;
-        int beat = (int)(t * tempo);
+        int beat = (int)(cue_t * tempo);
         int bar = (beat / 4) & 7;
         float pad = 0.0f, bass, melody, drums = 0.0f, sample;
         int v;
@@ -747,7 +749,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             /* An original, jaunty 1910s mess-hall tune: clipped brass melody
              * over an oom-pah bass.  Shellac colour is applied below without
              * artificial record clicks, which would mask transport faults. */
-            float position = t * 4.35f;
+            float position = cue_t * 4.35f;
             int step = (int)position & 31;
             int bass_step = ((int)(position * 0.5f)) & 7;
             float melody_hz = note_hz(mess_melody[step] + 7);
@@ -782,7 +784,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             bass = triangle_wave(a->synth_phase[3]) * 0.13f;
             melody = sinf(2.0f * (float)M_PI * a->synth_phase[4]) * 0.07f;
             if (a->music_mood == MUSIC_TENSION && (beat & 1) == 0 &&
-                fmodf(t * tempo, 1.0f) < 0.09f)
+                fmodf(cue_t * tempo, 1.0f) < 0.09f)
                 drums = ((float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f) * 0.08f;
             sample = pad * (a->music_mood == MUSIC_ARMISTICE ? 0.48f : 0.72f) +
                      bass * 0.42f + melody * 0.36f + drums;
@@ -792,7 +794,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
          * a military march. Every hit starts and ends at zero amplitude: the
          * old global-phase bass waveform produced a small click per beat. */
         if (a->scene != SCENE_SORTIE && a->music_mood == MUSIC_MARCH) {
-            float march = t * 2.18f;
+            float march = cue_t * 2.18f;
             float phase = march - floorf(march);
             int march_beat = (int)march;
             float noise_sample = (float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f;
@@ -845,6 +847,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         out[i * 2] = (int16_t)(sample * 18000.0f);
         out[i * 2 + 1] = out[i * 2];
         ++a->sample_clock;
+        ++a->cue_clock;
     }
 }
 
@@ -866,6 +869,7 @@ static int music_mood_for_scene(const Game *g, Scene scene)
 
 static void set_scene(Game *g, Scene scene)
 {
+    MusicMood previous_mood = (MusicMood)g->audio.music_mood;
     g->scene = scene;
     g->scene_started = SDL_GetTicks();
     g->redraw_static = 1;
@@ -873,6 +877,21 @@ static void set_scene(Game *g, Scene scene)
         SDL_LockAudioDevice(g->audio.device);
         g->audio.scene = scene;
         g->audio.music_mood = music_mood_for_scene(g, scene);
+        g->audio.cue_clock = 0;
+        if (previous_mood != (MusicMood)g->audio.music_mood) {
+            memset(g->audio.synth_phase, 0, sizeof(g->audio.synth_phase));
+            g->audio.gramophone_lp = 0.0f;
+            g->audio.gramophone_hp = 0.0f;
+            g->audio.gramophone_previous = 0.0f;
+        }
+        if (scene != SCENE_SORTIE) {
+            g->audio.shot = 0;
+            g->audio.blast = 0;
+            g->audio.engine_speed = 0.0f;
+            g->audio.engine_load = 0.0f;
+            g->audio.other_engine = 0.0f;
+            g->audio.vehicle_engine = 0.0f;
+        }
         if (scene == SCENE_TITLE) g->audio.music_pos = 0;
         SDL_UnlockAudioDevice(g->audio.device);
     }
@@ -970,6 +989,7 @@ static void reset_sortie(Game *g)
         g->enemies[i].y = 90.0f + (float)((i * 47) % 120);
         g->enemies[i].phase = i * 0.8f;
         g->enemies[i].hp = 1 + g->chapter / 3;
+        g->enemies[i].max_hp = g->enemies[i].hp;
         g->enemies[i].active = mode == MISSION_DOGFIGHT_3D &&
                                i < chapter->enemy_count;
         g->enemies[i].last_shot = 0;
@@ -1008,7 +1028,7 @@ static void new_explosion(Game *g, float x, float y, int large)
         Explosion *e = &g->explosions[i];
         if (!e->active) {
             e->x = x; e->y = y; e->age = 0.0f;
-            e->duration = large ? 0.72f : 0.42f;
+            e->duration = large == 2 ? 1.35f : (large ? 0.82f : 0.42f);
             e->large = large; e->active = 1;
             return;
         }
@@ -1227,7 +1247,22 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
                 b->active = 0;
                 g->score += 500;
                 ++g->objectives;
-                new_explosion(g, sx, (float)ty, 1);
+                new_explosion(g, sx, (float)ty, b->type == 1 ? 2 : 1);
+                g->audio.blast = 7000;
+            }
+        }
+    }
+    /* A missed bomb still strikes the physical ground and detonates.  Target
+     * collision is resolved first above so a direct hit gets the same larger
+     * blast without being replaced by a generic terrain impact. */
+    for (i = 0; i < MAX_BULLETS; ++i) {
+        Bullet *b = &g->bullets[i];
+        if (b->active && !b->enemy && b->type == 1) {
+            int impact_y = terrain_y(g->scroll + b->x) - 2;
+            if (b->y >= impact_y) {
+                b->y = (float)impact_y;
+                b->active = 0;
+                new_explosion(g, b->x, b->y, 2);
                 g->audio.blast = 7000;
             }
         }
@@ -1567,9 +1602,54 @@ static void draw_explosions(Game *g)
     for (i = 0; i < MAX_EXPLOSIONS; ++i) if (g->explosions[i].active) {
         Explosion *e = &g->explosions[i];
         float p = e->age / e->duration;
-        int radius = (int)((e->large ? 27.0f : 15.0f) * p) + 3;
+        int radius = (int)((e->large == 2 ? 43.0f :
+                            (e->large ? 29.0f : 15.0f)) * p) + 3;
         int x = (int)e->x, y = (int)e->y;
-        if (p < 0.48f) {
+        uint32_t seed = scene_hash((uint32_t)i * 2246822519u +
+                                   (uint32_t)(e->x * 13.0f));
+        if (e->large == 2) {
+            int lobe;
+            if (p < 0.10f) {
+                int flash = 32 - (int)(p * 190.0f);
+                circle(s, x, y, flash, rgb(s, 255, 238, 184));
+                circle(s, x, y, flash / 2, rgb(s, 255, 255, 226));
+            }
+            if (p < 0.48f) {
+                int fire_r = radius < 8 ? 8 : radius;
+                circle(s, x, y, fire_r, rgb(s, 204, 63, 23));
+                circle(s, x - fire_r / 3, y - fire_r / 4,
+                       fire_r * 2 / 3, rgb(s, 245, 126, 31));
+                circle(s, x + fire_r / 4, y - fire_r / 3,
+                       fire_r / 2, rgb(s, 255, 211, 82));
+                for (lobe = 0; lobe < 8; ++lobe) {
+                    float angle = (float)lobe * (float)M_PI * 0.25f;
+                    int reach = 10 + (int)(p * (52 + (seed >> (lobe & 7)) % 22));
+                    int dx = (int)(cosf(angle) * reach);
+                    int dy = (int)(sinf(angle) * reach * 0.66f);
+                    line(s, x, y, x + dx, y + dy,
+                         rgb(s, 226, 104, 31));
+                    circle(s, x + dx, y + dy, 2 + lobe % 3,
+                           rgb(s, 255, 177, 50));
+                }
+            }
+            /* The fireball rolls upward into several overlapping, expanding
+             * smoke lobes instead of collapsing into one grey disc. */
+            if (p > 0.22f) {
+                float smoke_p = (p - 0.22f) / 0.78f;
+                for (lobe = 0; lobe < 7; ++lobe) {
+                    int drift = (int)((((seed >> (lobe * 3)) & 7u) - 3) *
+                                      (3.0f + smoke_p * 2.0f));
+                    int py = y - 7 - (int)(smoke_p * (20 + lobe * 5));
+                    int pr = 7 + lobe / 2 + (int)(smoke_p * 11.0f);
+                    uint8_t grey = (uint8_t)(58 + lobe * 7 +
+                                             (int)(smoke_p * 24.0f));
+                    circle(s, x + drift, py, pr,
+                           rgb(s, grey, grey - 3, grey - 8));
+                    circle(s, x + drift - pr / 3, py - pr / 4, pr * 2 / 3,
+                           rgb(s, grey + 14, grey + 11, grey + 6));
+                }
+            }
+        } else if (p < 0.48f) {
             circle(s, x, y, radius, rgb(s, 239, 116, 35));
             circle(s, x, y, radius / 2, rgb(s, 255, 221, 108));
         } else {
@@ -1580,19 +1660,38 @@ static void draw_explosions(Game *g)
     }
 }
 
-static void draw_player_damage(Game *g)
+static void draw_aircraft_smoke(Game *g, int x, int y, int health,
+                                int trail_direction, uint32_t seed)
 {
     SDL_Surface *s = g->screen;
     int i;
     uint32_t now = SDL_GetTicks();
-    if (g->health >= 80) return;
-    for (i = 0; i < 6; ++i) {
-        int wobble = (int)(sinf((now * 0.006f) + i * 1.7f) * 5.0f);
-        int radius = 4 + i * 2;
-        uint8_t grey = (uint8_t)(64 + i * 13);
-        circle(s, (int)g->player_x - 31 - i * 10,
-               (int)g->player_y + wobble, radius, rgb(s, grey, grey, grey - 5));
+    int count = health < 42 ? 12 : 8;
+    for (i = 0; i < count; ++i) {
+        float phase = fmodf((float)now * 0.00072f +
+                            (float)i / (float)count, 1.0f);
+        int distance = 28 + (int)(phase * (health < 42 ? 118.0f : 82.0f));
+        int wobble = (int)(sinf(phase * 13.0f + i * 1.9f +
+                                 (seed & 15u)) * (3.0f + phase * 5.0f));
+        int px = x + trail_direction * distance;
+        int py = y - 2 - (int)(phase * 20.0f) + wobble;
+        int radius = 5 + (int)(phase * (health < 42 ? 14.0f : 10.0f));
+        uint8_t grey = (uint8_t)(54 + (int)(phase * 66.0f));
+        circle(s, px, py, radius, rgb(s, grey, grey, grey - 5));
+        circle(s, px - trail_direction * radius / 3, py - radius / 3,
+               radius * 2 / 3, rgb(s, grey + 19, grey + 18, grey + 14));
+        circle(s, px + trail_direction * radius / 3, py + radius / 5,
+               radius / 2, rgb(s, grey - 9, grey - 10, grey - 13));
     }
+}
+
+static void draw_player_damage(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t now = SDL_GetTicks();
+    if (g->health >= 80) return;
+    draw_aircraft_smoke(g, (int)g->player_x, (int)g->player_y,
+                        g->health, -1, 0x4e454444u);
     if (g->health < 42) {
         int flicker = (now / 45) & 3;
         circle(s, (int)g->player_x - 28, (int)g->player_y + 2,
@@ -1718,8 +1817,14 @@ static void draw_sortie(Game *g)
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
         int sx = (int)(g->enemies[i].x - g->scroll);
         int sy = (int)(g->enemies[i].y + sinf(g->scroll * 0.01f + g->enemies[i].phase) * 30.0f);
-        if (sx > -50 && sx < SCREEN_W + 50)
+        if (sx > -50 && sx < SCREEN_W + 50) {
+            if (g->enemies[i].hp < g->enemies[i].max_hp) {
+                int health = g->enemies[i].hp * 100 / g->enemies[i].max_hp;
+                draw_aircraft_smoke(g, sx, sy, health, 1,
+                                    0x454e454du + (uint32_t)i * 97u);
+            }
             draw_plane(g, sx, sy, 1, 2 + (int)(sinf(g->scroll * 0.02f + i) * 1.2f));
+        }
     }
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];

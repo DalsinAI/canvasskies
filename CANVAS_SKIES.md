@@ -34,7 +34,11 @@ The first vertical slice contains:
   artillery launches deliberately inaccurate ballistic shells which arc and
   detonate;
 - proximity-fused flak bursts, visible progressive airframe smoke/flame and
-  a wide parallax battlefield panorama with ruined villages, church tower,
+  layered billowing smoke from damaged player and enemy aircraft. Bombs which
+  miss a target collide with the visible terrain and produce a multi-stage
+  flash, fireball, debris burst and lingering smoke column instead of falling
+  silently out of the scene. A wide parallax battlefield panorama has ruined
+  villages, church tower,
   shell holes, trenches, waterlogged earth and layered dawn haze;
 - newly illustrated multi-angle aircraft sprites;
 - a gramophone-treated 1889 military march, with original real-time synth
