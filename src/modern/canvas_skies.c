@@ -3652,11 +3652,8 @@ static void draw_gunner_bullet_holes(Game *g)
 static void draw_simulator_terrain(Game *g)
 {
     SDL_Surface *s = g->screen;
-    const float tile_size = 520.0f;
     int horizon_left, horizon_right;
-    int base_tile_x = (int)floorf(g->flight_x / tile_size);
-    int base_tile_z = (int)floorf(g->flight_z / tile_size);
-    int tx, tz;
+    int tx, tz, pass;
     {
         const float far = 12000.0f;
         const float wide = 14000.0f;
@@ -3676,18 +3673,91 @@ static void draw_simulator_terrain(Game *g)
                                           -SCREEN_H * 3.0f,
                                            SCREEN_H * 4.0f);
     }
-    /* This is a world-space 360-degree view.  A finite photograph cannot be
-     * wrapped into a flight-sim landscape without seams or backwards motion. */
-    gradient(s, 38, 72, 112, 201, 170, 118);
+    /* The atmosphere is tied to the projected horizon, not the monitor.  The
+     * broad bands are deliberately subtle, but they stop a banked landscape
+     * looking pasted over an upright photographic sky. */
+    gradient(s, 25, 52, 91, 154, 145, 126);
+    {
+        static const int band_y[5] = {-128, -82, -48, -22, 1};
+        static const uint8_t band_colour[4][3] = {
+            {72, 101, 132}, {103, 124, 143},
+            {145, 145, 137}, {192, 163, 126}
+        };
+        int band;
+        for (band = 0; band < 4; ++band) {
+            int l0 = horizon_left + band_y[band];
+            int r0 = horizon_right + band_y[band];
+            int l1 = horizon_left + band_y[band + 1];
+            int r1 = horizon_right + band_y[band + 1];
+            uint32_t colour = rgb(s, band_colour[band][0],
+                                  band_colour[band][1],
+                                  band_colour[band][2]);
+            fill_triangle(s, 0, l0, SCREEN_W - 1, r0,
+                          SCREEN_W - 1, r1, colour);
+            fill_triangle(s, 0, l0, SCREEN_W - 1, r1, 0, l1, colour);
+        }
+    }
     fill_triangle(s, 0, horizon_left, SCREEN_W - 1, horizon_right,
                   0, SCREEN_H - 1, rgb(s, 78, 78, 48));
     fill_triangle(s, SCREEN_W - 1, horizon_right, SCREEN_W - 1,
                   SCREEN_H - 1, 0, SCREEN_H - 1, rgb(s, 67, 69, 42));
-    /* Fixed world tiles surround the aircraft.  Unlike the old camera-local
-     * grid they stay put while heading changes, so a turn is unmistakable
-     * and the same terrain works through a complete 360 degrees. */
-    for (tz = base_tile_z - 5; tz <= base_tile_z + 5; ++tz) {
-        for (tx = base_tile_x - 5; tx <= base_tile_x + 5; ++tx) {
+
+    /* Two deterministic ridge rings bridge atmosphere and ground.  Their
+     * bearings are fixed in the world, so they roll and pan with the same
+     * quaternion projection as the fields rather than sliding on the screen. */
+    for (pass = 0; pass < 2; ++pass) {
+        const int segments = 64;
+        float distance = pass == 0 ? 14200.0f : 9400.0f;
+        int segment;
+        for (segment = 0; segment < segments; ++segment) {
+            float a0 = (float)segment * (2.0f * (float)M_PI / segments);
+            float a1 = (float)(segment + 1) *
+                       (2.0f * (float)M_PI / segments);
+            uint32_t seed0 = scene_hash((uint32_t)segment * 92821u +
+                                        (uint32_t)pass * 0x48494c4cu);
+            uint32_t seed1 = scene_hash((uint32_t)((segment + 1) % segments) *
+                                        92821u +
+                                        (uint32_t)pass * 0x48494c4cu);
+            float height0 = (pass == 0 ? 430.0f : 260.0f) +
+                            (float)(seed0 % (pass == 0 ? 690u : 430u));
+            float height1 = (pass == 0 ? 430.0f : 260.0f) +
+                            (float)(seed1 % (pass == 0 ? 690u : 430u));
+            Vec3 w0 = {g->flight_x + sinf(a0) * distance, 0.0f,
+                       g->flight_z + cosf(a0) * distance};
+            Vec3 w1 = {g->flight_x + sinf(a1) * distance, 0.0f,
+                       g->flight_z + cosf(a1) * distance};
+            Projected3D b0 = project_world_point(g, w0);
+            Projected3D b1 = project_world_point(g, w1);
+            Projected3D t0, t1;
+            w0.y = height0;
+            w1.y = height1;
+            t0 = project_world_point(g, w0);
+            t1 = project_world_point(g, w1);
+            if (b0.visible && b1.visible && t0.visible && t1.visible &&
+                abs(b0.x) < 1500 && abs(b1.x) < 1500) {
+                uint32_t hill = pass == 0 ?
+                    rgb(s, 91, 99, 83) : rgb(s, 76, 83, 58);
+                fill_triangle(s, b0.x, b0.y, b1.x, b1.y,
+                              t1.x, t1.y, hill);
+                fill_triangle(s, b0.x, b0.y, t1.x, t1.y,
+                              t0.x, t0.y, hill);
+                if (pass == 1)
+                    line(s, t0.x, t0.y, t1.x, t1.y, rgb(s, 103, 105, 76));
+            }
+        }
+    }
+
+    /* A coarse 1.7 km grid carries fields almost to the ridge; the 520 m
+     * pass then restores hedges and texture around the aircraft.  Previously
+     * the detailed ground simply stopped after 2.6 km, exposing a flat wedge
+     * which was visibly disconnected from the horizon. */
+    for (pass = 0; pass < 2; ++pass) {
+        const float tile_size = pass == 0 ? 1700.0f : 520.0f;
+        const int reach = 5;
+        int base_tile_x = (int)floorf(g->flight_x / tile_size);
+        int base_tile_z = (int)floorf(g->flight_z / tile_size);
+        for (tz = base_tile_z - reach; tz <= base_tile_z + reach; ++tz) {
+        for (tx = base_tile_x - reach; tx <= base_tile_x + reach; ++tx) {
             float x0 = (float)tx * tile_size;
             float z0 = (float)tz * tile_size;
             Projected3D p0 = project_world_point(g, (Vec3){x0, 0.0f, z0});
@@ -3700,12 +3770,15 @@ static void draw_simulator_terrain(Game *g)
             uint32_t seed = scene_hash((uint32_t)(tx * 92821) ^
                                        (uint32_t)(tz * 68917));
             uint32_t field;
-            if ((tx % 6) == 0 || (tz % 7) == 0)
-                field = rgb(s, 102, 88, 58);
+            if (pass == 0)
+                field = (seed & 1u) ? rgb(s, 79, 82, 57) :
+                                      rgb(s, 70, 78, 54);
+            else if ((tx % 6) == 0 || (tz % 7) == 0)
+                field = rgb(s, 108, 91, 58);
             else if (seed & 1u)
-                field = rgb(s, 87, 82, 49);
+                field = rgb(s, 91, 86, 50);
             else
-                field = rgb(s, 64, 84, 47);
+                field = rgb(s, 66, 88, 49);
             if (p0.visible && p1.visible && p2.visible && p3.visible &&
                 abs(p0.x) < 1800 && abs(p1.x) < 1800 &&
                 abs(p2.x) < 1800 && abs(p3.x) < 1800 &&
@@ -3715,9 +3788,12 @@ static void draw_simulator_terrain(Game *g)
                               p2.x, p2.y, field);
                 fill_triangle(s, p0.x, p0.y, p2.x, p2.y,
                               p3.x, p3.y, field);
-                line(s, p0.x, p0.y, p1.x, p1.y, rgb(s, 49, 61, 37));
-                line(s, p0.x, p0.y, p3.x, p3.y, rgb(s, 57, 64, 39));
+                if (pass == 1) {
+                    line(s, p0.x, p0.y, p1.x, p1.y, rgb(s, 48, 61, 36));
+                    line(s, p0.x, p0.y, p3.x, p3.y, rgb(s, 56, 65, 39));
+                }
             }
+        }
         }
     }
 }
@@ -3725,30 +3801,48 @@ static void draw_simulator_terrain(Game *g)
 static void draw_simulator_clouds(Game *g)
 {
     SDL_Surface *s = g->screen;
-    int i;
-    static const Vec3 cloud_centres[] = {
-        {-820.0f, 820.0f, 620.0f}, {640.0f, 910.0f, 980.0f},
-        {-1300.0f, 1080.0f, 1550.0f}, {1180.0f, 760.0f, 1880.0f},
-        {-380.0f, 1260.0f, 2380.0f}, {1480.0f, 1120.0f, 2920.0f},
-        {-1750.0f, 690.0f, 3350.0f}, {260.0f, 870.0f, 3820.0f}
-    };
-    for (i = 0; i < (int)(sizeof(cloud_centres) / sizeof(cloud_centres[0])); ++i) {
-        Projected3D p = project_world_point(g, cloud_centres[i]);
-        int radius;
-        uint32_t shadow, light;
+    const float cell_size = 1750.0f;
+    int base_x = (int)floorf(g->flight_x / cell_size);
+    int base_z = (int)floorf(g->flight_z / cell_size);
+    int cx, cz;
+    for (cz = base_z - 4; cz <= base_z + 4; ++cz) {
+    for (cx = base_x - 4; cx <= base_x + 4; ++cx) {
+        uint32_t seed = scene_hash((uint32_t)(cx * 73471) ^
+                                   (uint32_t)(cz * 91229) ^ 0x434c4f55u);
+        Vec3 centre;
+        Projected3D p;
+        int radius, puffs, puff;
+        if ((seed & 7u) > 2u) continue;
+        centre.x = ((float)cx + 0.18f + (float)(seed & 255u) / 410.0f) *
+                   cell_size;
+        centre.z = ((float)cz + 0.15f +
+                   (float)((seed >> 8) & 255u) / 390.0f) * cell_size;
+        centre.y = 690.0f + (float)((seed >> 16) % 820u);
+        p = project_world_point(g, centre);
         if (!p.visible || p.x < -180 || p.x > SCREEN_W + 180 ||
             p.y < -100 || p.y > SCREEN_H + 100) continue;
-        radius = (int)(17500.0f / p.depth);
-        if (radius < 4) radius = 4;
-        if (radius > 28) radius = 28;
-        shadow = rgb(s, 116, 126, 136);
-        light = rgb(s, 188, 190, 184);
-        circle(s, p.x - radius / 2, p.y + radius / 4, radius / 2, shadow);
-        circle(s, p.x + radius / 3, p.y + radius / 5, radius * 3 / 5, shadow);
-        circle(s, p.x - radius / 3, p.y, radius * 2 / 3, light);
-        circle(s, p.x + radius / 5, p.y - radius / 5, radius * 3 / 4,
-               rgb(s, 207, 202, 189));
-        circle(s, p.x + radius * 3 / 4, p.y + radius / 8, radius / 2, light);
+        radius = (int)((26000.0f + (float)(seed & 8191u)) / p.depth);
+        if (radius < 3) radius = 3;
+        if (radius > 38) radius = 38;
+        puffs = 5 + (int)((seed >> 5) & 3u);
+        /* A broad underside joins the puffs into a bank instead of a row of
+         * identical cotton balls. */
+        rect(s, p.x - radius, p.y, radius * 2, radius / 3 + 1,
+             rgb(s, 113, 124, 132));
+        for (puff = 0; puff < puffs; ++puff) {
+            uint32_t ps = scene_hash(seed + (uint32_t)puff * 2654435761u);
+            int px = p.x - radius +
+                     (int)(ps % (uint32_t)(radius * 2 + 1));
+            int py = p.y - (int)((ps >> 9) % (uint32_t)(radius + 1)) / 2;
+            int pr = radius / 3 +
+                     (int)((ps >> 17) % (uint32_t)(radius / 3 + 1));
+            uint8_t shade = (uint8_t)(184 + ((ps >> 25) & 23u));
+            if (pr < 2) pr = 2;
+            circle(s, px, py + pr / 4, pr, rgb(s, 126, 134, 139));
+            circle(s, px - pr / 6, py - pr / 5, pr * 4 / 5,
+                   rgb(s, shade, shade, shade - 5));
+        }
+    }
     }
 }
 
@@ -3757,10 +3851,13 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
     SDL_Surface *s = g->screen;
     Projected3D centre = project_world_point(g, (Vec3){enemy->world_x,
         enemy->world_y, enemy->world_z});
-    Projected3D upper[4], lower[4], tail[4], nose, rear, fin;
+    Projected3D upper[4], lower[4], tail[4], rear, fin;
     Projected3D prop_l, prop_r, prop_u, prop_d;
     Projected3D wheel_l, wheel_r, mark_l, mark_r;
     Projected3D cockpit, pilot, cowling, gun_l, gun_r;
+    Projected3D nose_l, nose_r, nose_t, nose_b;
+    Projected3D mid_l, mid_r, mid_t, mid_b;
+    Projected3D rear_l, rear_r, rear_t, rear_b;
     uint32_t outline = rgb(s, 35, 27, 24);
     uint32_t canvas = rgb(s, 214, 187, 142);
     uint32_t underside = rgb(s, 172, 148, 111);
@@ -3795,7 +3892,6 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
         tail[i] = project_world_point(g, enemy_model_point(enemy,
             tail_wing[i][0], tail_wing[i][1], tail_wing[i][2]));
     }
-    nose = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, 18.5f));
     rear = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, -16.2f));
     fin = project_world_point(g, enemy_model_point(enemy, 0.0f, 6.0f, -14.8f));
     for (i = 0; i < 4; ++i)
@@ -3835,12 +3931,50 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
              rgb(s, 239, 211, 163));
         line(s, lower[3].x, lower[3].y, lower[2].x, lower[2].y, rib);
     }
-    if (nose.visible && rear.visible) {
-        int thickness;
-        for (thickness = -3; thickness <= 3; ++thickness)
-            line(s, nose.x + thickness, nose.y, rear.x + thickness, rear.y,
-                 thickness == -3 || thickness == 3 ? outline :
-                 (thickness < 0 ? body : body_light));
+    /* A projected tapered fuselage replaces the old seven screen-space
+     * parallel lines.  Those lines stayed upright while the wings banked and
+     * made the aircraft look like disconnected symbols rather than a solid
+     * aeroplane. */
+    nose_l = project_world_point(g, enemy_model_point(enemy, -3.0f, 0.0f, 13.4f));
+    nose_r = project_world_point(g, enemy_model_point(enemy,  3.0f, 0.0f, 13.4f));
+    nose_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 2.7f, 13.4f));
+    nose_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-2.4f, 13.4f));
+    mid_l = project_world_point(g, enemy_model_point(enemy, -2.3f, 0.0f, -3.8f));
+    mid_r = project_world_point(g, enemy_model_point(enemy,  2.3f, 0.0f, -3.8f));
+    mid_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 2.2f, -3.8f));
+    mid_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-1.9f, -3.8f));
+    rear_l = project_world_point(g, enemy_model_point(enemy, -0.8f, 0.0f,-14.7f));
+    rear_r = project_world_point(g, enemy_model_point(enemy,  0.8f, 0.0f,-14.7f));
+    rear_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 0.9f,-14.7f));
+    rear_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-0.7f,-14.7f));
+    if (nose_l.visible && nose_r.visible && nose_t.visible && nose_b.visible &&
+        mid_l.visible && mid_r.visible && mid_t.visible && mid_b.visible &&
+        rear_l.visible && rear_r.visible && rear_t.visible && rear_b.visible) {
+        fill_triangle(s, nose_l.x, nose_l.y, nose_t.x, nose_t.y,
+                      mid_t.x, mid_t.y, body);
+        fill_triangle(s, nose_l.x, nose_l.y, mid_t.x, mid_t.y,
+                      mid_l.x, mid_l.y, body);
+        fill_triangle(s, nose_t.x, nose_t.y, nose_r.x, nose_r.y,
+                      mid_r.x, mid_r.y, body_light);
+        fill_triangle(s, nose_t.x, nose_t.y, mid_r.x, mid_r.y,
+                      mid_t.x, mid_t.y, body_light);
+        fill_triangle(s, mid_l.x, mid_l.y, mid_t.x, mid_t.y,
+                      rear_t.x, rear_t.y, body);
+        fill_triangle(s, mid_l.x, mid_l.y, rear_t.x, rear_t.y,
+                      rear_l.x, rear_l.y, body);
+        fill_triangle(s, mid_t.x, mid_t.y, mid_r.x, mid_r.y,
+                      rear_r.x, rear_r.y, body_light);
+        fill_triangle(s, mid_t.x, mid_t.y, rear_r.x, rear_r.y,
+                      rear_t.x, rear_t.y, body_light);
+        fill_triangle(s, nose_l.x, nose_l.y, mid_l.x, mid_l.y,
+                      mid_b.x, mid_b.y, rgb(s, 91, 39, 31));
+        fill_triangle(s, nose_l.x, nose_l.y, mid_b.x, mid_b.y,
+                      nose_b.x, nose_b.y, rgb(s, 91, 39, 31));
+        line(s, nose_l.x, nose_l.y, rear_l.x, rear_l.y, outline);
+        line(s, nose_r.x, nose_r.y, rear_r.x, rear_r.y, outline);
+        line(s, nose_t.x, nose_t.y, rear_t.x, rear_t.y,
+             rgb(s, 222, 91, 57));
+        line(s, nose_b.x, nose_b.y, rear_b.x, rear_b.y, outline);
     }
     if (rear.visible && fin.visible) {
         fill_triangle(s, rear.x - 1, rear.y, rear.x + 1, rear.y,
@@ -3933,13 +4067,23 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
             enemy_model_point(enemy, 13.1f, 2.10f, 0.0f));
         if (mark_l.visible && mark_l_v0.visible && mark_l_v1.visible &&
             mark_l_h0.visible && mark_l_h1.visible) {
-            line(s, mark_l_v0.x, mark_l_v0.y, mark_l_v1.x, mark_l_v1.y, outline);
-            line(s, mark_l_h0.x, mark_l_h0.y, mark_l_h1.x, mark_l_h1.y, outline);
+            int thick;
+            for (thick = -1; thick <= 1; ++thick) {
+                line(s, mark_l_v0.x + thick, mark_l_v0.y,
+                     mark_l_v1.x + thick, mark_l_v1.y, outline);
+                line(s, mark_l_h0.x, mark_l_h0.y + thick,
+                     mark_l_h1.x, mark_l_h1.y + thick, outline);
+            }
         }
         if (mark_r.visible && mark_r_v0.visible && mark_r_v1.visible &&
             mark_r_h0.visible && mark_r_h1.visible) {
-            line(s, mark_r_v0.x, mark_r_v0.y, mark_r_v1.x, mark_r_v1.y, outline);
-            line(s, mark_r_h0.x, mark_r_h0.y, mark_r_h1.x, mark_r_h1.y, outline);
+            int thick;
+            for (thick = -1; thick <= 1; ++thick) {
+                line(s, mark_r_v0.x + thick, mark_r_v0.y,
+                     mark_r_v1.x + thick, mark_r_v1.y, outline);
+                line(s, mark_r_h0.x, mark_r_h0.y + thick,
+                     mark_r_h1.x, mark_r_h1.y + thick, outline);
+            }
         }
     } else {
         if (mark_l.visible) circle(s, mark_l.x, mark_l.y, 1, outline);
