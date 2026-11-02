@@ -393,6 +393,8 @@ typedef struct {
     float flight_throttle;
     float flight_alpha;
     int flight_stalled;
+    int flight_crashed;
+    uint32_t flight_crash_started;
     float airspeed;
     float scroll;
     float fuel;
@@ -1230,6 +1232,8 @@ static void reset_sortie(Game *g)
     g->flight_throttle = 0.68f;
     g->flight_alpha = 0.0f;
     g->flight_stalled = 0;
+    g->flight_crashed = 0;
+    g->flight_crash_started = 0;
     g->airspeed = 98.0f;
     g->scroll = 0.0f;
     g->fuel = 100.0f;
@@ -2026,6 +2030,12 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     int active = 0;
     float bank_input = 0.0f;
     float pitch_input = 0.0f;
+    if (g->flight_crashed) {
+        g->audio.engine_speed = 0.0f;
+        g->audio.engine_load = 0.0f;
+        g->audio.other_engine = 0.0f;
+        return;
+    }
     /* Conventional stick: left/right roll the matching wing down; pulling
      * back (Down) raises the nose and pushing forward (Up) lowers it. */
     if (keys[SDL_SCANCODE_LEFT]) bank_input = 1.0f;
@@ -2090,7 +2100,9 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     if (g->flight_y <= 0.0f) {
         g->flight_y = 0.0f;
         g->health = 0;
-        g->audio.blast = 3200;
+        g->flight_crashed = 1;
+        g->flight_crash_started = now;
+        g->audio.blast = 7000;
     }
     g->scroll += g->airspeed * dt;
     g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f);
@@ -3757,6 +3769,59 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
     }
 }
 
+static void draw_player_crash_overlay(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    float age;
+    int i;
+    if (!g->flight_crashed) return;
+    age = (float)(SDL_GetTicks() - g->flight_crash_started) / 1000.0f;
+    if (age < 0.16f) {
+        int flash = 96 - (int)(age * 420.0f);
+        circle(s, 320, 314, flash, rgb(s, 255, 191, 71));
+        circle(s, 320, 314, flash / 2, rgb(s, 255, 246, 191));
+    }
+    if (g->explosion_atlas && age < 1.55f) {
+        int frame = (int)(age / 1.55f * 8.0f);
+        int size = 160 + (int)(age * 54.0f);
+        if (frame > 7) frame = 7;
+        draw_explosion_frame(g, g->explosion_atlas, 8 + frame,
+                             320, 310 - (int)(age * 18.0f),
+                             size, 1, 255);
+    } else {
+        for (i = 0; i < 9; ++i) {
+            uint32_t seed = scene_hash(0x43524153u + (uint32_t)i * 97u);
+            int drift = (int)((int)(seed & 31u) - 15);
+            int rise = 28 + i * 11 + (int)(age * (9 + i));
+            int radius = 12 + i / 2 + (int)(age * 2.0f);
+            uint8_t grey = (uint8_t)(54 + i * 5);
+            circle(s, 320 + drift, 330 - rise, radius,
+                   rgb(s, grey, grey - 2, grey - 7));
+        }
+    }
+    /* Torn canvas, timber and metal leave the cockpit in different pieces;
+     * trajectories are deterministic so the effect is cheap on 68k. */
+    for (i = 0; i < 18; ++i) {
+        uint32_t seed = scene_hash(0x44454252u + (uint32_t)i * 131u);
+        float life = age < 1.8f ? age : 1.8f;
+        int vx = (int)(seed % 121u) - 60;
+        int vy = -42 - (int)((seed >> 8) % 78u);
+        int x = 320 + (int)(vx * life);
+        int y = 326 + (int)(vy * life + 58.0f * life * life);
+        uint32_t colour = (i % 3 == 0) ? rgb(s, 61, 49, 39) :
+                          (i % 3 == 1) ? rgb(s, 137, 91, 48) :
+                                         rgb(s, 111, 104, 89);
+        line(s, x - 3 - (i & 3), y - 2, x + 4 + (i & 1), y + 3, colour);
+        if ((i & 3) == 0) circle(s, x, y, 3, colour);
+    }
+    /* Jagged black gaps make the foreground read as a broken airframe, not
+     * an intact cockpit hidden behind a generic explosion. */
+    fill_triangle(s, 55, 421, 205, 380, 144, 458, rgb(s, 27, 24, 21));
+    fill_triangle(s, 585, 421, 438, 382, 503, 458, rgb(s, 27, 24, 21));
+    if (age > 0.55f)
+        draw_field_sign(g, 226, 270, 188, "AIRCRAFT DESTROYED");
+}
+
 static void draw_dogfight_simulator(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -3813,6 +3878,7 @@ static void draw_dogfight_simulator(Game *g)
     draw_field_sign(g, 502, 371, 130, buf);
     if (g->flight_stalled && ((now / 220u) & 1u))
         draw_field_sign(g, 240, 304, 160, "STALL - NOSE DOWN");
+    draw_player_crash_overlay(g);
 }
 
 static void draw_dogfight_3d_sortie(Game *g)
