@@ -36,8 +36,12 @@ The first vertical slice contains:
   and slipstream sound driven by airspeed and climb/dive load, with channels
   reserved for relative aircraft and real vehicle movement;
 - wooden-and-brass squadron boards and separate field-instrument placards;
-- a coherent two-depth scrolling battlefield and separately anchored gun
-  emplacements; rejected mixed-style foreground cutouts are not used;
+- a deterministic modular battlefield composer: distant hills scroll at 3.5%
+  of flight speed, ruined farms, churches, poplars, smoke, telegraph poles and
+  walls at 16%, and trenches, craters, wire, roads and blasted trees at 52%.
+  The same chapter and mission always rebuild the same landscape while later
+  missions can select different arrangements; interactive gun emplacements
+  remain separately anchored in gameplay space;
 - keyboard flight controls and an F10 full-screen test toggle.
 
 ## Controls

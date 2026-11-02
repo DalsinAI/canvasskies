@@ -1,5 +1,5 @@
 /*
- * Canvas Skies: 1917
+ * Canvas Skies
  *
  * An original cinematic WWI side-scrolling shooter prototype.  The flight
  * premise owes a debt to Sopwith and Scramble, but all presentation, code and
@@ -31,10 +31,46 @@
 #define CANVAS_JOURNAL_BMP "assets/canvas-skies/journal.bmp"
 #endif
 #ifndef CANVAS_BATTLEFIELD_BMP
-#define CANVAS_BATTLEFIELD_BMP "assets/canvas-skies/battlefield-panorama.bmp"
+#define CANVAS_BATTLEFIELD_BMP "assets/canvas-skies/far-hills.bmp"
 #endif
 #ifndef CANVAS_FOREGROUND_BMP
 #define CANVAS_FOREGROUND_BMP "assets/canvas-skies/foreground-panorama.bmp"
+#endif
+#ifndef CANVAS_MID_FARM_BMP
+#define CANVAS_MID_FARM_BMP "assets/canvas-skies/mid-farm.bmp"
+#endif
+#ifndef CANVAS_MID_CHURCH_BMP
+#define CANVAS_MID_CHURCH_BMP "assets/canvas-skies/mid-church.bmp"
+#endif
+#ifndef CANVAS_MID_POPLARS_BMP
+#define CANVAS_MID_POPLARS_BMP "assets/canvas-skies/mid-poplars.bmp"
+#endif
+#ifndef CANVAS_MID_SMOKE_BMP
+#define CANVAS_MID_SMOKE_BMP "assets/canvas-skies/mid-smoke.bmp"
+#endif
+#ifndef CANVAS_MID_TELEGRAPH_BMP
+#define CANVAS_MID_TELEGRAPH_BMP "assets/canvas-skies/mid-telegraph.bmp"
+#endif
+#ifndef CANVAS_MID_WALL_BMP
+#define CANVAS_MID_WALL_BMP "assets/canvas-skies/mid-wall.bmp"
+#endif
+#ifndef CANVAS_NEAR_CRATER_BMP
+#define CANVAS_NEAR_CRATER_BMP "assets/canvas-skies/near-crater.bmp"
+#endif
+#ifndef CANVAS_NEAR_TRENCH_BMP
+#define CANVAS_NEAR_TRENCH_BMP "assets/canvas-skies/near-trench.bmp"
+#endif
+#ifndef CANVAS_NEAR_TREE_BMP
+#define CANVAS_NEAR_TREE_BMP "assets/canvas-skies/near-tree.bmp"
+#endif
+#ifndef CANVAS_NEAR_WIRE_BMP
+#define CANVAS_NEAR_WIRE_BMP "assets/canvas-skies/near-wire.bmp"
+#endif
+#ifndef CANVAS_NEAR_ROAD_BMP
+#define CANVAS_NEAR_ROAD_BMP "assets/canvas-skies/near-road.bmp"
+#endif
+#ifndef CANVAS_NEAR_MOUND_BMP
+#define CANVAS_NEAR_MOUND_BMP "assets/canvas-skies/near-mound.bmp"
 #endif
 #ifndef CANVAS_MACHINE_GUN_BMP
 #define CANVAS_MACHINE_GUN_BMP "assets/canvas-skies/ground-machine-gun.bmp"
@@ -79,6 +115,8 @@
 #define MAX_ENEMIES 10
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
+#define MIDGROUND_ELEMENT_COUNT 6
+#define NEAR_ELEMENT_COUNT 6
 
 typedef enum {
     SCENE_TITLE,
@@ -201,6 +239,8 @@ typedef struct {
     SDL_Surface *journal;
     SDL_Surface *battlefield;
     SDL_Surface *foreground_panorama;
+    SDL_Surface *midground[MIDGROUND_ELEMENT_COUNT];
+    SDL_Surface *near_props[NEAR_ELEMENT_COUNT];
     SDL_Surface *machine_gun_sprite;
     SDL_Surface *aa_gun_sprite;
     SDL_Surface *font_display_36x42;
@@ -239,6 +279,49 @@ typedef struct {
     Enemy enemies[MAX_ENEMIES];
     Target targets[MAX_TARGETS];
 } Game;
+
+static uint32_t scene_hash(uint32_t value)
+{
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    value ^= value >> 16;
+    return value;
+}
+
+static void draw_element_layer(Game *g, SDL_Surface **elements, int count,
+                               float parallax, int spacing, int ground_y,
+                               uint32_t salt)
+{
+    int camera = (int)(g->scroll * parallax);
+    int first_segment = camera / spacing - 1;
+    int visible_segments = SCREEN_W / spacing + 3;
+    int n;
+
+    for (n = 0; n < visible_segments; ++n) {
+        int segment = first_segment + n;
+        uint32_t seed = scene_hash((uint32_t)segment * 2654435761u ^
+                                   (uint32_t)(g->chapter + 1) * 2246822519u ^
+                                   (uint32_t)(g->mission + 1) * 3266489917u ^
+                                   salt);
+        SDL_Surface *element = elements[seed % (uint32_t)count];
+        int jitter = (int)((seed >> 9) % (uint32_t)(spacing / 3));
+        int x;
+        SDL_Rect dest;
+
+        if (!element)
+            continue;
+        x = segment * spacing - camera + jitter;
+        if (x + element->w < 0 || x >= SCREEN_W)
+            continue;
+        dest.x = x;
+        dest.y = ground_y - element->h;
+        dest.w = element->w;
+        dest.h = element->h;
+        SDL_BlitSurface(element, NULL, g->screen, &dest);
+    }
+}
 
 static uint32_t rgb(SDL_Surface *s, uint8_t r, uint8_t g, uint8_t b)
 {
@@ -1290,7 +1373,7 @@ static void draw_sortie(Game *g)
     if (g->battlefield) {
         SDL_Rect source;
         int limit = g->battlefield->w - SCREEN_W;
-        source.x = (int)(g->scroll * 0.08f);
+        source.x = (int)(g->scroll * 0.035f);
         if (source.x < 0) source.x = 0;
         if (source.x > limit) source.x = limit;
         source.y = 0;
@@ -1305,6 +1388,8 @@ static void draw_sortie(Game *g)
     near = rgb(s, 72, 59, 46);
     earth = rgb(s, 43, 37, 31);
     wire = rgb(s, 43, 39, 34);
+    draw_element_layer(g, g->midground, MIDGROUND_ELEMENT_COUNT,
+                       0.16f, 285, 285, 0x4d494431u);
     if (!g->battlefield) {
         for (x = 0; x < SCREEN_W; ++x) {
             int fy = 228 + (int)(18 * sinf((x + g->scroll * 0.18f) * 0.012f));
@@ -1352,6 +1437,8 @@ static void draw_sortie(Game *g)
             SDL_BlitSurface(g->foreground_panorama, &source, s, &dest);
         }
     }
+    draw_element_layer(g, g->near_props, NEAR_ELEMENT_COUNT,
+                       0.52f, 235, 350, 0x4e454152u);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         int sx = (int)(g->targets[i].world_x - g->scroll);
         if (sx > -20 && sx < SCREEN_W + 20) {
@@ -1556,6 +1643,37 @@ static int game_init(Game *g)
     else
         fprintf(stderr, "Foreground panorama unavailable (%s): %s\n",
                 CANVAS_FOREGROUND_BMP, SDL_GetError());
+    {
+        const char *mid_paths[MIDGROUND_ELEMENT_COUNT] = {
+            CANVAS_MID_FARM_BMP, CANVAS_MID_CHURCH_BMP,
+            CANVAS_MID_POPLARS_BMP, CANVAS_MID_SMOKE_BMP,
+            CANVAS_MID_TELEGRAPH_BMP, CANVAS_MID_WALL_BMP
+        };
+        const char *near_paths[NEAR_ELEMENT_COUNT] = {
+            CANVAS_NEAR_CRATER_BMP, CANVAS_NEAR_TRENCH_BMP,
+            CANVAS_NEAR_TREE_BMP, CANVAS_NEAR_WIRE_BMP,
+            CANVAS_NEAR_ROAD_BMP, CANVAS_NEAR_MOUND_BMP
+        };
+        int i;
+        for (i = 0; i < MIDGROUND_ELEMENT_COUNT; ++i) {
+            g->midground[i] = SDL_LoadBMP(mid_paths[i]);
+            if (g->midground[i])
+                SDL_SetColorKey(g->midground[i], SDL_TRUE,
+                    SDL_MapRGB(g->midground[i]->format, 255, 0, 255));
+            else
+                fprintf(stderr, "Midground element unavailable (%s): %s\n",
+                        mid_paths[i], SDL_GetError());
+        }
+        for (i = 0; i < NEAR_ELEMENT_COUNT; ++i) {
+            g->near_props[i] = SDL_LoadBMP(near_paths[i]);
+            if (g->near_props[i])
+                SDL_SetColorKey(g->near_props[i], SDL_TRUE,
+                    SDL_MapRGB(g->near_props[i]->format, 255, 0, 255));
+            else
+                fprintf(stderr, "Near-ground element unavailable (%s): %s\n",
+                        near_paths[i], SDL_GetError());
+        }
+    }
     g->machine_gun_sprite = SDL_LoadBMP(CANVAS_MACHINE_GUN_BMP);
     g->aa_gun_sprite = SDL_LoadBMP(CANVAS_AA_GUN_BMP);
     {
@@ -1680,6 +1798,13 @@ int main(int argc, char **argv)
     if (g.journal) SDL_FreeSurface(g.journal);
     if (g.battlefield) SDL_FreeSurface(g.battlefield);
     if (g.foreground_panorama) SDL_FreeSurface(g.foreground_panorama);
+    {
+        int i;
+        for (i = 0; i < MIDGROUND_ELEMENT_COUNT; ++i)
+            if (g.midground[i]) SDL_FreeSurface(g.midground[i]);
+        for (i = 0; i < NEAR_ELEMENT_COUNT; ++i)
+            if (g.near_props[i]) SDL_FreeSurface(g.near_props[i]);
+    }
     if (g.machine_gun_sprite) SDL_FreeSurface(g.machine_gun_sprite);
     if (g.aa_gun_sprite) SDL_FreeSurface(g.aa_gun_sprite);
     if (g.font_display_36x42) SDL_FreeSurface(g.font_display_36x42);
