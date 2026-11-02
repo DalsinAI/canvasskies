@@ -3783,6 +3783,9 @@ static void draw_simulator_terrain(Game *g)
 {
     SDL_Surface *s = g->screen;
     int horizon_left, horizon_right;
+    float horizon_dx, horizon_dy, horizon_length;
+    float sky_normal_x, sky_normal_y;
+    int ground_positive = 1;
     int tx, tz, pass;
     {
         const float far = 12000.0f;
@@ -3803,6 +3806,31 @@ static void draw_simulator_terrain(Game *g)
                                           -SCREEN_H * 3.0f,
                                            SCREEN_H * 4.0f);
     }
+    horizon_dx = (float)(SCREEN_W - 1);
+    horizon_dy = (float)(horizon_right - horizon_left);
+    horizon_length = sqrtf(horizon_dx * horizon_dx +
+                           horizon_dy * horizon_dy);
+    if (horizon_length < 1.0f) horizon_length = 1.0f;
+    sky_normal_x = -horizon_dy / horizon_length;
+    sky_normal_y = horizon_dx / horizon_length;
+    {
+        float sh = sinf(g->flight_heading), ch = cosf(g->flight_heading);
+        Projected3D ground_probe = project_world_point(g, (Vec3){
+            g->flight_x + sh * 2400.0f, 0.0f,
+            g->flight_z + ch * 2400.0f});
+        if (ground_probe.visible) {
+            float side = horizon_dx *
+                         ((float)ground_probe.y - horizon_left) -
+                         horizon_dy * (float)ground_probe.x;
+            ground_positive = side >= 0.0f;
+        }
+    }
+    /* (-dy, dx) points to the positive half-plane.  Haze belongs on the
+     * opposite side from the projected ground probe. */
+    if (ground_positive) {
+        sky_normal_x = -sky_normal_x;
+        sky_normal_y = -sky_normal_y;
+    }
     /* The atmosphere is tied to the projected horizon, not the monitor. */
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 23, 48, 86));
     {
@@ -3815,15 +3843,38 @@ static void draw_simulator_terrain(Game *g)
             uint8_t red = (uint8_t)(23.0f + 169.0f * t);
             uint8_t green = (uint8_t)(48.0f + 113.0f * t);
             uint8_t blue = (uint8_t)(86.0f + 38.0f * t);
-            line(s, 0, horizon_left - distance,
-                 SCREEN_W - 1, horizon_right - distance,
+            float centre_x = (SCREEN_W - 1) * 0.5f +
+                             sky_normal_x * distance;
+            float centre_y = (horizon_left + horizon_right) * 0.5f +
+                             sky_normal_y * distance;
+            float tangent_x = horizon_dx / horizon_length;
+            float tangent_y = horizon_dy / horizon_length;
+            const float span = 1100.0f;
+            line(s, (int)(centre_x - tangent_x * span),
+                 (int)(centre_y - tangent_y * span),
+                 (int)(centre_x + tangent_x * span),
+                 (int)(centre_y + tangent_y * span),
                  rgb(s, red, green, blue));
         }
     }
-    fill_triangle(s, 0, horizon_left, SCREEN_W - 1, horizon_right,
-                  0, SCREEN_H - 1, rgb(s, 78, 78, 48));
-    fill_triangle(s, SCREEN_W - 1, horizon_right, SCREEN_W - 1,
-                  SCREEN_H - 1, 0, SCREEN_H - 1, rgb(s, 67, 69, 42));
+    {
+        int x;
+        uint32_t ground = rgb(s, 70, 74, 45);
+        for (x = 0; x < SCREEN_W; ++x) {
+            int horizon_y = horizon_left +
+                (int)(horizon_dy * (float)x / horizon_dx);
+            if (ground_positive) {
+                int start = horizon_y;
+                if (start < 0) start = 0;
+                if (start < SCREEN_H)
+                    line(s, x, start, x, SCREEN_H - 1, ground);
+            } else {
+                int end = horizon_y;
+                if (end >= SCREEN_H) end = SCREEN_H - 1;
+                if (end >= 0) line(s, x, 0, x, end, ground);
+            }
+        }
+    }
 
     /* Two deterministic ridge rings bridge atmosphere and ground.  Their
      * bearings are fixed in the world, so they roll and pan with the same
