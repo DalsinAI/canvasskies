@@ -2213,8 +2213,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     /* Conventional stick: left/right roll the matching wing down; pulling
      * back (Down) raises the nose and pushing forward (Up) lowers it. */
-    if (keys[SDL_SCANCODE_LEFT]) aileron_command = -1.0f;
-    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
+    if (keys[SDL_SCANCODE_LEFT]) aileron_command = 1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) aileron_command = -1.0f;
     if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
     if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
     if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
