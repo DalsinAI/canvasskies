@@ -434,6 +434,8 @@ typedef struct {
 
 static void flight_state_init(FlightState *f, float heading, float pitch,
                               float bank, float speed, float throttle);
+static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
+                                   float east, float down);
 
 static int is_perspective_mode(MissionMode mode)
 {
@@ -1477,6 +1479,24 @@ static Projected3D project_world_point(const Game *g, Vec3 point)
     float dx = point.x - g->flight_x;
     float dy = point.y - g->flight_y;
     float dz = point.z - g->flight_z;
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    const float focal = 330.0f;
+    if (mode == MISSION_DOGFIGHT_3D) {
+        /* The flight quaternion is the camera attitude.  Transform the world
+         * displacement straight back into body axes so the terrain, horizon,
+         * clouds and aircraft all share exactly one frame of reference. */
+        Vec3 body = flight_rotate_from_ned(&g->flight, dz, dx, -dy);
+        out.depth = body.x;
+        out.visible = body.x > 5.0f;
+        if (out.visible) {
+            out.x = 320 + (int)(body.y * focal / body.x);
+            out.y = 190 + (int)(body.z * focal / body.x);
+        } else {
+            out.x = out.y = -10000;
+        }
+        return out;
+    }
+    {
     float ch = cosf(g->flight_heading);
     float sh = sinf(g->flight_heading);
     float cp = cosf(g->view_pitch);
@@ -1489,7 +1509,6 @@ static Projected3D project_world_point(const Game *g, Vec3 point)
     float camera_z = sp * dy + cp * forward;
     float rolled_x = cr * camera_x + sr * camera_y;
     float rolled_y = -sr * camera_x + cr * camera_y;
-    const float focal = 330.0f;
     out.depth = camera_z;
     out.visible = camera_z > 5.0f;
     if (out.visible) {
@@ -1497,6 +1516,7 @@ static Projected3D project_world_point(const Game *g, Vec3 point)
         out.y = 190 - (int)(rolled_y * focal / camera_z);
     } else {
         out.x = out.y = -10000;
+    }
     }
     return out;
 }
@@ -3630,21 +3650,29 @@ static void draw_simulator_terrain(Game *g)
 {
     SDL_Surface *s = g->screen;
     const float tile_size = 520.0f;
-    float bank_cos = cosf(g->view_bank);
-    float horizon_slope;
-    int horizon_centre;
     int horizon_left, horizon_right;
     int base_tile_x = (int)floorf(g->flight_x / tile_size);
     int base_tile_z = (int)floorf(g->flight_z / tile_size);
     int tx, tz;
-    if (fabsf(bank_cos) < 0.25f)
-        bank_cos = bank_cos < 0.0f ? -0.25f : 0.25f;
-    horizon_slope = sinf(g->view_bank) / bank_cos;
-    if (horizon_slope < -4.0f) horizon_slope = -4.0f;
-    if (horizon_slope > 4.0f) horizon_slope = 4.0f;
-    horizon_centre = 190 + (int)(sinf(g->view_pitch) * 330.0f);
-    horizon_left = horizon_centre - (int)(horizon_slope * 320.0f);
-    horizon_right = horizon_centre + (int)(horizon_slope * 320.0f);
+    {
+        const float far = 12000.0f;
+        const float wide = 14000.0f;
+        float sh = sinf(g->flight_heading), ch = cosf(g->flight_heading);
+        Vec3 centre = {g->flight_x + sh * far, 0.0f,
+                       g->flight_z + ch * far};
+        Projected3D left = project_world_point(g, (Vec3){
+            centre.x - ch * wide, centre.y, centre.z + sh * wide});
+        Projected3D right = project_world_point(g, (Vec3){
+            centre.x + ch * wide, centre.y, centre.z - sh * wide});
+        horizon_left = left.visible ? left.y : SCREEN_H / 2;
+        horizon_right = right.visible ? right.y : SCREEN_H / 2;
+        horizon_left = (int)flight_clamp((float)horizon_left,
+                                         -SCREEN_H * 3.0f,
+                                          SCREEN_H * 4.0f);
+        horizon_right = (int)flight_clamp((float)horizon_right,
+                                          -SCREEN_H * 3.0f,
+                                           SCREEN_H * 4.0f);
+    }
     /* This is a world-space 360-degree view.  A finite photograph cannot be
      * wrapped into a flight-sim landscape without seams or backwards motion. */
     gradient(s, 38, 72, 112, 201, 170, 118);
