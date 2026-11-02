@@ -2321,9 +2321,16 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         float dx, dy, dz, horizontal, distance;
         float desired_heading, heading_error, desired_bank, desired_pitch;
         if (enemy->crashing) {
+            /* Preserve forward momentum, but force a real downward velocity.
+             * The previous pitch decrement had the model's nose-up sign and
+             * made a descending centre look as though the aircraft fell
+             * upwards. */
+            if (enemy->vy > -12.0f) enemy->vy = -12.0f;
+            enemy->vy -= (31.0f + i * 1.7f) * dt;
             enemy->bank += dt * (1.7f + 0.16f * i);
-            enemy->pitch -= 0.72f * dt;
-            enemy->world_y -= (34.0f + (620.0f - enemy->world_y) * 0.10f) * dt;
+            enemy->pitch = flight_approach(enemy->pitch, 0.82f, 0.64f * dt);
+            enemy->heading += sinf(enemy->bank) * 0.24f * dt;
+            enemy->world_y += enemy->vy * dt;
             enemy->world_x += sinf(enemy->heading) * enemy->speed * 0.42f * dt;
             enemy->world_z += cosf(enemy->heading) * enemy->speed * 0.42f * dt;
             if (enemy->world_y < 15.0f) enemy->active = 0;
@@ -3685,19 +3692,18 @@ static void draw_simulator_terrain(Game *g)
                                           -SCREEN_H * 3.0f,
                                            SCREEN_H * 4.0f);
     }
-    /* The atmosphere is tied to the projected horizon, not the monitor.  The
-     * broad bands are deliberately subtle, but they stop a banked landscape
-     * looking pasted over an upright photographic sky. */
-    gradient(s, 23, 48, 86, 70, 94, 119);
+    /* The atmosphere is tied to the projected horizon, not the monitor. */
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 23, 48, 86));
     {
         int distance;
         /* One-pixel bands are cheaper than alpha blending on a 68040 and
-         * produce a continuous horizon-relative aerial perspective. */
-        for (distance = 150; distance >= 0; --distance) {
-            float t = 1.0f - (float)distance / 150.0f;
-            uint8_t red = (uint8_t)(59.0f + 133.0f * t);
-            uint8_t green = (uint8_t)(87.0f + 74.0f * t);
-            uint8_t blue = (uint8_t)(121.0f + 3.0f * t);
+         * produce a continuous horizon-relative aerial perspective.  Start
+         * at the exact upper-sky colour so there is no horizontal join. */
+        for (distance = 260; distance >= 0; --distance) {
+            float t = 1.0f - (float)distance / 260.0f;
+            uint8_t red = (uint8_t)(23.0f + 169.0f * t);
+            uint8_t green = (uint8_t)(48.0f + 113.0f * t);
+            uint8_t blue = (uint8_t)(86.0f + 38.0f * t);
             line(s, 0, horizon_left - distance,
                  SCREEN_W - 1, horizon_right - distance,
                  rgb(s, red, green, blue));
