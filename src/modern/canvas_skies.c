@@ -1268,6 +1268,25 @@ static int current_mission_goal(const Game *g)
     return chapters[g->chapter].goal;
 }
 
+static int perspective_enemy_total(const Game *g)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    int total = chapters[g->chapter].enemy_count;
+    if (mode == MISSION_GUNNER_3D && total > 2) total = 2;
+    if (mode == MISSION_DOGFIGHT_3D && total > 4) total = 4;
+    return total;
+}
+
+static int perspective_enemies_remaining(const Game *g)
+{
+    int i, remaining = 0;
+    for (i = 0; i < MAX_ENEMIES; ++i) {
+        if (g->enemies[i].active && !g->enemies[i].crashing)
+            ++remaining;
+    }
+    return remaining;
+}
+
 static void reset_sortie(Game *g)
 {
     int i;
@@ -1325,6 +1344,7 @@ static void reset_sortie(Game *g)
     g->objectives = 0;
     g->ammunition = 260 - g->chapter * 13;
     if (g->ammunition < 160) g->ammunition = 160;
+    g->ammunition += g->ammunition / 2;
     g->bombs_remaining = 12 - g->chapter / 2;
     if (g->bombs_remaining < 8) g->bombs_remaining = 8;
     g->last_shot = 0;
@@ -4509,8 +4529,8 @@ static void draw_dogfight_simulator(Game *g)
         circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
         circle(s, 350, 228, 2, rgb(s, 255, 238, 157));
     }
-    snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
-             current_mission_goal(g));
+    snprintf(buf, sizeof(buf), "ENEMIES %d/%d",
+             perspective_enemies_remaining(g), perspective_enemy_total(g));
     draw_field_sign(g, 8, 342, 130, buf);
     snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
     draw_field_sign(g, 8, 371, 130, buf);
@@ -4657,8 +4677,8 @@ static void draw_dogfight_3d_sortie(Game *g)
         line(s, ax - 12, ay + 12, ax - 6, ay + 16, sight);
         line(s, ax + 12, ay + 12, ax + 6, ay + 16, sight);
     }
-    snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
-             current_mission_goal(g));
+    snprintf(buf, sizeof(buf), "ENEMIES %d/%d",
+             perspective_enemies_remaining(g), perspective_enemy_total(g));
     draw_field_sign(g, 8, 342, 130, buf);
     snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
     draw_field_sign(g, 8, 371, 130, buf);
