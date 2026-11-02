@@ -1,0 +1,112 @@
+# Canvas Skies historical voice guide
+
+Canvas Skies is fictional, but Neddy Seagoon's journal should sound as though it
+belongs among surviving First World War flying diaries. This is the working
+source ledger and writing standard for all 96 missions. It is a guide to tone
+and material, not a licence to copy a real person's words or life story.
+
+## Primary sources
+
+### Capt. Ewart James Garland, RFC
+
+- [Diary of Capt. E. J. Garland RFC — Army Flying Museum](https://armyflying.com/the-collections/online-exhibitions/diary-of-capt-e-j-garland-rfc/)
+- Best source for the operational rhythm of the campaign, particularly 1916–17.
+- Garland moves directly from weather to work: photography, artillery
+  observation, patrols, bomb raids, machine tests and ferry flights. Missions
+  are measured in height, hours, plates, bomb weight and whether an escort was
+  present.
+- Mechanical trouble is ordinary rather than theatrical: a jammed gun, a
+  damaged machine under repair, poor visibility, bad bumps and a forced return.
+- Danger and domestic life sit beside one another. A disastrous sortie may be
+  followed by the dentist, work on the mess, dinner with another squadron or a
+  concert. The diary calls grounded weather a "dud day" and moves on.
+- Emotion is brief and therefore powerful. Loss, pride and fear appear as one
+  plain sentence amid practical notes; they are not converted into speeches.
+
+### Lt. Zenos R. Miller, USAS
+
+- [Zenos R. Miller World War I Diaries — Smithsonian Transcription Center](https://transcription.si.edu/projects/air-and-space/17872)
+- [Downloadable transcription of Diary 1](https://edan.si.edu/transcription/pdf_files/17872.pdf)
+- Useful for the late-war and prisoner-of-war end of the story. Miller records
+  comrades by name and nickname, how each was captured, camp regulations,
+  roll calls, parole walks, food, improvised cooking gear, songs and jokes.
+- His material keeps machinery human: pilots discuss the merits of different
+  scouts, engines fail or are shot through, and a crash is remembered alongside
+  the meal or room shared afterwards.
+- The camp writing is not unbroken misery. Hunger, sickness and confinement
+  coexist with birthday dinners, music and irreverent humour. This is the model
+  for relief without making the war cosy.
+
+## Supporting museum material
+
+These are useful for checking what a mission asks Neddy to do and what he could
+reasonably see, carry or report. They should inform action and vocabulary, not
+be mined for dramatic plots.
+
+- [Transcript of the First World War reconnaissance podcast — RAF Museum](https://www.rafmuseum.org.uk/documents/podcasts/transcripts/ww1_photo_recon.pdf): map preparation, visual sketching, cameras and plates, weather, working height, anti-aircraft fire and repeat sorties when photographs fail.
+- [First World War personal experiences — RAF Museum](https://www.rafmuseum.org.uk/research/online-exhibitions/taking-flight/personal-experiences/first-world-war/): James McCudden's progression from mechanic and observer to fighter pilot, useful for technical confidence, training and the changing air war.
+- [Personal papers in the RAF Museum archive](https://www.rafmuseum.org.uk/our-collection/collections/archive-collection/personal-papers/): diaries, letters, memoirs, log books, reports and training notebooks that can support later fact-checking without treating one exceptional pilot as typical.
+
+## Journal grammar
+
+Each pre-mission entry should normally contain four beats, in this order:
+
+1. Date, place, weather and visibility.
+2. The assigned work, stated in practical terms.
+3. The condition of the machine, crew or equipment.
+4. One personal observation, never a summary of what the player ought to feel.
+
+A strong entry is usually two to five ruled lines. It should read like something
+written at the end of a long day, not like narration written for an audience.
+
+Prefer concrete particulars:
+
+- altitude, duration, compass bearing, cloud base and wind;
+- aircraft type or simply "the machine" when Neddy is tired of it;
+- observer, escort, plates, wireless set, message bag, bomb weight and fuel;
+- a gun stoppage, oil leak, torn fabric, bent undercarriage or rough engine;
+- breakfast, tea, repairs, letters, the dentist, a concert, a muddy bicycle or
+  an empty chair at mess;
+- names and nicknames before abstractions such as courage, sacrifice or glory.
+
+Use period terms sparingly and only when the speaker would use them. "Archie"
+is anti-aircraft fire; "the lines" is enough when everyone knows which lines;
+photographic plates are exposed, changed and returned for development. Avoid
+turning every noun into period slang.
+
+## Emotional register
+
+- Understatement is the default.
+- Fear appears through behaviour: checking the compass again, watching the oil
+  pressure, counting holes, staying close to cloud or hurrying west of the line.
+- Grief names the missing person and the ordinary thing left behind.
+- Humour comes from squadron life and the characters, not from mocking injury or
+  death.
+- Victories are uncertain until confirmed and rarely feel clean.
+- The Armistice is first experienced as a change in sound and routine. Let the
+  quiet carry the ending.
+
+## Campaign progression
+
+- **1914:** maps, handwritten messages, visual reconnaissance and unreliable
+  machines; enemy aviators are first seen as other men doing the same work.
+- **1915:** cameras, wireless and improvised weapons arrive; trench lines and
+  weather dominate the work.
+- **1916:** artillery observation, photography, balloons and the industrial
+  scale of the Somme; fatigue replaces novelty.
+- **1917:** specialised aircraft, escorts, formation fighting, heavy losses,
+  night work and repeated photographic sorties.
+- **1918:** retreat, rapidly moving fronts, rebuilt machines and mixed Allied
+  formations; experience makes Neddy precise, not invulnerable.
+- **November 1918:** rumours, orders, clocks and the abrupt absence of firing;
+  avoid giving Neddy foreknowledge of history while he is living it.
+
+## What not to do
+
+- Do not copy diary sentences, distinctive incidents or a real pilot's life arc.
+- Do not make every entry prophetic, heroic or mournful.
+- Do not use later historical terminology in Neddy's immediate observations.
+- Do not make the journal repeat the commander's briefing or explain controls.
+- Do not erase routine, failed sorties, weather cancellations and repairs; they
+  are what make the exceptional missions credible.
+

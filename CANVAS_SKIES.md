@@ -1,6 +1,6 @@
-# Canvas Skies: 1917
+# Canvas Skies
 
-`Canvas Skies: 1917` is an original cinematic WWI shooter built from the useful
+`Canvas Skies` is an original cinematic WWI shooter built from the useful
 lessons in SDL Sopwith rather than a cosmetic reskin of the 1984 game. It uses
 the existing SDL2/OpenGPU module and a CPU-authoritative 32-bit window surface.
 
@@ -75,3 +75,7 @@ artwork, music, branding or story material from Cinemaware's *Wings* is used.
 The battlefield panorama and mission board are also original generated assets
 created for this project; their full-resolution sources are retained beside the
 game-ready BMP files.
+
+The fictional campaign's journal voice and operational details are grounded in
+museum-held diaries and aviation records. The source ledger and rules for using
+them without copying real lives are in `CANVAS_SKIES_SOURCES.md`.
