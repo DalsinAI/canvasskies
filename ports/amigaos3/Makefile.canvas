@@ -4,12 +4,24 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
+HDR := src/modern/canvas_campaign.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
 	-DCANVAS_TITLE_BMP=\"PROGDIR:assets/canvas-skies/title.bmp\" \
-	-DCANVAS_DISPLAY_FONT_BMP=\"PROGDIR:assets/canvas-skies/font-display.bmp\" \
-	-DCANVAS_TYPEWRITER_FONT_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter.bmp\" \
+	-DCANVAS_BOARD_BMP=\"PROGDIR:assets/canvas-skies/mission-board-v2.bmp\" \
+	-DCANVAS_JOURNAL_BMP=\"PROGDIR:assets/canvas-skies/journal.bmp\" \
+	-DCANVAS_BATTLEFIELD_BMP=\"PROGDIR:assets/canvas-skies/battlefield-panorama.bmp\" \
+	-DCANVAS_FOREGROUND_BMP=\"PROGDIR:assets/canvas-skies/foreground-panorama.bmp\" \
+	-DCANVAS_MACHINE_GUN_BMP=\"PROGDIR:assets/canvas-skies/ground-machine-gun.bmp\" \
+	-DCANVAS_AA_GUN_BMP=\"PROGDIR:assets/canvas-skies/ground-aa-gun.bmp\" \
+	-DCANVAS_DISPLAY_36X42_BMP=\"PROGDIR:assets/canvas-skies/font-display-36x42.bmp\" \
+	-DCANVAS_DISPLAY_22X28_BMP=\"PROGDIR:assets/canvas-skies/font-display-22x28.bmp\" \
+	-DCANVAS_DISPLAY_16X23_BMP=\"PROGDIR:assets/canvas-skies/font-display-16x23.bmp\" \
+	-DCANVAS_DISPLAY_12X18_BMP=\"PROGDIR:assets/canvas-skies/font-display-12x18.bmp\" \
+	-DCANVAS_TYPEWRITER_10X15_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter-10x15.bmp\" \
+	-DCANVAS_TYPEWRITER_7X11_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter-7x11.bmp\" \
+	-DCANVAS_JOURNAL_8X12_BMP=\"PROGDIR:assets/canvas-skies/font-journal-8x12.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
 	-DCANVAS_ENEMY_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy.bmp\" \
 	-DCANVAS_MARCH_WAV=\"PROGDIR:assets/canvas-skies/washington-post-gramophone.wav\"
@@ -20,7 +32,7 @@ LDLIBS := -lSDL2 -lm -lamiga
 
 all: $(OUT)
 
-$(OUT): $(SRC)
+$(OUT): $(SRC) $(HDR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 

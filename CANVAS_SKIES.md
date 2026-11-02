@@ -6,23 +6,45 @@ the existing SDL2/OpenGPU module and a CPU-authoritative 32-bit window surface.
 
 The first vertical slice contains:
 
+- an eight-chapter, 96-mission chronological campaign beginning with unarmed
+  observation in August 1914 and ending at 11:00 on Armistice Day;
+- a continuous first-person story lived by pilot Neddy Seagoon: every mission
+  opens on his physical journal, followed by formal General Headquarters
+  orders issued by the Commander-in-Chief;
+- campaign data for four side-on, four top-down and four perspective 3D
+  dogfight missions in every chapter. Side/top-down sorties contain only
+  Neddy's aircraft; 3D sorties add persistent allied pilots Eccles, Gridpipe
+  Thyne and Bluebottle against increasingly capable enemy formations. The
+  opening side-on mission is playable in this vertical slice; the dedicated
+  top-down and 3D gameplay/rendering loops remain to be built;
 - an original painted title screen;
-- a period serif display face and field-typewriter briefing face, rasterised
-  from the OFL-licensed Liberation fonts;
+- period serif display and field-typewriter faces, each rasterised into a
+  separate atlas at every final pixel size and copied 1:1 with no run-time
+  font scaling. The display face is Noto Serif Display; the field face is
+  Liberation Mono Bold;
 - squadron briefing and debriefing screens;
 - a continuous side-on, Scramble-style mission with fuel, airframe damage,
   armed fighters, machine-gun nests, anti-aircraft guns and ground objectives;
+- proximity-fused flak bursts, visible progressive airframe smoke/flame and
+  a wide parallax battlefield panorama with ruined villages, church tower,
+  shell holes, trenches, waterlogged earth and layered dawn haze;
 - newly illustrated multi-angle aircraft sprites;
 - a gramophone-treated 1889 military march, with original real-time synth
-  fallback and sound effects;
+  fallback, an added marching drum line, and distinct machine-gun/artillery
+  sound envelopes;
+- music only outside missions; gameplay switches to a continuous-phase engine
+  and slipstream sound driven by airspeed and climb/dive load, with channels
+  reserved for relative aircraft and real vehicle movement;
+- wooden-and-brass squadron boards and separate field-instrument placards;
+- a coherent two-depth scrolling battlefield and separately anchored gun
+  emplacements; rejected mixed-style foreground cutouts are not used;
 - keyboard flight controls and an F10 full-screen test toggle.
 
 ## Controls
 
-- Up/Down or comma/slash: climb/dive
-- A/D: move fore and aft within the visible formation
-- X/Right: increase speed
-- Z/Left: reduce speed
+- Arrow keys: move the aircraft in all four directions
+- X: increase throttle
+- Z: reduce throttle
 - Space: fire
 - Enter: advance through title, briefing and debriefing
 - F10: toggle full screen
@@ -50,3 +72,6 @@ an intentionally narrow-band, shellac-era recording. Full credits are in
 
 The title painting is original generated artwork created for this project. No
 artwork, music, branding or story material from Cinemaware's *Wings* is used.
+The battlefield panorama and mission board are also original generated assets
+created for this project; their full-resolution sources are retained beside the
+game-ready BMP files.
