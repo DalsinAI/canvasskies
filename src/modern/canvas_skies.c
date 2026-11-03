@@ -5362,6 +5362,15 @@ int main(int argc, char **argv)
         g.success = 0;
         g.health = 0;
         set_scene(&g, SCENE_DEBRIEF);
+    } else if (argc > 1 && strcmp(argv[1], "DEBRIEF_SUCCESS") == 0) {
+        /* Direct listening/visual test for the mission-complete board and its
+         * de-clicked officers' mess cue. */
+        g.chapter = 2;
+        g.mission = 2;
+        reset_sortie(&g);
+        g.success = 1;
+        g.score = current_mission_goal(&g) * 250;
+        set_scene(&g, SCENE_DEBRIEF);
     }
     previous = SDL_GetTicks();
     while (g.running) {

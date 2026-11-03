@@ -1,8 +1,11 @@
 # Canvas Skies: implementation status and handoff
 
-Status date: 2 November 2026  
-Branch: `canvas-skies-vertical-slice`  
-Code state before this documentation commit: `9a33fd9`  
+Status date: 3 November 2026
+
+Branch: `canvas-skies-vertical-slice`
+
+Code state before this documentation commit: `9a33fd9`
+
 Repository: `DalsinAI/amigasdlsopwith`
 
 This file is the resumable handoff. Update it when a significant feature is
@@ -76,11 +79,14 @@ CanvasSkies TOPDOWN
 CanvasSkies DOGFIGHT
 CanvasSkies GUNNER
 CanvasSkies DEBRIEF
+CanvasSkies DEBRIEF_SUCCESS
 ```
 
 `DOGFIGHT` and `GUNNER` deliberately use a durable late-war test and keep the
 sortie open for visual inspection. The normal executable starts at the title
-and campaign menu.
+and campaign menu. `DEBRIEF_SUCCESS` is the direct listening test for the
+mission-complete board and de-clicked officers' mess cue; `DEBRIEF` exercises
+the failure board and mourning cue.
 
 Current controls:
 
