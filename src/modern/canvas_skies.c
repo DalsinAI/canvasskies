@@ -219,6 +219,14 @@ static inline pix_t pix_mix(pix_t a, pix_t b, int t)
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
 #define MAX_BULLET_HOLES 18
+#define MAX_ROUNDS 96
+#define MAX_SPARKS 160
+#define AI_ATTACK 0
+#define AI_BREAK 1
+#define AI_EVADE 2
+#define AI_FLEE 3
+#define AI_FORMATION 4
+#define AI_HOMEWARD 5
 #define PLAYER_DURABILITY_MULTIPLIER 8
 #define MIDGROUND_ELEMENT_COUNT 6
 #define GROUND_MIPS 6
@@ -354,6 +362,8 @@ typedef struct {
     int crashing;
     int active, hp, max_hp;
     uint32_t last_shot;
+    int ai_state, target, fled;
+    float ai_timer, ai_side, smoke_timer;
 } Enemy;
 
 typedef struct {
@@ -374,6 +384,22 @@ typedef struct {
     float depth;
     int visible;
 } Projected3D;
+
+typedef struct {
+    Vec3 p, v;
+    float life, hit_time;
+    int owner;   /* 0 player, 1 enemy, 2 wingman */
+    int target;  /* enemy rounds: -1 player, 0..2 wingman */
+    int will_hit;
+    int active;
+} WorldRound;
+
+typedef struct {
+    Vec3 p, v;
+    float life, initial;
+    int kind;    /* 0 spark, 1 fabric, 2 smoke */
+    int active;
+} WorldSpark;
 
 typedef struct {
     float x, y; /* source-airframe coordinates */
@@ -537,6 +563,18 @@ typedef struct {
     DogfightParticle dogfight_particles[MAX_DOGFIGHT_PARTICLES];
     Explosion explosions[MAX_EXPLOSIONS];
     Enemy enemies[MAX_ENEMIES];
+    Enemy wingmen[3];
+    int wingman_hit_today[3];
+    WorldRound rounds[MAX_ROUNDS];
+    WorldSpark sparks[MAX_SPARKS];
+    uint32_t combat_seed;
+    float home_heading;
+    int guns_jammed;
+    uint32_t jam_clear_until;
+    uint32_t heading_home_at;
+    float skill_flying;
+    float skill_gunnery;
+    float skill_engine;
     Target targets[MAX_TARGETS];
     BulletHole bullet_holes[MAX_BULLET_HOLES];
     int next_bullet_hole;
@@ -544,6 +582,8 @@ typedef struct {
 
 static void flight_state_init(FlightState *f, float heading, float pitch,
                               float bank, float speed, float throttle);
+static void reset_wingmen(Game *g);
+static float wrap_angle(float angle);
 static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
                                    float east, float down);
 
@@ -1918,16 +1958,20 @@ static void reset_sortie(Game *g)
         /* Staggered WWI engagements, not a modern fighter formation.  The
          * first machine approaches nearly head-on, the next crosses our
          * nose, and the later aircraft enter from wider offsets. */
-        g->enemies[i].world_x = (float)((i & 1) ? 145 + i * 72 : -85 - i * 88) *
-                                0.6f;
-        g->enemies[i].world_y = 600.0f + (float)((i * 57) % 150);
-        g->enemies[i].world_z = 560.0f + (float)i * 320.0f;
-        if (i == 0)
-            g->enemies[i].heading = 2.92f;
-        else if (i == 1)
-            g->enemies[i].heading = -2.62f;
-        else
-            g->enemies[i].heading = (i & 1) ? -2.25f : 2.35f;
+        /* They appear as specks one to two kilometres out and close. */
+        g->enemies[i].world_x = (float)((i & 1) ? 1 : -1) *
+                                (120.0f + (float)i * 95.0f);
+        g->enemies[i].world_y = 620.0f + (float)((i * 57) % 180);
+        g->enemies[i].world_z = 1150.0f + (float)i * 260.0f;
+        g->enemies[i].heading = wrap_angle(atan2f(-g->enemies[i].world_x,
+                                                  -g->enemies[i].world_z) +
+                                           ((i & 1) ? 0.25f : -0.25f));
+        g->enemies[i].ai_state = AI_ATTACK;
+        g->enemies[i].ai_timer = 0.0f;
+        g->enemies[i].ai_side = (i & 1) ? 1.0f : -1.0f;
+        g->enemies[i].target = -1;
+        g->enemies[i].fled = 0;
+        g->enemies[i].smoke_timer = 0.0f;
         g->enemies[i].pitch = 0.0f;
         g->enemies[i].bank = 0.0f;
         g->enemies[i].speed = 84.0f + (float)((i * 13) % 24);
@@ -1959,6 +2003,17 @@ static void reset_sortie(Game *g)
                                i < perspective_enemy_count;
         g->enemies[i].last_shot = SDL_GetTicks() + 650u + (uint32_t)i * 390u;
     }
+    memset(g->rounds, 0, sizeof(g->rounds));
+    memset(g->sparks, 0, sizeof(g->sparks));
+    g->combat_seed ^= SDL_GetTicks() * 2654435761u + 12345u;
+    g->home_heading = (float)M_PI;
+    g->guns_jammed = 0;
+    g->jam_clear_until = 0;
+    g->heading_home_at = 0;
+    g->notice_until = 0;
+    g->shake = 0.0f;
+    g->gun_recoil = 0.0f;
+    reset_wingmen(g);
     for (i = 0; i < MAX_TARGETS; ++i) {
         g->targets[i].world_x = 560.0f + i * 480.0f;
         g->targets[i].active = !is_perspective_mode(mode) &&
@@ -2001,20 +2056,6 @@ static void new_dogfight_particle(Game *g, float x, float y,
             return;
         }
     }
-}
-
-static void launch_dogfight_tracer(Game *g, float x, float y,
-                                   float target_x, float target_y,
-                                   float speed, int kind)
-{
-    float dx = target_x - x;
-    float dy = target_y - y;
-    float distance = sqrtf(dx * dx + dy * dy);
-    float life;
-    if (distance < 1.0f) distance = 1.0f;
-    life = distance / speed + 0.055f;
-    new_dogfight_particle(g, x, y, dx / distance * speed,
-                          dy / distance * speed, life, kind);
 }
 
 static void update_dogfight_particles(Game *g, float dt)
@@ -2497,6 +2538,34 @@ static void arcade_flight_advance(FlightState *f, Vec3 *position,
         f->accumulator -= step;
         ++iterations;
     }
+}
+
+typedef struct {
+    Vec3 pos, right, up, forward;
+} AircraftPose;
+
+/* Pose from a flight quaternion: body x forward, y right, z down in NED,
+ * converted to the renderer's x east, y up, z north. */
+static AircraftPose pose_from_flight(const FlightState *f, Vec3 pos)
+{
+    AircraftPose p;
+    Vec3 fwd = flight_rotate_to_ned(f, 1.0f, 0.0f, 0.0f);
+    Vec3 rt = flight_rotate_to_ned(f, 0.0f, 1.0f, 0.0f);
+    Vec3 dn = flight_rotate_to_ned(f, 0.0f, 0.0f, 1.0f);
+    p.pos = pos;
+    p.forward = (Vec3){fwd.y, -fwd.z, fwd.x};
+    p.right = (Vec3){rt.y, -rt.z, rt.x};
+    p.up = (Vec3){-dn.y, dn.z, -dn.x};
+    return p;
+}
+
+static Vec3 pose_point(const AircraftPose *p, float x, float y, float z)
+{
+    Vec3 out;
+    out.x = p->pos.x + p->right.x * x + p->up.x * y + p->forward.x * z;
+    out.y = p->pos.y + p->right.y * x + p->up.y * y + p->forward.y * z;
+    out.z = p->pos.z + p->right.z * x + p->up.z * y + p->forward.z * z;
+    return out;
 }
 
 /* ---- Joystick -----------------------------------------------------------
@@ -2990,6 +3059,614 @@ static void update_perspective_sortie(Game *g, float dt,
         finish_alternate_sortie(g);
 }
 
+/* ---- Air combat ---------------------------------------------------------
+ *
+ * Rounds are real objects in the world: they leave the guns at muzzle
+ * speed plus the aircraft's own, converge on the sight line and hit what
+ * they pass through.  Enemy pilots attack, break away, defend when we are
+ * on their tail and run for home when badly hit.  The flight joins the
+ * fight once the enemy is close. */
+#define ROUND_SPEED 380.0f
+#define ENEMY_HIT_RADIUS 6.5f
+
+static float random_unit(Game *g)
+{
+    g->combat_seed = g->combat_seed * 1664525u + 1013904223u;
+    return (float)(g->combat_seed >> 8) / 16777216.0f;
+}
+
+static Vec3 vec3_sub(Vec3 a, Vec3 b)
+{
+    return (Vec3){a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+static float vec3_length(Vec3 a)
+{
+    return sqrtf(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+static Vec3 aircraft_velocity(const FlightState *f)
+{
+    Vec3 v = flight_rotate_to_ned(f, f->u, f->v, f->w);
+    return (Vec3){v.y, -v.z, v.x};
+}
+
+static WorldRound *new_round(Game *g, Vec3 from, Vec3 velocity, int owner,
+                             float life)
+{
+    int i;
+    for (i = 0; i < MAX_ROUNDS; ++i) if (!g->rounds[i].active) {
+        WorldRound *r = &g->rounds[i];
+        memset(r, 0, sizeof(*r));
+        r->p = from;
+        r->v = velocity;
+        r->life = life;
+        r->owner = owner;
+        r->target = -1;
+        r->active = 1;
+        return r;
+    }
+    return NULL;
+}
+
+static void new_spark(Game *g, Vec3 at, Vec3 velocity, int kind, float life)
+{
+    int i, oldest = 0;
+    for (i = 0; i < MAX_SPARKS; ++i) {
+        if (!g->sparks[i].active) { oldest = i; break; }
+        if (g->sparks[i].life < g->sparks[oldest].life) oldest = i;
+    }
+    g->sparks[oldest].p = at;
+    g->sparks[oldest].v = velocity;
+    g->sparks[oldest].kind = kind;
+    g->sparks[oldest].life = life;
+    g->sparks[oldest].initial = life;
+    g->sparks[oldest].active = 1;
+}
+
+static void burst_of_debris(Game *g, Vec3 at, Vec3 carry, int fabric)
+{
+    int k;
+    for (k = 0; k < 5; ++k) {
+        Vec3 v = {carry.x * 0.6f + (random_unit(g) - 0.5f) * 30.0f,
+                  carry.y * 0.6f + (random_unit(g) - 0.3f) * 24.0f,
+                  carry.z * 0.6f + (random_unit(g) - 0.5f) * 30.0f};
+        new_spark(g, at, v, k < 3 || !fabric ? 0 : 1,
+                  k < 3 ? 0.35f : 1.6f);
+    }
+}
+
+/* Two synchronised guns either side of the sight, converging on the ring
+ * sight line 150 m out. */
+static void fire_player_guns(Game *g)
+{
+    Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
+    AircraftPose pose = pose_from_flight(&g->flight, me);
+    Vec3 carry = aircraft_velocity(&g->flight);
+    Vec3 aim = pose_point(&pose, 0.0f, -150.0f * 20.0f / WORLD_FOCAL, 150.0f);
+    float spread = 0.012f - g->skill_gunnery * 0.008f;
+    int gun;
+    for (gun = 0; gun < 2; ++gun) {
+        Vec3 from = pose_point(&pose, gun ? 0.42f : -0.42f, -0.35f, 2.2f);
+        Vec3 dir = vec3_sub(aim, from);
+        float len = vec3_length(dir);
+        WorldRound *r;
+        dir.x /= len; dir.y /= len; dir.z /= len;
+        dir.x += (random_unit(g) - 0.5f) * spread;
+        dir.y += (random_unit(g) - 0.5f) * spread;
+        dir.z += (random_unit(g) - 0.5f) * spread;
+        r = new_round(g, from, (Vec3){carry.x + dir.x * ROUND_SPEED,
+                                      carry.y + dir.y * ROUND_SPEED,
+                                      carry.z + dir.z * ROUND_SPEED}, 0, 1.6f);
+        (void)r;
+    }
+}
+
+static float segment_sphere_distance(Vec3 a, Vec3 b, Vec3 c)
+{
+    Vec3 ab = vec3_sub(b, a), ac = vec3_sub(c, a);
+    float ab2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
+    float t = ab2 > 1e-6f ? (ac.x * ab.x + ac.y * ab.y + ac.z * ab.z) / ab2
+                          : 0.0f;
+    Vec3 closest;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    closest = (Vec3){a.x + ab.x * t, a.y + ab.y * t, a.z + ab.z * t};
+    return vec3_length(vec3_sub(c, closest));
+}
+
+static void damage_enemy(Game *g, Enemy *enemy, Vec3 at, int by_player)
+{
+    Vec3 carry = aircraft_velocity(&enemy->flight);
+    if (!by_player && enemy->hp <= 1) return;
+    --enemy->hp;
+    burst_of_debris(g, at, carry, 1);
+    if (by_player) {
+        g->audio.hit_player = 0;
+        g->audio.hit = 950;
+    }
+    if (enemy->hp <= 0) {
+        enemy->crashing = 1;
+        if (by_player) credit_air_kill(g);
+    }
+}
+
+/* The aircraft we are hit by: player (-1) or a wingman (0..2). */
+static void enemy_round_arrives(Game *g, WorldRound *r)
+{
+    if (r->target < 0) {
+        if (g->flight_doomed || g->flight_crashed) return;
+        if (!g->qa_hold || g->health > 30) {
+            g->health -= player_machine_gun_damage(g);
+            add_dogfight_bullet_hole(g, SDL_GetTicks() ^ (uint32_t)(r - g->rounds));
+        }
+        g->audio.hit_player = 1;
+        g->audio.hit = 1400;
+        g->last_damage = SDL_GetTicks();
+        g->shake = 1.0f;
+    } else if (r->target < 3 && g->wingmen[r->target].active) {
+        Enemy *w = &g->wingmen[r->target];
+        burst_of_debris(g, r->p, aircraft_velocity(&w->flight), 1);
+        if (--w->hp <= 0 && w->ai_state != AI_HOMEWARD) {
+            /* Wounded, not killed: he turns for home trailing smoke. */
+            w->ai_state = AI_HOMEWARD;
+            w->ai_timer = 22.0f;
+            g->wingman_hit_today[r->target] = 1;
+            snprintf(g->notice, sizeof(g->notice), "%s IS HIT",
+                     allied_pilot_names[r->target]);
+            g->notice_until = SDL_GetTicks() + 2200u;
+        }
+    }
+}
+
+static void update_rounds(Game *g, float dt)
+{
+    int i, e;
+    for (i = 0; i < MAX_ROUNDS; ++i) {
+        WorldRound *r = &g->rounds[i];
+        Vec3 next;
+        if (!r->active) continue;
+        r->life -= dt;
+        next = (Vec3){r->p.x + r->v.x * dt, r->p.y + r->v.y * dt,
+                      r->p.z + r->v.z * dt};
+        next.y -= 4.9f * dt * dt;
+        r->v.y -= 9.81f * dt;
+        if (r->owner == 0 || r->owner == 2) {
+            for (e = 0; e < MAX_ENEMIES; ++e) {
+                Enemy *enemy = &g->enemies[e];
+                Vec3 c;
+                if (!enemy->active || enemy->crashing) continue;
+                c = (Vec3){enemy->world_x, enemy->world_y, enemy->world_z};
+                if (segment_sphere_distance(r->p, next, c) < ENEMY_HIT_RADIUS) {
+                    damage_enemy(g, enemy, c, r->owner == 0);
+                    r->active = 0;
+                    break;
+                }
+            }
+        } else if (r->will_hit) {
+            r->hit_time -= dt;
+            if (r->hit_time <= 0.0f) {
+                enemy_round_arrives(g, r);
+                r->active = 0;
+            }
+        }
+        r->p = next;
+        if (r->life <= 0.0f || r->p.y < 0.0f) r->active = 0;
+    }
+    for (i = 0; i < MAX_SPARKS; ++i) {
+        WorldSpark *sp = &g->sparks[i];
+        if (!sp->active) continue;
+        sp->life -= dt;
+        if (sp->life <= 0.0f) { sp->active = 0; continue; }
+        sp->p.x += sp->v.x * dt;
+        sp->p.y += sp->v.y * dt;
+        sp->p.z += sp->v.z * dt;
+        if (sp->kind == 2) {
+            sp->v.x *= 1.0f - dt * 0.8f;
+            sp->v.z *= 1.0f - dt * 0.8f;
+            sp->v.y += 1.6f * dt;
+        } else {
+            sp->v.y -= (sp->kind == 1 ? 3.0f : 9.81f) * dt;
+        }
+    }
+}
+
+/* Enemy guns: a burst has a chance to strike that depends on range, the
+ * pilot's skill and how hard we are manoeuvring.  The tracers fly at the
+ * target (or wide of it) so what you see matches what happened. */
+static void enemy_burst(Game *g, Enemy *enemy, Vec3 target, Vec3 target_v,
+                        int target_index, float hit_chance)
+{
+    Vec3 from = {enemy->world_x, enemy->world_y, enemy->world_z};
+    AircraftPose pose = pose_from_flight(&enemy->flight, from);
+    Vec3 carry = aircraft_velocity(&enemy->flight);
+    float distance = vec3_length(vec3_sub(target, from));
+    float flight_time = distance / ROUND_SPEED;
+    int hit = random_unit(g) < hit_chance;
+    int k;
+    Vec3 aim = {target.x + target_v.x * flight_time,
+                target.y + target_v.y * flight_time,
+                target.z + target_v.z * flight_time};
+    for (k = 0; k < 3; ++k) {
+        Vec3 aim_k = aim, gun = pose_point(&pose, k & 1 ? 0.4f : -0.4f,
+                                           0.7f, 4.6f);
+        Vec3 dir;
+        float len;
+        WorldRound *r;
+        if (!hit || k > 0) {
+            float miss = hit ? 2.0f : 7.0f + random_unit(g) * 9.0f;
+            aim_k.x += (random_unit(g) - 0.5f) * 2.0f * miss;
+            aim_k.y += (random_unit(g) - 0.5f) * 2.0f * miss;
+            aim_k.z += (random_unit(g) - 0.5f) * 2.0f * miss;
+        }
+        dir = vec3_sub(aim_k, gun);
+        len = vec3_length(dir);
+        if (len < 1.0f) len = 1.0f;
+        r = new_round(g, gun, (Vec3){carry.x * 0.2f + dir.x / len * ROUND_SPEED,
+                                     carry.y * 0.2f + dir.y / len * ROUND_SPEED,
+                                     carry.z * 0.2f + dir.z / len * ROUND_SPEED},
+                      1, len / ROUND_SPEED + 0.6f);
+        if (r && hit && k == 0) {
+            r->will_hit = 1;
+            r->hit_time = len / ROUND_SPEED;
+            r->target = target_index;
+        }
+    }
+    enemy->last_shot = SDL_GetTicks();
+}
+
+/* Shared autopilot: steer toward a heading and pitch with a bank limit. */
+static void ai_fly(Enemy *a, float dt, float desired_heading,
+                   float desired_pitch, float max_bank)
+{
+    Vec3 position = {a->world_x, a->world_y, a->world_z};
+    float heading_error = wrap_angle(desired_heading - a->heading);
+    float desired_bank = flight_clamp(heading_error * 1.3f, -max_bank,
+                                      max_bank);
+    float aileron = flight_clamp((desired_bank - a->bank) * 2.2f -
+                                 a->flight.p * 0.32f, -1.0f, 1.0f);
+    float elevator = flight_clamp((desired_pitch - a->pitch) * 2.4f -
+                                  a->flight.q * 0.28f +
+                                  fabsf(a->bank) * 0.55f, -1.0f, 1.0f);
+    a->flight.throttle = a->throttle;
+    ww1_flight_advance(&a->flight, &position, dt, aileron, elevator);
+    a->world_x = position.x;
+    a->world_y = position.y;
+    a->world_z = position.z;
+    flight_outputs(&a->flight, &a->heading, &a->pitch, &a->bank,
+                   &a->vx, &a->vy, &a->vz, &a->speed);
+    a->roll_rate = a->flight.p;
+    a->pitch_rate = a->flight.q;
+}
+
+static void lead_pursuit(const Enemy *a, Vec3 target, Vec3 target_v,
+                         float *heading, float *pitch, float *distance)
+{
+    Vec3 me = {a->world_x, a->world_y, a->world_z};
+    float d = vec3_length(vec3_sub(target, me));
+    float t = d / ROUND_SPEED;
+    Vec3 lead = {target.x + target_v.x * t - me.x,
+                 target.y + target_v.y * t - me.y,
+                 target.z + target_v.z * t - me.z};
+    float horizontal = sqrtf(lead.x * lead.x + lead.z * lead.z);
+    *heading = atan2f(lead.x, lead.z);
+    *pitch = flight_clamp(atan2f(lead.y, horizontal > 1.0f ? horizontal : 1.0f),
+                          -0.45f, 0.45f);
+    *distance = d;
+}
+
+/* Angle between a's nose and the direction to point p. */
+static float off_nose(const Enemy *a, Vec3 p)
+{
+    Vec3 me = {a->world_x, a->world_y, a->world_z};
+    Vec3 fwd = aircraft_velocity(&a->flight);
+    Vec3 to = vec3_sub(p, me);
+    float lf = vec3_length(fwd), lt = vec3_length(to);
+    float c;
+    if (lf < 1e-3f || lt < 1e-3f) return 0.0f;
+    c = (fwd.x * to.x + fwd.y * to.y + fwd.z * to.z) / (lf * lt);
+    return acosf(flight_clamp(c, -1.0f, 1.0f));
+}
+
+static int active_wingman_count(const Game *g)
+{
+    int i, n = 0;
+    for (i = 0; i < 3; ++i)
+        if (g->wingmen[i].active && g->wingmen[i].ai_state != AI_HOMEWARD) ++n;
+    return n;
+}
+
+static void reset_wingmen(Game *g)
+{
+    static const float offset[3][3] = {
+        {-34.0f, 2.0f, 30.0f}, {40.0f, -3.0f, 45.0f}, {-72.0f, 6.0f, 60.0f}
+    };
+    Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
+    AircraftPose pose = pose_from_flight(&g->flight, me);
+    int i;
+    memset(g->wingmen, 0, sizeof(g->wingmen));
+    memset(g->wingman_hit_today, 0, sizeof(g->wingman_hit_today));
+    if (!chapters[g->chapter].armed ||
+        campaign_missions[g->chapter][g->mission].mode != MISSION_DOGFIGHT_3D)
+        return;
+    for (i = 0; i < 3; ++i) {
+        Enemy *w = &g->wingmen[i];
+        Vec3 at;
+        if (g->wingman_health[i] <= 0) continue;
+        at = pose_point(&pose, offset[i][0], offset[i][1], offset[i][2]);
+        w->world_x = at.x; w->world_y = at.y; w->world_z = at.z;
+        w->heading = g->flight_heading;
+        w->speed = 98.0f;
+        w->throttle = 0.7f;
+        flight_state_init(&w->flight, w->heading, 0.0f, 0.0f, 43.8f, 0.7f);
+        w->hp = 3;
+        w->max_hp = 3;
+        w->active = 1;
+        w->ai_state = AI_FORMATION;
+        w->ai_timer = 7.0f + (float)i * 1.5f;
+        w->target = -1;
+        w->last_shot = SDL_GetTicks() + 2000u;
+    }
+}
+
+static void update_wingmen(Game *g, float dt)
+{
+    static const float slot[3][2] = {{-34.0f, 30.0f}, {40.0f, 45.0f},
+                                     {-72.0f, 60.0f}};
+    uint32_t now = SDL_GetTicks();
+    Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
+    AircraftPose my_pose = pose_from_flight(&g->flight, me);
+    int i, e;
+    for (i = 0; i < 3; ++i) {
+        Enemy *w = &g->wingmen[i];
+        Vec3 pos;
+        float heading = w->heading, pitch = 0.0f, distance = 0.0f;
+        float max_bank = 0.85f;
+        if (!w->active) continue;
+        pos = (Vec3){w->world_x, w->world_y, w->world_z};
+        w->ai_timer -= dt;
+        if (w->ai_state == AI_HOMEWARD) {
+            heading = g->home_heading;
+            pitch = 0.05f;
+            w->throttle = 0.55f;
+            if (w->ai_timer <= 0.0f) w->active = 0;
+            if (((now / 90u) + (uint32_t)i) % 3u == 0u)
+                new_spark(g, pos, (Vec3){0.0f, 2.0f, 0.0f}, 2, 2.6f);
+        } else if (w->ai_state == AI_FORMATION) {
+            Vec3 want = pose_point(&my_pose, slot[i][0], 0.0f, slot[i][1]);
+            Vec3 to = vec3_sub(want, pos);
+            float along = to.x * my_pose.forward.x + to.z * my_pose.forward.z;
+            heading = atan2f(to.x + my_pose.forward.x * 60.0f,
+                             to.z + my_pose.forward.z * 60.0f);
+            pitch = flight_clamp(to.y * 0.01f, -0.2f, 0.2f);
+            w->throttle = flight_clamp(g->flight_throttle + along * 0.01f,
+                                       0.2f, 1.0f);
+            /* Break formation once the enemy is close or time is up. */
+            for (e = 0; e < MAX_ENEMIES; ++e) {
+                Enemy *enemy = &g->enemies[e];
+                if (!enemy->active || enemy->crashing) continue;
+                if (vec3_length(vec3_sub((Vec3){enemy->world_x,
+                    enemy->world_y, enemy->world_z}, pos)) < 900.0f)
+                    w->ai_timer = 0.0f;
+            }
+            if (w->ai_timer <= 0.0f) w->ai_state = AI_ATTACK;
+        } else {
+            Enemy *target = NULL;
+            float best = 1e9f;
+            if (w->target >= 0 && w->target < MAX_ENEMIES &&
+                g->enemies[w->target].active &&
+                !g->enemies[w->target].crashing)
+                target = &g->enemies[w->target];
+            else {
+                w->target = -1;
+                for (e = 0; e < MAX_ENEMIES; ++e) {
+                    Enemy *enemy = &g->enemies[e];
+                    float d;
+                    if (!enemy->active || enemy->crashing) continue;
+                    d = vec3_length(vec3_sub((Vec3){enemy->world_x,
+                        enemy->world_y, enemy->world_z}, pos)) +
+                        (float)((e + i) % 3) * 150.0f;
+                    if (d < best) { best = d; w->target = e; }
+                }
+                if (w->target >= 0) target = &g->enemies[w->target];
+            }
+            if (target) {
+                Vec3 tp = {target->world_x, target->world_y, target->world_z};
+                lead_pursuit(w, tp, aircraft_velocity(&target->flight),
+                             &heading, &pitch, &distance);
+                w->throttle = 0.85f;
+                if (distance < 120.0f) heading += (i & 1) ? 0.9f : -0.9f;
+                if (distance < 420.0f && off_nose(w, tp) < 0.12f &&
+                    now - w->last_shot > 900u) {
+                    enemy_burst(g, w, tp, aircraft_velocity(&target->flight),
+                                -2, 0.0f);
+                    /* Wingmen harry the enemy but leave the kill to you. */
+                    if (random_unit(g) < 0.22f)
+                        damage_enemy(g, target, tp, 0);
+                }
+            } else {
+                /* Sky clear: rejoin. */
+                w->ai_state = AI_FORMATION;
+                w->ai_timer = 999.0f;
+            }
+        }
+        if (w->world_y < 120.0f) pitch = 0.3f;
+        ai_fly(w, dt, heading, pitch, max_bank);
+        if (w->world_y < 1.0f) w->active = 0;
+    }
+}
+
+static void choose_enemy_target(Game *g, Enemy *enemy)
+{
+    int i, pick = -1, n = active_wingman_count(g);
+    enemy->target = -1;
+    if (n > 0 && random_unit(g) < 0.3f) {
+        int skip = (int)(random_unit(g) * (float)n);
+        for (i = 0; i < 3; ++i)
+            if (g->wingmen[i].active && g->wingmen[i].ai_state != AI_HOMEWARD &&
+                skip-- == 0) { pick = i; break; }
+        enemy->target = pick;
+    }
+}
+
+/* One enemy pilot's decision for this frame. */
+static void enemy_think(Game *g, Enemy *enemy, int index, float dt,
+                        float *heading, float *pitch, float *max_bank,
+                        float *distance_to_player)
+{
+    Vec3 me = {enemy->world_x, enemy->world_y, enemy->world_z};
+    Vec3 player = {g->flight_x, g->flight_y, g->flight_z};
+    Vec3 target = player, target_v = aircraft_velocity(&g->flight);
+    int ace = index == 0 && g->chapter >= 3;
+    float skill = flight_clamp(0.25f + (float)g->chapter * 0.1f +
+                               (ace ? 0.3f : 0.0f), 0.0f, 1.0f);
+    float player_distance = vec3_length(vec3_sub(player, me));
+    float distance;
+    *max_bank = flight_clamp(0.7f + skill * 0.5f, 0.7f, 1.25f);
+    *distance_to_player = player_distance;
+    enemy->ai_timer -= dt;
+    if (enemy->target >= 0 && (enemy->target > 2 ||
+        !g->wingmen[enemy->target].active ||
+        g->wingmen[enemy->target].ai_state == AI_HOMEWARD))
+        enemy->target = -1;
+    if (enemy->target >= 0) {
+        Enemy *w = &g->wingmen[enemy->target];
+        target = (Vec3){w->world_x, w->world_y, w->world_z};
+        target_v = aircraft_velocity(&w->flight);
+    }
+    /* Badly hit: run, once. */
+    if (enemy->hp == 1 && enemy->max_hp > 1 && !enemy->fled &&
+        enemy->ai_state != AI_FLEE) {
+        enemy->ai_state = AI_FLEE;
+        enemy->ai_timer = 5.0f;
+        enemy->fled = 1;
+    }
+    /* We are on its tail: defend. */
+    if (enemy->ai_state == AI_ATTACK && player_distance < 450.0f &&
+        off_nose(enemy, player) > 2.3f && random_unit(g) < skill * dt * 3.0f) {
+        enemy->ai_state = AI_EVADE;
+        enemy->ai_timer = 2.5f + skill * 1.5f;
+        enemy->ai_side = random_unit(g) < 0.5f ? -1.0f : 1.0f;
+    }
+    switch (enemy->ai_state) {
+    case AI_BREAK:
+        *heading = enemy->heading + enemy->ai_side * 1.3f;
+        *pitch = (index & 1) ? 0.28f : -0.18f;
+        if (enemy->ai_timer <= 0.0f) {
+            enemy->ai_state = AI_ATTACK;
+            choose_enemy_target(g, enemy);
+        }
+        break;
+    case AI_EVADE:
+        if (((int)(enemy->ai_timer / 1.4f)) & 1) enemy->ai_side = -enemy->ai_side;
+        *heading = enemy->heading + enemy->ai_side * 1.5f;
+        *pitch = (enemy->ai_timer > 1.5f) ? -0.2f : 0.25f;
+        if (enemy->ai_timer <= 0.0f) enemy->ai_state = AI_ATTACK;
+        break;
+    case AI_FLEE:
+        *heading = atan2f(me.x - player.x, me.z - player.z);
+        *pitch = -0.22f;
+        enemy->throttle = 1.0f;
+        if (enemy->ai_timer <= 0.0f) {
+            enemy->ai_state = AI_ATTACK;
+            enemy->throttle = 0.75f;
+        }
+        break;
+    default:
+        lead_pursuit(enemy, target, target_v, heading, pitch, &distance);
+        *heading += sinf(g->scroll * 0.0021f + enemy->phase) * 0.08f *
+                    (1.0f - skill);
+        if (distance < 140.0f + (1.0f - skill) * 80.0f) {
+            enemy->ai_state = AI_BREAK;
+            enemy->ai_timer = 2.0f + random_unit(g) * 1.5f;
+            enemy->ai_side = (index & 1) ? 1.0f : -1.0f;
+        }
+        break;
+    }
+    if (enemy->world_y < 150.0f) *pitch = 0.3f;
+}
+
+/* Fires when the attacker's nose is on its target. */
+static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
+{
+    uint32_t now = SDL_GetTicks();
+    Vec3 me = {enemy->world_x, enemy->world_y, enemy->world_z};
+    Vec3 target = {g->flight_x, g->flight_y, g->flight_z};
+    Vec3 target_v = aircraft_velocity(&g->flight);
+    int ace = index == 0 && g->chapter >= 3;
+    float distance, chance, cooldown;
+    if (!chapters[g->chapter].armed || enemy->ai_state != AI_ATTACK ||
+        now - g->scene_started < 5200u || now < enemy->last_shot) return;
+    if (enemy->target >= 0) {
+        Enemy *w = &g->wingmen[enemy->target];
+        target = (Vec3){w->world_x, w->world_y, w->world_z};
+        target_v = aircraft_velocity(&w->flight);
+    }
+    distance = vec3_length(vec3_sub(target, me));
+    cooldown = 1150.0f - (float)g->chapter * 45.0f + (float)((index * 173) % 400);
+    if (distance > 600.0f || now - enemy->last_shot < (uint32_t)cooldown ||
+        off_nose(enemy, target) > 0.1f) return;
+    chance = (0.3f + (float)g->chapter * 0.035f + (ace ? 0.15f : 0.0f)) *
+             (1.0f - distance / 700.0f);
+    if (enemy->target < 0 && fabsf(g->view_bank) > 0.6f) chance *= 0.6f;
+    if (g->qa_hold && enemy->target < 0 && g->health <= 30) chance = 0.0f;
+    enemy_burst(g, enemy, target, target_v, enemy->target, chance);
+}
+
+static void draw_combat_effects(Game *g, int smoke_pass)
+{
+    SDL_Surface *s = g->screen;
+    int i;
+    if (smoke_pass) {
+        for (i = 0; i < MAX_SPARKS; ++i) {
+            WorldSpark *sp = &g->sparks[i];
+            Projected3D p;
+            int r, alpha;
+            if (!sp->active || sp->kind != 2) continue;
+            p = project_world_point(g, sp->p);
+            if (!p.visible || p.x < -40 || p.x > SCREEN_W + 40 ||
+                p.y < -40 || p.y > SCREEN_H + 40) continue;
+            r = (int)((2.0f + (sp->initial - sp->life) * 3.0f) * 330.0f /
+                      p.depth);
+            if (r < 1) r = 1;
+            if (r > 40) r = 40;
+            alpha = (int)(170.0f * sp->life / sp->initial);
+            blend_circle(s, p.x, p.y, r, 46, 40, 38, (uint8_t)alpha);
+        }
+        return;
+    }
+    for (i = 0; i < MAX_SPARKS; ++i) {
+        WorldSpark *sp = &g->sparks[i];
+        Projected3D p;
+        if (!sp->active || sp->kind == 2) continue;
+        p = project_world_point(g, sp->p);
+        if (!p.visible) continue;
+        if (sp->kind == 0) {
+            pixel(s, p.x, p.y, PIX_PACK(255, 226, 140));
+            pixel(s, p.x + 1, p.y, PIX_PACK(255, 170, 70));
+        } else {
+            int size = (int)(60.0f / p.depth) + 1;
+            if (size > 4) size = 4;
+            rect(s, p.x, p.y, size, size > 1 ? size - 1 : 1,
+                 PIX_PACK(196, 176, 136));
+        }
+    }
+    for (i = 0; i < MAX_ROUNDS; ++i) {
+        WorldRound *r = &g->rounds[i];
+        Projected3D a, b;
+        Vec3 tail;
+        if (!r->active) continue;
+        tail = (Vec3){r->p.x - r->v.x * 0.025f, r->p.y - r->v.y * 0.025f,
+                      r->p.z - r->v.z * 0.025f};
+        a = project_world_point(g, r->p);
+        b = project_world_point(g, tail);
+        if (!a.visible || !b.visible) continue;
+        if (abs(a.x - b.x) > 200 || abs(a.y - b.y) > 200) continue;
+        line(s, a.x, a.y, b.x, b.y, r->owner == 1 ? PIX_PACK(255, 128, 64)
+                                                  : PIX_PACK(255, 236, 160));
+    }
+}
+
 static void update_dogfight_3d_sortie(Game *g, float dt,
                                       const uint8_t *keys)
 {
@@ -3078,48 +3755,53 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         fabsf(g->flight_alpha) + (g->flight_stalled ? 0.45f : 0.0f);
     g->audio.other_engine = 0.0f;
 
+    /* Guns jam now and then; R works the cocking handles to clear them. */
+    if (g->guns_jammed && keys[SDL_SCANCODE_R] && !g->jam_clear_until)
+        g->jam_clear_until = now + 1400u -
+                             (uint32_t)(g->skill_engine * 600.0f);
+    if (g->guns_jammed && g->jam_clear_until && now >= g->jam_clear_until) {
+        g->guns_jammed = 0;
+        g->jam_clear_until = 0;
+        show_notice(g, "GUNS CLEAR");
+    }
     if (!g->flight_doomed && keys[SDL_SCANCODE_SPACE] &&
-        chapters[g->chapter].armed &&
+        chapters[g->chapter].armed && !g->guns_jammed &&
         g->ammunition > 0 && now - g->last_shot >= 160u) {
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = 1500;
         g->gun_recoil = 1.0f;
-        launch_dogfight_tracer(g, 292.0f, 231.0f,
-                               320.0f, 210.0f, 300.0f, 0);
-        launch_dogfight_tracer(g, 350.0f, 231.0f,
-                               320.0f, 210.0f, 300.0f, 0);
+        fire_player_guns(g);
         new_dogfight_particle(g, 298.0f, 245.0f,
                               -54.0f, -68.0f, 0.42f, 2);
         new_dogfight_particle(g, 344.0f, 245.0f,
                                58.0f, -62.0f, 0.42f, 2);
-        for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active &&
-                                                  !g->enemies[i].crashing) {
-            Projected3D p = project_world_point(g, (Vec3){
-                g->enemies[i].world_x, g->enemies[i].world_y,
-                g->enemies[i].world_z});
-            int radius;
-            if (!p.visible) continue;
-            radius = (int)(650.0f / p.depth);
-            if (radius < 5) radius = 5;
-            if (radius > 40) radius = 40;
-            if (abs(p.x - 320) <= radius && abs(p.y - 218) <= radius) {
-                --g->enemies[i].hp;
-                g->audio.hit_player = 0;
-                g->audio.hit = 950;
-                if (g->enemies[i].hp <= 0) {
-                    g->enemies[i].crashing = 1;
-                    credit_air_kill(g);
-                }
-                break;
-            }
+        if (random_unit(g) < 0.004f - g->skill_gunnery * 0.0025f) {
+            g->guns_jammed = 1;
+            g->jam_clear_until = 0;
+            show_notice(g, "GUNS JAMMED - PRESS R");
         }
+    } else if (g->guns_jammed && keys[SDL_SCANCODE_SPACE] &&
+               (!g->notice_until || now >= g->notice_until)) {
+        show_notice(g, "GUNS JAMMED - PRESS R");
     }
+    /* H turns for home: the sortie ends as it stands. */
+    if (keys[SDL_SCANCODE_H] && !g->heading_home_at && !g->flight_doomed &&
+        !g->qa_hold) {
+        g->heading_home_at = now + 2200u;
+        show_notice(g, "TURNING FOR HOME");
+    }
+    if (g->heading_home_at && now >= g->heading_home_at) {
+        finish_alternate_sortie(g);
+        return;
+    }
+    update_wingmen(g, dt);
+    update_rounds(g, dt);
 
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
         Enemy *enemy = &g->enemies[i];
         float dx, dy, dz, horizontal, distance;
-        float desired_heading, heading_error, desired_bank, desired_pitch;
+        float desired_heading = 0.0f, desired_pitch = 0.0f;
         if (enemy->crashing) {
             /* Preserve forward momentum, but force a real downward velocity.
              * The previous pitch decrement had the model's nose-up sign and
@@ -3133,6 +3815,13 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             /* The renderer reads the attitude from the quaternion. */
             flight_quaternion_from_euler(&enemy->flight, enemy->bank,
                                          enemy->pitch, enemy->heading);
+            enemy->smoke_timer -= dt;
+            if (enemy->smoke_timer <= 0.0f) {
+                enemy->smoke_timer = 0.05f;
+                new_spark(g, (Vec3){enemy->world_x, enemy->world_y,
+                                    enemy->world_z},
+                          (Vec3){0.0f, 2.0f, 0.0f}, 2, 3.0f);
+            }
             enemy->world_y += enemy->vy * dt;
             enemy->world_x += sinf(enemy->heading) * enemy->speed * 0.42f * dt;
             enemy->world_z += cosf(enemy->heading) * enemy->speed * 0.42f * dt;
@@ -3177,43 +3866,20 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             ++active;
             continue;
         }
-        desired_heading = atan2f(dx, dz) +
-            sinf(g->scroll * 0.0021f + enemy->phase) * 0.12f;
-        if (distance < 220.0f) {
-            float urgency = (220.0f - distance) / 220.0f;
-            float break_side = (i & 1) ? 1.0f : -1.0f;
-            /* Stop pointing at the player's centre and cross clear of the
-             * collision cone.  Alternating sides prevent several attackers
-             * choosing the same escape path. */
-            desired_heading += break_side * (0.48f + urgency * 0.72f);
-        }
-        heading_error = wrap_angle(desired_heading - enemy->heading);
-        desired_bank = heading_error * 1.18f;
-        if (desired_bank < -0.70f) desired_bank = -0.70f;
-        if (desired_bank > 0.70f) desired_bank = 0.70f;
-        desired_pitch = atan2f(dy, horizontal > 1.0f ? horizontal : 1.0f);
-        if (desired_pitch < -0.30f) desired_pitch = -0.30f;
-        if (desired_pitch > 0.30f) desired_pitch = 0.30f;
         {
-            Vec3 enemy_position = {enemy->world_x, enemy->world_y,
-                                   enemy->world_z};
-            float enemy_aileron = flight_clamp(
-                (desired_bank - enemy->bank) * 2.2f - enemy->flight.p * 0.32f,
-                -1.0f, 1.0f);
-            float enemy_elevator = flight_clamp(
-                (desired_pitch - enemy->pitch) * 2.4f - enemy->flight.q * 0.28f,
-                -1.0f, 1.0f);
-            enemy->flight.throttle = enemy->throttle;
-            ww1_flight_advance(&enemy->flight, &enemy_position, dt,
-                               enemy_aileron, enemy_elevator);
-            enemy->world_x = enemy_position.x;
-            enemy->world_y = enemy_position.y;
-            enemy->world_z = enemy_position.z;
-            flight_outputs(&enemy->flight, &enemy->heading, &enemy->pitch,
-                           &enemy->bank, &enemy->vx, &enemy->vy, &enemy->vz,
-                           &enemy->speed);
-            enemy->roll_rate = enemy->flight.p;
-            enemy->pitch_rate = enemy->flight.q;
+            float max_bank, to_player;
+            enemy_think(g, enemy, i, dt, &desired_heading, &desired_pitch,
+                        &max_bank, &to_player);
+            ai_fly(enemy, dt, desired_heading, desired_pitch, max_bank);
+        }
+        if (enemy->hp < enemy->max_hp) {
+            enemy->smoke_timer -= dt;
+            if (enemy->smoke_timer <= 0.0f) {
+                enemy->smoke_timer = enemy->hp <= 1 ? 0.07f : 0.16f;
+                new_spark(g, (Vec3){enemy->world_x, enemy->world_y,
+                                    enemy->world_z},
+                          (Vec3){0.0f, 1.5f, 0.0f}, 2, 2.4f);
+            }
         }
         if (enemy->world_y <= 0.0f) {
             enemy->world_y = 0.0f;
@@ -3224,35 +3890,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             enemy->crash_size = 18;
             continue;
         }
-        {
-            Projected3D attack_view = project_world_point(g, (Vec3){
-                enemy->world_x, enemy->world_y, enemy->world_z});
-            /* An attacker can only hit while it is actually in the player's
-             * forward view and has settled its nose.  This prevents several
-             * unseen aircraft draining the airframe during their entrance. */
-            if (chapters[g->chapter].armed &&
-                now - g->scene_started > 5200u && distance < 600.0f &&
-                attack_view.visible && attack_view.x > 24 &&
-                attack_view.x < SCREEN_W - 24 && attack_view.y > 18 &&
-                attack_view.y < SCREEN_H - 80 &&
-                fabsf(heading_error) < 0.095f &&
-                fabsf(desired_pitch - enemy->pitch) < 0.085f &&
-                now >= enemy->last_shot && now - enemy->last_shot >
-                (uint32_t)(1550 - g->chapter * 45 + (i * 173) % 520)) {
-                enemy->last_shot = now;
-                launch_dogfight_tracer(g, (float)attack_view.x,
-                                       (float)attack_view.y,
-                                       320.0f, 218.0f, 390.0f, 1);
-                if (!g->qa_hold || g->health > 30) {
-                    g->health -= player_machine_gun_damage(g);
-                    add_dogfight_bullet_hole(g, now);
-                }
-                g->shake = 1.0f;
-                g->audio.hit_player = 1;
-                g->audio.hit = 1400;
-                g->last_damage = now;
-            }
-        }
+        enemy_maybe_fire(g, enemy, i);
         {
             float presence = 1.0f - distance / 1600.0f;
             if (presence > g->audio.other_engine) {
@@ -5550,34 +6188,6 @@ static const AircraftMesh *aircraft_mesh(int allied)
     return &meshes[allied];
 }
 
-typedef struct {
-    Vec3 pos, right, up, forward;
-} AircraftPose;
-
-/* Pose from a flight quaternion: body x forward, y right, z down in NED,
- * converted to the renderer's x east, y up, z north. */
-static AircraftPose pose_from_flight(const FlightState *f, Vec3 pos)
-{
-    AircraftPose p;
-    Vec3 fwd = flight_rotate_to_ned(f, 1.0f, 0.0f, 0.0f);
-    Vec3 rt = flight_rotate_to_ned(f, 0.0f, 1.0f, 0.0f);
-    Vec3 dn = flight_rotate_to_ned(f, 0.0f, 0.0f, 1.0f);
-    p.pos = pos;
-    p.forward = (Vec3){fwd.y, -fwd.z, fwd.x};
-    p.right = (Vec3){rt.y, -rt.z, rt.x};
-    p.up = (Vec3){-dn.y, dn.z, -dn.x};
-    return p;
-}
-
-static Vec3 pose_point(const AircraftPose *p, float x, float y, float z)
-{
-    Vec3 out;
-    out.x = p->pos.x + p->right.x * x + p->up.x * y + p->forward.x * z;
-    out.y = p->pos.y + p->right.y * x + p->up.y * y + p->forward.y * z;
-    out.z = p->pos.z + p->right.z * x + p->up.z * y + p->forward.z * z;
-    return out;
-}
-
 static Vec3 sun_direction(void)
 {
     static Vec3 sun;
@@ -6012,26 +6622,6 @@ static const AircraftLivery *enemy_livery(const Game *g, int index)
     return &enemy_liveries[(index + g->mission) % 3];
 }
 
-/* Until they join the fight, the flight holds a loose formation on us. */
-static int wingman_formation_pose(const Game *g, int index,
-                                  AircraftPose *pose)
-{
-    static const float offset[3][3] = {
-        {-34.0f, 2.0f, 70.0f}, {40.0f, -3.0f, 95.0f}, {-72.0f, 6.0f, 130.0f}
-    };
-    AircraftPose me;
-    if (index < 0 || index > 2 || g->wingman_health[index] <= 0 ||
-        !chapters[g->chapter].armed) return 0;
-    me = pose_from_flight(&g->flight,
-                          (Vec3){g->flight_x, g->flight_y, g->flight_z});
-    *pose = me;
-    pose->pos = pose_point(&me, offset[index][0], offset[index][1],
-                           offset[index][2]);
-    /* A slow weave keeps them from looking bolted to our aircraft. */
-    pose->pos.y += sinf((float)SDL_GetTicks() * 0.0011f + index * 2.1f) * 3.0f;
-    return 1;
-}
-
 static void draw_dogfight_simulator(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -6047,13 +6637,12 @@ static void draw_dogfight_simulator(Game *g)
             g->enemies[i].world_y, g->enemies[i].world_z});
         if (p.visible) { order[count] = i; depth[count++] = p.depth; }
     }
-    for (i = 0; i < 3; ++i) {
-        AircraftPose pose;
-        Projected3D p;
-        if (!wingman_formation_pose(g, i, &pose)) continue;
-        p = project_world_point(g, pose.pos);
+    for (i = 0; i < 3; ++i) if (g->wingmen[i].active) {
+        Projected3D p = project_world_point(g, (Vec3){g->wingmen[i].world_x,
+            g->wingmen[i].world_y, g->wingmen[i].world_z});
         if (p.visible) { order[count] = MAX_ENEMIES + i; depth[count++] = p.depth; }
     }
+    draw_combat_effects(g, 1);
     for (i = 0; i < count; ++i) for (j = i + 1; j < count; ++j) {
         if (depth[i] < depth[j]) {
             float td = depth[i]; int ti = order[i];
@@ -6067,8 +6656,11 @@ static void draw_dogfight_simulator(Game *g)
         AircraftPose pose;
         Projected3D p;
         if (order[i] >= MAX_ENEMIES) {
-            if (wingman_formation_pose(g, order[i] - MAX_ENEMIES, &pose))
-                draw_aircraft_mesh(g, &pose, &allied_livery, 1, 0);
+            Enemy *w = &g->wingmen[order[i] - MAX_ENEMIES];
+            pose = pose_from_flight(&w->flight,
+                                    (Vec3){w->world_x, w->world_y, w->world_z});
+            draw_aircraft_mesh(g, &pose, &allied_livery, 1,
+                               w->ai_state == AI_HOMEWARD);
             continue;
         }
         enemy = &g->enemies[order[i]];
@@ -6084,6 +6676,7 @@ static void draw_dogfight_simulator(Game *g)
             pixel(s, p.x, p.y, rgb(s, 255, 236, 164));
         }
     }
+    draw_combat_effects(g, 0);
     draw_explosions(g);
     draw_dogfight_particles(g, 0);
     draw_living_cockpit(g);
