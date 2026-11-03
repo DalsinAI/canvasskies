@@ -500,6 +500,19 @@ static int is_perspective_mode(MissionMode mode)
 /* Wingmen follow the written story rather than a damage simulation.
  * Gridpipe Thyne turns east and is lost in "Thyne's Last Turn" (Chapter 5,
  * Mission 9); from the next sortie onward his place stays empty. */
+/* QA entry points (DOGFIGHT, DEATH, CHAPTER_SUCCESS...) write their own
+ * save file so testing on a player's install never replaces the campaign. */
+static const char *save_path = CANVAS_SAVE_PATH;
+static const char *save_new_path = CANVAS_SAVE_NEW_PATH;
+static const char *save_backup_path = CANVAS_SAVE_BACKUP_PATH;
+
+static void use_qa_save_paths(void)
+{
+    save_path = "PROGDIR:CanvasSkies-QA.save";
+    save_new_path = "PROGDIR:CanvasSkies-QA.save.new";
+    save_backup_path = "PROGDIR:CanvasSkies-QA.save.bak";
+}
+
 static void apply_story_wingmen(Game *g)
 {
     int pilot;
@@ -555,14 +568,14 @@ static int load_campaign_save_path(Game *g, const char *path)
 
 static int load_campaign_save(Game *g)
 {
-    if (load_campaign_save_path(g, CANVAS_SAVE_PATH)) {
+    if (load_campaign_save_path(g, save_path)) {
         g->save_loaded_from_backup = 0;
         return 1;
     }
     /* A save is first written under a temporary name and the preceding save
      * is retained as .bak.  If power is lost during replacement, continue
      * from the last complete record instead of silently losing the campaign. */
-    if (load_campaign_save_path(g, CANVAS_SAVE_BACKUP_PATH)) {
+    if (load_campaign_save_path(g, save_backup_path)) {
         g->save_loaded_from_backup = 1;
         return 1;
     }
@@ -571,7 +584,7 @@ static int load_campaign_save(Game *g)
 
 static int save_campaign(Game *g)
 {
-    FILE *file = fopen(CANVAS_SAVE_NEW_PATH, "w");
+    FILE *file = fopen(save_new_path, "w");
     int ok;
     int backed_up;
     if (!file) return 0;
@@ -581,23 +594,23 @@ static int save_campaign(Game *g)
                  g->wingman_health[2], g->campaign_complete, g->lives) > 0;
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
-        remove(CANVAS_SAVE_NEW_PATH);
+        remove(save_new_path);
         return 0;
     }
     if (g->save_loaded_from_backup) {
         /* The primary was already known bad.  Keep the valid backup in place
          * until the replacement has landed instead of rotating corruption
          * over the only recoverable campaign. */
-        remove(CANVAS_SAVE_PATH);
+        remove(save_path);
         backed_up = 0;
     } else {
-        remove(CANVAS_SAVE_BACKUP_PATH);
-        backed_up = rename(CANVAS_SAVE_PATH, CANVAS_SAVE_BACKUP_PATH) == 0;
+        remove(save_backup_path);
+        backed_up = rename(save_path, save_backup_path) == 0;
     }
-    if (rename(CANVAS_SAVE_NEW_PATH, CANVAS_SAVE_PATH) != 0) {
+    if (rename(save_new_path, save_path) != 0) {
         if (backed_up)
-            rename(CANVAS_SAVE_BACKUP_PATH, CANVAS_SAVE_PATH);
-        remove(CANVAS_SAVE_NEW_PATH);
+            rename(save_backup_path, save_path);
+        remove(save_new_path);
         return 0;
     }
     g->saved_chapter = g->chapter;
@@ -6157,6 +6170,7 @@ int main(int argc, char **argv)
 {
     Game g;
     uint32_t previous;
+    if (argc > 1) use_qa_save_paths();
     if (!game_init(&g)) return 1;
     /* QA entry points keep the normal title/campaign flow untouched while
      * allowing each renderer to be launched directly on real Amiga hardware. */
