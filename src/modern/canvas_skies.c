@@ -243,7 +243,8 @@ typedef enum {
     SCENE_BRIEFING,
     SCENE_SORTIE,
     SCENE_DEBRIEF,
-    SCENE_EPILOGUE
+    SCENE_EPILOGUE,
+    SCENE_AWARD
 } Scene;
 
 typedef enum {
@@ -520,6 +521,16 @@ typedef struct {
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
+    /* Pilot's record: victories, decorations, rank and growing skills. */
+    int victories, sorties, rank;
+    unsigned awards;
+    int saved_victories, saved_sorties, saved_rank;
+    unsigned saved_awards;
+    float saved_skill[3];
+    int pending_award, pending_rank;
+    int career_counted;
+    int story_stage;
+    uint32_t reveal_started;
     uint32_t scene_started;
     float player_x;
     float player_y;
@@ -626,11 +637,14 @@ static int load_campaign_save_path(Game *g, const char *path)
     int wingman0, wingman1, wingman2;
     int complete = 0;
     int lives = 3;
+    int victories = 0, sorties = 0, rank = 0;
+    unsigned awards = 0;
+    int skill[3] = {0, 0, 0};
     if (!file) return 0;
     if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
                &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
         strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
-        (version != 1 && version != 2 && version != 3) ||
+        (version < 1 || version > 4) ||
         chapter < 0 || chapter >= CHAPTER_COUNT ||
         mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
         wingman0 < 0 || wingman0 > 100 ||
@@ -650,7 +664,24 @@ static int load_campaign_save_path(Game *g, const char *path)
         fclose(file);
         return 0;
     }
+    /* Version 4 adds the pilot's record.  Older saves start it at zero. */
+    if (version >= 4 &&
+        (fscanf(file, "%d %d %u %d %d %d %d", &victories, &sorties, &awards,
+                &rank, &skill[0], &skill[1], &skill[2]) != 7 ||
+         victories < 0 || sorties < 0 || rank < 0 || rank > 3 ||
+         skill[0] < 0 || skill[0] > 100 || skill[1] < 0 || skill[1] > 100 ||
+         skill[2] < 0 || skill[2] > 100)) {
+        fclose(file);
+        return 0;
+    }
     fclose(file);
+    g->saved_victories = victories;
+    g->saved_sorties = sorties;
+    g->saved_awards = awards;
+    g->saved_rank = rank;
+    g->saved_skill[0] = (float)skill[0] / 100.0f;
+    g->saved_skill[1] = (float)skill[1] / 100.0f;
+    g->saved_skill[2] = (float)skill[2] / 100.0f;
     g->saved_chapter = chapter;
     g->saved_mission = mission;
     g->saved_wingman_health[0] = wingman0;
@@ -683,10 +714,15 @@ static int save_campaign(Game *g)
     int ok;
     int backed_up;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 3\n%d %d\n%d %d %d\n%d\n%d\n",
+    ok = fprintf(file, "CANVAS_SKIES_SAVE 4\n%d %d\n%d %d %d\n%d\n%d\n"
+                 "%d %d %u %d %d %d %d\n",
                  g->chapter, g->mission,
                  g->wingman_health[0], g->wingman_health[1],
-                 g->wingman_health[2], g->campaign_complete, g->lives) > 0;
+                 g->wingman_health[2], g->campaign_complete, g->lives,
+                 g->victories, g->sorties, g->awards, g->rank,
+                 (int)(g->skill_flying * 100.0f + 0.5f),
+                 (int)(g->skill_gunnery * 100.0f + 0.5f),
+                 (int)(g->skill_engine * 100.0f + 0.5f)) > 0;
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(save_new_path);
@@ -714,9 +750,121 @@ static int save_campaign(Game *g)
     g->saved_lives = g->lives;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
+    g->saved_victories = g->victories;
+    g->saved_sorties = g->sorties;
+    g->saved_awards = g->awards;
+    g->saved_rank = g->rank;
+    g->saved_skill[0] = g->skill_flying;
+    g->saved_skill[1] = g->skill_gunnery;
+    g->saved_skill[2] = g->skill_engine;
     g->has_save = 1;
     g->save_loaded_from_backup = 0;
     return 1;
+}
+
+/* ---- Pilot's record ------------------------------------------------------
+ *
+ * Every sortie flown makes the pilot a little better: flying sharpens the
+ * turn, gunnery tightens the spread and makes jams rarer, and time with the
+ * fitters clears jams faster.  Victories bring decorations and promotion. */
+typedef struct {
+    const char *name;
+    const char *citation;
+    int victories;
+    uint8_t ribbon[3][3];
+    int shape; /* 0 leaf, 1 cross, 2 star cross */
+} Decoration;
+
+static const Decoration decorations[5] = {
+    {"MENTIONED IN DESPATCHES",
+     "FOR GALLANT SERVICE IN THE FIELD. HIS NAME WAS READ OUT IN THE MESS "
+     "AND HE WAS MADE TO BUY THE FIRST ROUND.", 1,
+     {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, 0},
+    {"MILITARY CROSS",
+     "FOR CONSPICUOUS GALLANTRY IN THE AIR. HE ENGAGED A SUPERIOR ENEMY "
+     "FORMATION, BROKE IT UP AND DROVE IT BACK OVER ITS OWN LINES.", 5,
+     {{236, 232, 220}, {104, 48, 112}, {236, 232, 220}}, 1},
+    {"DISTINGUISHED FLYING CROSS",
+     "FOR SKILL AND COURAGE OVER THE LINES. TEN TIMES HE HAS COME HOME WITH "
+     "AN ENEMY MACHINE TO HIS NAME AND A HOLED AEROPLANE TO SHOW FOR IT.", 10,
+     {{104, 48, 112}, {236, 232, 220}, {104, 48, 112}}, 2},
+    {"DISTINGUISHED SERVICE ORDER",
+     "FOR LEADERSHIP OF THE HIGHEST ORDER. UNDER HIS COMMAND THE FLIGHT HELD "
+     "THE SKY OVER THE ADVANCE AND BROUGHT ITS PILOTS HOME.", 20,
+     {{170, 36, 36}, {40, 54, 120}, {170, 36, 36}}, 2},
+    {"BAR TO THE MILITARY CROSS",
+     "FOR FURTHER ACTS OF GALLANTRY. THIRTY ENEMY MACHINES HAVE FALLEN TO HIS "
+     "GUNS. HE SPEAKS OF NONE OF THEM.", 30,
+     {{236, 232, 220}, {104, 48, 112}, {236, 232, 220}}, 1}
+};
+
+static const char *rank_names[4] = {
+    "SECOND LIEUTENANT", "LIEUTENANT", "CAPTAIN", "MAJOR"
+};
+
+static const char *rank_short[4] = {"2ND LT.", "LT.", "CAPT.", "MAJOR"};
+
+static int earned_rank(const Game *g)
+{
+    if (g->victories >= 25 && g->chapter >= 5) return 3;
+    if (g->victories >= 12 && g->chapter >= 3) return 2;
+    if (g->victories >= 3 || g->sorties >= 10) return 1;
+    return 0;
+}
+
+static void reset_career(Game *g)
+{
+    g->victories = g->sorties = g->rank = 0;
+    g->awards = 0;
+    g->skill_flying = g->skill_gunnery = g->skill_engine = 0.0f;
+    g->pending_award = 0;
+    g->pending_rank = 0;
+}
+
+static void restore_saved_career(Game *g)
+{
+    g->victories = g->saved_victories;
+    g->sorties = g->saved_sorties;
+    g->awards = g->saved_awards;
+    g->rank = g->saved_rank;
+    g->skill_flying = g->saved_skill[0];
+    g->skill_gunnery = g->saved_skill[1];
+    g->skill_engine = g->saved_skill[2];
+    g->pending_award = 0;
+    g->pending_rank = 0;
+}
+
+static float grow_skill(float skill, float amount)
+{
+    skill += amount * (1.0f - skill * 0.5f);
+    return skill > 1.0f ? 1.0f : skill;
+}
+
+static void count_sortie_in_record(Game *g)
+{
+    int i, rank;
+    if (g->career_counted) return;
+    g->career_counted = 1;
+    ++g->sorties;
+    if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
+        g->victories += g->kills;
+    g->skill_flying = grow_skill(g->skill_flying, g->success ? 0.03f : 0.012f);
+    g->skill_gunnery = grow_skill(g->skill_gunnery, 0.006f + 0.018f * g->kills);
+    g->skill_engine = grow_skill(g->skill_engine, 0.015f);
+    g->pending_award = 0;
+    for (i = 0; i < 5; ++i)
+        if (!(g->awards & (1u << i)) && g->victories >= decorations[i].victories) {
+            g->awards |= 1u << i;
+            g->pending_award |= 1 << i;
+        }
+    rank = earned_rank(g);
+    g->pending_rank = rank > g->rank;
+    if (rank > g->rank) g->rank = rank;
+    if (g->fatal_sortie) {
+        /* A pilot who goes down shows no decoration card that evening. */
+        g->pending_award = 0;
+        g->pending_rank = 0;
+    }
 }
 
 static int save_mission_result(Game *g)
@@ -729,6 +877,7 @@ static int save_mission_result(Game *g)
         if (g->lives > 0) --g->lives;
         g->life_lost_this_sortie = 1;
     }
+    count_sortie_in_record(g);
     /* The debrief still describes the sortie just flown, but the durable
      * continuation point must already describe what comes next.  A failed
      * sortie deliberately saves the same mission so Retry remains honest. */
@@ -1690,6 +1839,7 @@ static int music_mood_for_scene(const Game *g, Scene scene)
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     if (scene == SCENE_TITLE || scene == SCENE_MENU) return MUSIC_MARCH;
     if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
+    if (scene == SCENE_AWARD) return MUSIC_MESS;
     if (scene == SCENE_DEBRIEF)
         return g->success ? MUSIC_MESS :
                (g->fatal_sortie && g->lives <= 0) ?
@@ -1703,9 +1853,20 @@ static int music_mood_for_scene(const Game *g, Scene scene)
     return MUSIC_RECON;
 }
 
+/* Gridpipe Thyne is lost late in 1917; the evening after, his chair is
+ * empty in the mess. */
+static int thyne_lost_tonight(const Game *g)
+{
+    return g->chapter == 4 && g->mission == 9;
+}
+
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    if (scene == SCENE_STORY)
+        g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 : 2;
+    if (scene == SCENE_STORY || scene == SCENE_AWARD)
+        g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
     if (scene == SCENE_DEBRIEF && g->mission_save_state == 0)
         save_mission_result(g);
@@ -1877,6 +2038,7 @@ static void reset_sortie(Game *g)
     g->mission_save_state = 0;
     g->fatal_sortie = 0;
     g->life_lost_this_sortie = 0;
+    g->career_counted = 0;
     apply_story_wingmen(g);
     if (mode == MISSION_TOP_DOWN) {
         g->player_x = 320.0f;
@@ -2471,7 +2633,7 @@ static void flight_outputs(const FlightState *f, float *heading, float *pitch,
  * throttle and is traded with height in climbs and dives, and a slow
  * aircraft drops its nose.  F8 switches to the full six-axis model. */
 static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
-                               float aileron, float elevator)
+                               float aileron, float elevator, float agility)
 {
     float bank, pitch, heading, speed = f->u, turn;
     float target_speed, accel;
@@ -2480,13 +2642,13 @@ static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
     flight_euler(f, &bank, &pitch, &heading);
     /* Roll: proportional, with a gentle self-levelling when centred. */
     if (fabsf(aileron) > 0.05f)
-        f->p = flight_approach(f->p, aileron * 2.3f, 9.0f * dt);
+        f->p = flight_approach(f->p, aileron * 2.3f * agility, 9.0f * dt);
     else
         f->p = flight_approach(f->p,
                                fabsf(bank) < 1.2f ? -bank * 0.7f : 0.0f,
                                6.0f * dt);
     /* Pitch authority fades as the aircraft slows. */
-    f->q = flight_approach(f->q, elevator * 1.05f *
+    f->q = flight_approach(f->q, elevator * 1.05f * agility *
                            flight_clamp(speed / 44.0f, 0.3f, 1.15f),
                            5.0f * dt);
     /* Coordinated turn: bank turns the nose round the horizon. */
@@ -2527,14 +2689,14 @@ static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
 
 static void arcade_flight_advance(FlightState *f, Vec3 *position,
                                   float frame_dt, float aileron,
-                                  float elevator)
+                                  float elevator, float agility)
 {
     const float step = 0.02f;
     int iterations = 0;
     if (frame_dt > 0.10f) frame_dt = 0.10f;
     f->accumulator += frame_dt;
     while (f->accumulator >= step && iterations < 5) {
-        arcade_flight_step(f, position, step, aileron, elevator);
+        arcade_flight_step(f, position, step, aileron, elevator, agility);
         f->accumulator -= step;
         ++iterations;
     }
@@ -3716,7 +3878,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                            aileron_command, elevator_command);
     else
         arcade_flight_advance(&g->flight, &position, dt,
-                              aileron_command, elevator_command);
+                              aileron_command, elevator_command,
+                              1.0f + g->skill_flying * 0.22f);
     g->gun_recoil = flight_approach(g->gun_recoil, 0.0f, dt * 9.0f);
     g->shake = flight_approach(g->shake, 0.0f, dt * 2.6f);
     if (g->flight_doomed) {
@@ -4296,6 +4459,196 @@ static void gradient(SDL_Surface *s, uint8_t r0, uint8_t g0, uint8_t b0,
     }
 }
 
+/* ---- Story presentation -------------------------------------------------
+ *
+ * Each chapter opens on a title card over the painted battlefield, the
+ * diary entry is written out a few letters at a time, and decorations and
+ * promotions arrive as typed citations.  When Thyne is lost the next
+ * evening opens on his empty chair. */
+#define JOURNAL_LETTERS_PER_SECOND 38
+#define CITATION_LETTERS_PER_SECOND 46
+
+static int revealed_letters(const Game *g, int per_second)
+{
+    uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
+    return (int)(elapsed * (uint32_t)per_second / 1000u);
+}
+
+static int story_reveal_done(const Game *g)
+{
+    const CampaignMission *mission = &campaign_missions[g->chapter][g->mission];
+    return revealed_letters(g, JOURNAL_LETTERS_PER_SECOND) >=
+           (int)strlen(mission->log);
+}
+
+static int current_award_index(const Game *g)
+{
+    int i;
+    for (i = 0; i < 5; ++i)
+        if (g->pending_award & (1 << i)) return i;
+    return -1;
+}
+
+static const char *award_citation(const Game *g)
+{
+    int index = current_award_index(g);
+    if (index >= 0) return decorations[index].citation;
+    return "HAVING SHOWN GREAT SKILL AND COOLNESS IN COMMAND OF HIS "
+           "MACHINE, HE IS PROMOTED WITH EFFECT FROM THIS DAY.";
+}
+
+static int award_reveal_done(const Game *g)
+{
+    return revealed_letters(g, CITATION_LETTERS_PER_SECOND) >=
+           (int)strlen(award_citation(g));
+}
+
+/* Word-wrapped text which shows only its first 'limit' letters, laid out
+ * as if complete so words never jump between lines as they are written. */
+static int wrapped_text_limit(Game *g, int x, int y, const char *str,
+                              int columns, int line_height, int limit,
+                              int typewriter, uint32_t color)
+{
+    char line_buf[80];
+    int line_len = 0, shown = 0;
+    const char *p = str;
+    while (*p) {
+        const char *word;
+        int word_len;
+        while (*p == ' ') { ++p; ++shown; }
+        if (!*p) break;
+        word = p;
+        while (*p && *p != ' ') ++p;
+        word_len = (int)(p - word);
+        if (line_len && line_len + 1 + word_len > columns) {
+            line_buf[line_len] = '\0';
+            if (typewriter) typewriter_text(g, x, y, line_buf, 7, 11, color);
+            else journal_text(g, x, y, line_buf, color);
+            y += line_height;
+            line_len = 0;
+        }
+        if (line_len) line_buf[line_len++] = ' ';
+        if (word_len > (int)sizeof(line_buf) - line_len - 1)
+            word_len = (int)sizeof(line_buf) - line_len - 1;
+        if (shown + word_len > limit) {
+            int part = limit - shown;
+            if (part > 0) {
+                memcpy(line_buf + line_len, word, (size_t)part);
+                line_len += part;
+            }
+            line_buf[line_len] = '\0';
+            if (typewriter) typewriter_text(g, x, y, line_buf, 7, 11, color);
+            else journal_text(g, x, y, line_buf, color);
+            /* The pen nib at the end of the writing. */
+            if (!typewriter)
+                circle(g->screen, x + line_len * 8 + 2, y + 9, 1, color);
+            return 0;
+        }
+        memcpy(line_buf + line_len, word, (size_t)word_len);
+        line_len += word_len;
+        shown += word_len;
+    }
+    if (line_len) {
+        line_buf[line_len] = '\0';
+        if (typewriter) typewriter_text(g, x, y, line_buf, 7, 11, color);
+        else journal_text(g, x, y, line_buf, color);
+    }
+    return 1;
+}
+
+static void draw_victory_tally(Game *g, int x, int y, int count,
+                               uint32_t ink)
+{
+    SDL_Surface *s = g->screen;
+    int i;
+    if (count > 40) count = 40;
+    for (i = 0; i < count; ++i) {
+        int cx = x + (i % 20) * 10, cy = y + (i / 20) * 12;
+        line(s, cx - 3, cy, cx + 3, cy, ink);
+        line(s, cx, cy - 3, cx, cy + 3, ink);
+        line(s, cx - 3, cy + 1, cx + 3, cy + 1, ink);
+    }
+}
+
+static void draw_chapter_card(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    const Chapter *chapter = &chapters[g->chapter];
+    uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
+    char year[8];
+    size_t len = strlen(chapter->date);
+    int fade;
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(10, 8, 8));
+    if (g->dogfight_background) {
+        SDL_Rect src, dst;
+        int span = g->dogfight_background->w - SCREEN_W;
+        src.x = span > 0 ? (int)((elapsed / 60u) % (uint32_t)span) : 0;
+        src.y = g->dogfight_background->h > SCREEN_H ?
+                (g->dogfight_background->h - SCREEN_H) / 2 : 0;
+        src.w = SCREEN_W;
+        src.h = SCREEN_H;
+        dst.x = 0; dst.y = 0; dst.w = SCREEN_W; dst.h = SCREEN_H;
+        SDL_BlitSurface(g->dogfight_background, &src, s, &dst);
+    }
+    blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 8, 6, 6, 110);
+    blend_rect(s, 0, 110, SCREEN_W, 170, 8, 6, 6, 120);
+    snprintf(year, sizeof(year), "%s", len >= 4 ? chapter->date + len - 4 : "");
+    if (elapsed > 500u)
+        display_text(g, 320 - 2 * 36, 124, year, 36, 42,
+                     PIX_PACK(236, 214, 160));
+    if (elapsed > 1300u) {
+        int w = (int)strlen(chapter->title) * 22;
+        display_text(g, 320 - w / 2, 184, chapter->title, 22, 28,
+                     PIX_PACK(214, 92, 62));
+    }
+    if (elapsed > 2000u) {
+        int w = (int)strlen(chapter->date) * 10;
+        typewriter_text(g, 320 - w / 2, 230, chapter->date, 10, 15,
+                        PIX_PACK(226, 206, 166));
+    }
+    if (elapsed > 2800u)
+        typewriter_text(g, 320 - 6 * 7, 360, "ENTER", 7, 11,
+                        PIX_PACK(200, 180, 140));
+    /* Fade up from black. */
+    fade = elapsed < 1200u ? 255 - (int)(elapsed * 255u / 1200u) : 0;
+    if (fade > 0) blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 0, 0, 0,
+                             (uint8_t)fade);
+}
+
+static void draw_loss_card(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
+    static const char *lines[4] = {
+        "THE MESS, THAT EVENING.",
+        "THYNE'S CHAIR STOOD EMPTY BY THE STOVE.",
+        "NOBODY MOVED HIS PIPE FROM THE TABLE,",
+        "AND NOBODY SAT DOWN IN HIS PLACE."
+    };
+    int i;
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(12, 9, 8));
+    /* A candle and the empty chair, drawn in a few strokes. */
+    blend_circle(s, 470, 170, 70, 120, 80, 30, 60);
+    rect(s, 468, 150, 4, 26, PIX_PACK(220, 206, 170));
+    circle(s, 470, 146, 3, PIX_PACK(255, 214, 120));
+    rect(s, 380, 210, 70, 8, PIX_PACK(70, 46, 30));
+    rect(s, 380, 140, 8, 150, PIX_PACK(70, 46, 30));
+    rect(s, 442, 218, 8, 72, PIX_PACK(70, 46, 30));
+    rect(s, 380, 140, 70, 8, PIX_PACK(84, 56, 36));
+    rect(s, 380, 218, 8, 72, PIX_PACK(70, 46, 30));
+    for (i = 0; i < 4; ++i)
+        if (elapsed > 600u + (uint32_t)i * 1100u)
+            typewriter_text(g, 60, 150 + i * 26, lines[i], 7, 11,
+                            i == 0 ? PIX_PACK(200, 90, 60)
+                                   : PIX_PACK(220, 204, 170));
+    if (elapsed > 5200u)
+        typewriter_text(g, 60, 300, "GRIDPIPE THYNE, ROYAL FLYING CORPS", 7, 11,
+                        PIX_PACK(160, 146, 120));
+    if (elapsed > 6000u)
+        typewriter_text(g, 320 - 6 * 7, 360, "ENTER", 7, 11,
+                        PIX_PACK(200, 180, 140));
+}
+
 static void draw_story(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -4304,31 +4657,136 @@ static void draw_story(Game *g)
     char buf[48];
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
+    int done;
+    if (g->story_stage == 0) { draw_chapter_card(g); return; }
+    if (g->story_stage == 1) { draw_loss_card(g); return; }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
     journal_text(g, 112, journal_line_y(0), "FLIGHT LOG", red);
-    journal_text(g, 112, journal_line_y(2), "NEDDY SEAGOON", ink);
+    snprintf(buf, sizeof(buf), "%s NEDDY SEAGOON", rank_short[g->rank & 3]);
+    journal_text(g, 112, journal_line_y(2), buf, ink);
     journal_text(g, 112, journal_line_y(3), "ROYAL FLYING CORPS", ink);
     journal_text(g, 112, journal_line_y(5), chapter->date, red);
     snprintf(buf, sizeof(buf), "CHAPTER %d / MISSION %d",
              g->chapter + 1, g->mission + 1);
     journal_text(g, 112, journal_line_y(7), buf, ink);
     journal_paragraph(g, 112, journal_line_y(9), chapter->title, 22, red);
+    snprintf(buf, sizeof(buf), "VICTORIES %d", g->victories);
+    journal_text(g, 112, journal_line_y(11), buf, ink);
+    draw_victory_tally(g, 116, journal_line_y(12) + 6, g->victories, ink);
     journal_text(g, 348, journal_line_y(0), mission->title, red);
     journal_text(g, 348, journal_line_y(2), mission_mode_name(mission->mode), ink);
-    journal_paragraph(g, 348, journal_line_y(4), mission->log, 25, ink);
+    done = wrapped_text_limit(g, 348, journal_line_y(4), mission->log, 25, 17,
+                              revealed_letters(g, JOURNAL_LETTERS_PER_SECOND),
+                              0, ink);
+    if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
         journal_text(g, 348, journal_line_y(11), "FLYING WITH:", red);
         snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                  allied_pilot_names[2]);
         journal_text(g, 348, journal_line_y(12), buf, ink);
-        journal_text(g, 348, journal_line_y(13), allied_pilot_names[1], ink);
+        if (g->wingman_health[1] > 0)
+            journal_text(g, 348, journal_line_y(13), allied_pilot_names[1], ink);
     } else if (mission->mode == MISSION_GUNNER_3D) {
         journal_text(g, 348, journal_line_y(11), "REAR COCKPIT:", red);
         journal_text(g, 348, journal_line_y(12), "TOM AT THE CONTROLS", ink);
         journal_text(g, 348, journal_line_y(13), "LEWIS GUN READY", ink);
     }
     journal_text(g, 348, journal_line_y(14), "ENTER - READ ORDERS", red);
+}
+
+static void draw_medal(SDL_Surface *s, int x, int y, const Decoration *d)
+{
+    int i;
+    if (d->shape == 0) {
+        /* A bronze oak leaf. */
+        ellipse(s, x, y + 40, 9, 22, PIX_PACK(150, 104, 52));
+        line(s, x, y + 18, x, y + 64, PIX_PACK(96, 64, 30));
+        return;
+    }
+    for (i = 0; i < 3; ++i)
+        rect(s, x - 18 + i * 12, y, 12, 40,
+             PIX_PACK(d->ribbon[i][0], d->ribbon[i][1], d->ribbon[i][2]));
+    rect(s, x - 18, y + 40, 36, 3, PIX_PACK(150, 120, 60));
+    if (d->shape == 1) {
+        rect(s, x - 5, y + 46, 10, 34, PIX_PACK(200, 196, 188));
+        rect(s, x - 17, y + 58, 34, 10, PIX_PACK(200, 196, 188));
+        circle(s, x, y + 63, 5, PIX_PACK(176, 140, 64));
+    } else {
+        fill_triangle(s, x, y + 44, x - 16, y + 63, x + 16, y + 63,
+                      PIX_PACK(214, 210, 200));
+        fill_triangle(s, x, y + 82, x - 16, y + 63, x + 16, y + 63,
+                      PIX_PACK(214, 210, 200));
+        circle(s, x, y + 63, 7, PIX_PACK(176, 140, 64));
+    }
+}
+
+static void draw_award(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int index = current_award_index(g);
+    const char *title = index >= 0 ? decorations[index].name :
+                        rank_names[g->rank & 3];
+    uint32_t ink = PIX_PACK(47, 37, 27);
+    uint32_t red = PIX_PACK(125, 39, 31);
+    int w;
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(24, 17, 12));
+    if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
+    blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 10, 8, 6, 170);
+    rect(s, 92, 58, 460, 270, PIX_PACK(28, 20, 14));
+    rect(s, 88, 54, 460, 270, PIX_PACK(226, 212, 178));
+    rect(s, 96, 62, 444, 1, PIX_PACK(150, 120, 80));
+    rect(s, 96, 314, 444, 1, PIX_PACK(150, 120, 80));
+    w = 22 * 12;
+    display_text(g, 318 - w / 2, 72, "BY COMMAND OF THE KING", 12, 18, ink);
+    typewriter_text(g, 210, 98, index >= 0 ? "IS AWARDED THE" : "IS PROMOTED",
+                    7, 11, ink);
+    w = (int)strlen(title) * 12;
+    if (w > 420) w = 420;
+    display_text(g, 318 - w / 2, 116, title, 12, 18, red);
+    if (index >= 0) draw_medal(s, 140, 150, &decorations[index]);
+    {
+        char who[48];
+        snprintf(who, sizeof(who), "%s N. SEAGOON, R.F.C.",
+                 rank_short[g->rank & 3]);
+        typewriter_text(g, 200, 150, who, 7, 11, red);
+    }
+    if (wrapped_text_limit(g, 200, 172, award_citation(g), 46, 16,
+                           revealed_letters(g, CITATION_LETTERS_PER_SECOND),
+                           1, ink))
+        typewriter_text(g, 400, 296, "ENTER", 7, 11, red);
+}
+
+/* The squadron roster pinned over the map on the briefing board. */
+static void draw_squadron_roster(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t ink = PIX_PACK(47, 37, 27);
+    uint32_t red = PIX_PACK(125, 39, 31);
+    char buf[48];
+    int i, y = 222;
+    rect(s, 404, 206, 196, 118, PIX_PACK(30, 22, 16));
+    rect(s, 400, 202, 196, 118, PIX_PACK(228, 216, 184));
+    circle(s, 498, 208, 3, PIX_PACK(150, 40, 30));
+    typewriter_text(g, 410, y - 6, "SQUADRON ROSTER", 7, 11, red);
+    y += 12;
+    snprintf(buf, sizeof(buf), "%s SEAGOON %dV", rank_short[g->rank & 3],
+             g->victories);
+    typewriter_text(g, 410, y, buf, 7, 11, ink);
+    for (i = 0; i < 3; ++i) {
+        y += 15;
+        snprintf(buf, sizeof(buf), "%-14s %s", allied_pilot_names[i],
+                 g->wingman_health[i] > 0 ? "FIT" : "LOST");
+        typewriter_text(g, 410, y, buf, 7, 11,
+                        g->wingman_health[i] > 0 ? ink : red);
+    }
+    y += 15;
+    typewriter_text(g, 410, y, "TOM           OBSERVER", 7, 11, ink);
+    y += 15;
+    snprintf(buf, sizeof(buf), "FLY %d  GUN %d  ENG %d",
+             (int)(g->skill_flying * 10.0f), (int)(g->skill_gunnery * 10.0f),
+             (int)(g->skill_engine * 10.0f));
+    typewriter_text(g, 410, y, buf, 7, 11, ink);
 }
 
 static void draw_briefing(Game *g)
@@ -4385,6 +4843,8 @@ static void draw_briefing(Game *g)
                         "SPACE       LEWIS GUN" :
                         "SPACE       MACHINE GUN", 7, 11, ink);
         typewriter_text(g, 73, 253,
+                        mission->mode == MISSION_DOGFIGHT_3D ?
+                        "R CLEAR JAM   H HOME" :
                         is_perspective_mode(mission->mode) ?
                         "              RETURN ALIVE" :
                         "B           DROP BOMB", 7, 11, ink);
@@ -4392,6 +4852,7 @@ static void draw_briefing(Game *g)
         typewriter_text(g, 73, 237, "NO ARMAMENT FITTED", 7, 11, red);
         typewriter_text(g, 73, 253, "OBSERVE AND RETURN", 7, 11, ink);
     }
+    draw_squadron_roster(g);
     rect(s, 68, 344, 194, 25, rgb(s, 184, 139, 63));
     rect(s, 70, 346, 190, 21, rgb(s, 57, 39, 27));
     circle(s, 76, 351, 2, rgb(s, 184, 139, 63));
@@ -7546,6 +8007,26 @@ static int game_init(Game *g)
     return 1;
 }
 
+static void advance_after_debrief(Game *g)
+{
+    if (!g->success && g->fatal_sortie && g->lives <= 0) {
+        g->menu_selection = 0;
+        set_scene(g, SCENE_TITLE);
+    }
+    else if (!g->success) set_scene(g, SCENE_BRIEFING);
+    else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
+        ++g->mission;
+        set_scene(g, SCENE_STORY);
+    } else if (g->chapter + 1 >= CHAPTER_COUNT) {
+        g->campaign_complete = 1;
+        set_scene(g, SCENE_EPILOGUE);
+    } else {
+        ++g->chapter;
+        g->mission = 0;
+        set_scene(g, SCENE_STORY);
+    }
+}
+
 static void handle_event(Game *g, SDL_Event *ev)
 {
     SDL_Scancode scancode;
@@ -7648,6 +8129,7 @@ static void handle_event(Game *g, SDL_Event *ev)
                 g->lives = g->saved_lives;
                 memcpy(g->wingman_health, g->saved_wingman_health,
                        sizeof(g->wingman_health));
+                restore_saved_career(g);
                 if (g->campaign_complete) {
                     set_scene(g, SCENE_EPILOGUE);
                     break;
@@ -7666,6 +8148,7 @@ static void handle_event(Game *g, SDL_Event *ev)
                 g->mission = 0;
                 g->campaign_complete = 0;
                 g->lives = 3;
+                reset_career(g);
                 for (pilot = 0; pilot < 3; ++pilot)
                     g->wingman_health[pilot] = 100;
                 apply_story_wingmen(g);
@@ -7673,7 +8156,6 @@ static void handle_event(Game *g, SDL_Event *ev)
             }
             set_scene(g, SCENE_STORY);
         }
-        else if (g->scene == SCENE_STORY) set_scene(g, SCENE_BRIEFING);
         else if (g->scene == SCENE_BRIEFING) {
             reset_sortie(g);
             set_scene(g, SCENE_SORTIE);
@@ -7682,21 +8164,37 @@ static void handle_event(Game *g, SDL_Event *ev)
                 g->mission_save_state = 0;
                 if (!save_mission_result(g)) break;
             }
-            if (!g->success && g->fatal_sortie && g->lives <= 0) {
-                g->menu_selection = 0;
-                set_scene(g, SCENE_TITLE);
+            if (g->pending_award || g->pending_rank) {
+                set_scene(g, SCENE_AWARD);
+                break;
             }
-            else if (!g->success) set_scene(g, SCENE_BRIEFING);
-            else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
-                ++g->mission;
-                set_scene(g, SCENE_STORY);
-            } else if (g->chapter + 1 >= CHAPTER_COUNT) {
-                g->campaign_complete = 1;
-                set_scene(g, SCENE_EPILOGUE);
+            advance_after_debrief(g);
+        } else if (g->scene == SCENE_AWARD) {
+            if (!award_reveal_done(g)) {
+                /* First press finishes the typing; the next moves on. */
+                g->reveal_started = SDL_GetTicks() - 60000u;
+                break;
+            }
+            if (g->pending_award) {
+                g->pending_award &= g->pending_award - 1;
             } else {
-                ++g->chapter;
-                g->mission = 0;
-                set_scene(g, SCENE_STORY);
+                g->pending_rank = 0;
+            }
+            if (g->pending_award || g->pending_rank) {
+                g->reveal_started = SDL_GetTicks();
+                g->redraw_static = 1;
+            } else {
+                advance_after_debrief(g);
+            }
+        } else if (g->scene == SCENE_STORY) {
+            if (g->story_stage == 2 && !story_reveal_done(g)) {
+                g->reveal_started = SDL_GetTicks() - 60000u;
+            } else if (g->story_stage < 2) {
+                g->story_stage = (g->story_stage == 0 &&
+                                  thyne_lost_tonight(g)) ? 1 : 2;
+                g->reveal_started = SDL_GetTicks();
+            } else {
+                set_scene(g, SCENE_BRIEFING);
             }
         } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);
         break;
@@ -7836,6 +8334,7 @@ int main(int argc, char **argv)
          * or prompt changes (redraw_static), not every frame. */
         if (g.scene == SCENE_TITLE ||
             g.scene == SCENE_SORTIE || g.scene == SCENE_DEBRIEF ||
+            g.scene == SCENE_STORY || g.scene == SCENE_AWARD ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
@@ -7846,6 +8345,7 @@ int main(int argc, char **argv)
             case SCENE_SORTIE: draw_sortie(&g); break;
             case SCENE_DEBRIEF: draw_debrief(&g); break;
             case SCENE_EPILOGUE: draw_epilogue(&g); break;
+            case SCENE_AWARD: draw_award(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
