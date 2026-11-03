@@ -4,7 +4,7 @@ Status date: 3 November 2026
 
 Branch: `canvas-skies-vertical-slice`
 
-Code state before this documentation commit: `9a33fd9`
+Code state before this documentation update: `368c215`
 
 Repository: `DalsinAI/amigasdlsopwith`
 
@@ -112,6 +112,10 @@ Current controls:
   mission and all three wingmen. The officers' menu adds a Continue plaque
   only when a valid save is present; malformed or out-of-range saves are
   ignored.
+- The normal Amiga build has now been restarted in the visible lab with a
+  known Chapter 3 / Mission 5 save. It reached the title and displayed
+  `CONTINUE CAMPAIGN - CHAPTER 3 / MISSION 5`, proving the persisted values
+  survive process and emulator restart and are presented correctly.
 - Debrief and epilogue scene paths exist.
 - Fonts are provided as separately rendered sizes; field-sign text is centred.
 - Amiga drawer icon and obvious start icon are present in the package folder.
@@ -235,8 +239,10 @@ These are not optional polish if the game is to become an RC.
   final number.
 - Wingman persistence, survival consequences and named-friend story outcomes
   are scaffolded but not yet a proven campaign system.
-- Campaign continuation is implemented, but still needs a clean-instance test
-  covering creation, restart, Continue, chapter rollover and a malformed save.
+- Campaign continuation is implemented, and save discovery plus restart/menu
+  presentation have been qualified in the visible Amiga lab. It still needs
+  tests covering in-game creation, accepting Continue, chapter rollover and a
+  malformed save.
 
 ### Audio and licensing
 
@@ -294,9 +300,10 @@ These are not optional polish if the game is to become an RC.
 
 ## Safe resume point
 
-At this handoff, the branch is pushed through `9a33fd9`, the build succeeds with
-`ports/amigaos3/Makefile.canvas`, and the visible lab has the enemy counter and
-50% ammunition increase installed. The next developer should first pull the
-branch, read these two documents, run the direct `DOGFIGHT` test and inspect
-`git status` before touching the three untracked gunner experiments.
+At this handoff, the branch is pushed through `368c215`, the build succeeds with
+`ports/amigaos3/Makefile.canvas`, and the visible lab has the latest normal
+build open at the campaign menu with the Chapter 3 / Mission 5 Continue plaque
+visible. The next developer should first pull the branch, read these two
+documents, run the direct `DOGFIGHT` test and inspect `git status` before
+touching the three untracked gunner experiments.
 
