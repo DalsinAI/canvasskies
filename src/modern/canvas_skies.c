@@ -3450,7 +3450,8 @@ static void draw_explosion_frame(Game *g, SDL_Surface *atlas, int frame,
             if (tx < 0 || tx >= dst->w) continue;
             source = surface_pixel(atlas, sx, sy);
             SDL_GetRGB(source, atlas->format, &r, &green, &b);
-            if (r > 168 && b > 115 && green + 42 < r && green + 42 < b)
+            if ((r > 168 && b > 115 && green + 42 < r && green + 42 < b) ||
+                (r > 70 && b > 45 && green + 28 < r && green + 10 < b))
                 continue;
             if (alpha >= 250) {
                 pixel(dst, tx, ty, rgb(dst, r, green, b));
@@ -5398,9 +5399,11 @@ static int game_init(Game *g)
         SDL_Surface *keyed[] = {g->topdown_player, g->dogfight_enemy,
                                 g->pilot_cockpit, g->gunner_cockpit,
                                 g->gunner_ring, g->gunner_airframe,
-                                g->gunner_moving_guns};
+                                g->gunner_moving_guns,
+                                g->explosion_atlas,
+                                g->topdown_explosion_atlas};
         int i;
-        for (i = 0; i < 7; ++i) if (keyed[i])
+        for (i = 0; i < 9; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||

@@ -4,7 +4,7 @@ Status date: 3 November 2026
 
 Branch: `canvas-skies-vertical-slice`
 
-Code state before this documentation update: `368c215`
+Code state before this documentation update: `34d456b`
 
 Repository: `DalsinAI/amigasdlsopwith`
 
@@ -153,8 +153,12 @@ Current controls:
 
 - Dedicated top-down battlefield, player art and explosion atlas.
 - Ground targets and moving vehicles are represented.
-- Bombs and ground effects use world-axis tracking so they are intended to
-  scroll with the landscape rather than the player.
+- Bombs and ground effects use world-axis tracking. A visible two-frame Amiga
+  test now proves a ground strike remains attached to the scrolling terrain
+  while the player stays centred.
+- Explosion rendering rejects the dark red-purple antialias fringe in the
+  source atlas as well as the ordinary magenta key. The visible ground-strike
+  retest has clean smoke and blast edges.
 - Gameplay resources and increasing chapter/mission difficulty exist.
 
 ### Rear-gunner mode
@@ -249,9 +253,9 @@ These are not optional polish if the game is to become an RC.
 
 - Both modes need a systematic play test of target counts, mission completion,
   ammunition use, damage and difficulty across 1914-1918.
-- Confirm that every ground explosion remains attached to world coordinates
-  while scrolling. This was repeatedly wrong during development and must have
-  a regression test.
+- The top-down bomb case has now been visibly qualified for world-coordinate
+  scrolling. Repeat the same controlled check for moving targets and side-on
+  strikes, then turn the check into a durable regression test.
 - Top-down art, vehicles and explosions still need more variety and detail.
 - Side-on foreground/background separation needs final colour, silhouette and
   parallax tuning.
@@ -313,8 +317,8 @@ These are not optional polish if the game is to become an RC.
    dive to ground impact, firing, enemy damage, collision and mission end.
 2. Correct the rear-gunner mode to one Lewis gun everywhere and produce a
    deliberate angle atlas tied to measured muzzle positions.
-3. Add a repeatable world-effect test proving side and top-down explosions stay
-   attached to ground coordinates.
+3. Convert the visibly qualified top-down world-effect check into a repeatable
+   test, then cover the side-on case and moving ground targets.
 4. Give one complete chapter all twelve distinct objectives and play it from
    journal to debrief. Use that as the campaign template.
 5. Resolve the audio tick and music licensing before adding more recordings.
@@ -338,9 +342,10 @@ These are not optional polish if the game is to become an RC.
 ## Safe resume point
 
 At this handoff, the build succeeds with `ports/amigaos3/Makefile.canvas`, and
-the visible lab has the latest build open in direct `GUNNER` mode after a live
-muzzle-origin and purple-fringe check. The primary save still contains version
-2 coordinates `1 0` with the campaign-active flag. The next developer should
-first pull the branch, read these two documents, run the direct `DOGFIGHT` test
-and inspect `git status` before touching the three untracked gunner experiments.
+the visible lab has the latest build open in direct `TOPDOWN` mode after a live
+ground-anchoring and explosion-edge check. The primary save still contains
+version 2 coordinates `1 0` with the campaign-active flag. The next developer
+should first pull the branch, read these two documents, run the direct
+`DOGFIGHT` test and inspect `git status` before touching the three untracked
+gunner experiments.
 
