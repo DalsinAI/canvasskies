@@ -4,7 +4,7 @@ Status date: 3 November 2026
 
 Branch: `canvas-skies-vertical-slice`
 
-Code state before this documentation update: `34d456b`
+Code state before this documentation update: `c699a33`
 
 Repository: `DalsinAI/amigasdlsopwith`
 
@@ -195,6 +195,10 @@ Current controls:
   removed by replacing one-pixel atmosphere bands with a solid signed-distance
   fill.
 - Perspective terrain, clouds and detailed cockpit foreground.
+- Simulator clouds now use three deterministic world-space formations: low
+  cumulus, wind-stretched stratus and taller cells. Puff placement, height and
+  scale vary without screen-space repetition or camera-relative swimming; a
+  visible steep-bank Amiga test retained a solid sky/ground frame.
 - Enemy flight states, entry paths, pursuit, firing, damage, collision
   avoidance and ground-impact crashes.
 - Mid-air collision dooms both aircraft and carries both to the ground.
@@ -229,7 +233,8 @@ These are not optional polish if the game is to become an RC.
   steep bank still needs visual qualification in every quadrant and through a
   full 360-degree turn.
 - Distant hills, horizon transition, clouds and ground geometry require more
-  detail and better continuity. Clouds must be less repetitive.
+  detail and better continuity. The cloud layout is now less repetitive, but
+  the smallest distant formations still need silhouette and colour polish.
 - Enemy aircraft are still visually basic. They need convincing biplane and
   monoplane silhouettes, bank/pitch poses, damage states and distance-based
   levels of detail.
@@ -342,8 +347,8 @@ These are not optional polish if the game is to become an RC.
 ## Safe resume point
 
 At this handoff, the build succeeds with `ports/amigaos3/Makefile.canvas`, and
-the visible lab has the latest build open in direct `TOPDOWN` mode after a live
-ground-anchoring and explosion-edge check. The primary save still contains
+the visible lab has the latest build open in direct `DOGFIGHT` mode after a
+live cloud-variety and steep-bank frame check. The primary save still contains
 version 2 coordinates `1 0` with the campaign-active flag. The next developer
 should first pull the branch, read these two documents, run the direct
 `DOGFIGHT` test and inspect `git status` before touching the three untracked

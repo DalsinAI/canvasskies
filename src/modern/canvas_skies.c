@@ -4249,39 +4249,65 @@ static void draw_simulator_clouds(Game *g)
                                    (uint32_t)(cz * 91229) ^ 0x434c4f55u);
         Vec3 centre;
         Projected3D p;
-        int radius, puffs, puff;
+        int radius, puffs, puff, cloud_type;
         if ((seed & 7u) > 2u) continue;
+        cloud_type = (int)((seed >> 27) % 3u);
         centre.x = ((float)cx + 0.18f + (float)(seed & 255u) / 410.0f) *
                    cell_size;
         centre.z = ((float)cz + 0.15f +
                    (float)((seed >> 8) & 255u) / 390.0f) * cell_size;
-        centre.y = 690.0f + (float)((seed >> 16) % 820u);
+        centre.y = 650.0f + (float)((seed >> 16) % 660u);
+        if (cloud_type == 1) centre.y += 180.0f;
+        if (cloud_type == 2) centre.y += 360.0f;
         p = project_world_point(g, centre);
         if (!p.visible || p.x < -180 || p.x > SCREEN_W + 180 ||
             p.y < -100 || p.y > SCREEN_H + 100) continue;
-        radius = (int)((26000.0f + (float)(seed & 8191u)) / p.depth);
-        if (radius < 3) radius = 3;
-        if (radius > 38) radius = 38;
-        puffs = 4 + (int)((seed >> 5) & 3u);
-        /* The wind-stretched base joins the rising cells.  Varying ellipses
-         * read as a bank of vapour where equal circles read as bubbles. */
-        ellipse(s, p.x, p.y + radius / 5, radius * 6 / 5,
-                radius / 3 + 1, rgb(s, 111, 122, 132));
-        ellipse(s, p.x - radius / 8, p.y, radius,
-                radius / 3 + 1, rgb(s, 160, 167, 168));
+        radius = (int)((41000.0f + (float)(seed & 12287u)) / p.depth);
+        if (radius < 5) continue;
+        if (radius > 44) radius = 44;
+        puffs = cloud_type == 2 ? 8 + (int)((seed >> 5) & 3u) :
+                5 + (int)((seed >> 5) & 3u);
+        /* Three deterministic shapes break up the old row of equally spaced
+         * bubbles: low cumulus, wind-smeared stratus and tall storm cells.
+         * They stay in world space, so variety does not make them swim across
+         * the view as the aircraft turns. */
+        if (cloud_type == 1) {
+            ellipse(s, p.x, p.y + radius / 6, radius * 8 / 5,
+                    radius / 4 + 1, rgb(s, 116, 126, 134));
+            ellipse(s, p.x - radius / 3, p.y - radius / 10,
+                    radius * 7 / 5, radius / 4 + 1,
+                    rgb(s, 174, 180, 180));
+        } else {
+            ellipse(s, p.x, p.y + radius / 4,
+                    cloud_type == 2 ? radius : radius * 6 / 5,
+                    radius / 3 + 1, rgb(s, 111, 122, 132));
+            ellipse(s, p.x - radius / 8, p.y,
+                    cloud_type == 2 ? radius * 3 / 4 : radius,
+                    radius / 3 + 1, rgb(s, 160, 167, 168));
+        }
         for (puff = 0; puff < puffs; ++puff) {
             uint32_t ps = scene_hash(seed + (uint32_t)puff * 2654435761u);
-            int px = p.x - radius * 3 / 4 +
-                     puff * (radius * 3 / 2) / (puffs - 1) +
-                     (int)(ps % 7u) - 3;
-            int py = p.y - radius / 7 -
-                     (int)((ps >> 9) % (uint32_t)(radius / 2 + 1));
+            int span_x = cloud_type == 1 ? radius * 3 / 2 :
+                         cloud_type == 2 ? radius * 3 / 5 : radius;
+            int span_y = cloud_type == 1 ? radius / 5 :
+                         cloud_type == 2 ? radius : radius / 2;
+            int px = p.x + (int)(ps % (uint32_t)(span_x * 2 + 1)) - span_x;
+            int py = p.y - (int)((ps >> 9) % (uint32_t)(span_y + 1));
             int pr = radius / 3 + (int)((ps >> 17) %
                      (uint32_t)(radius / 4 + 1));
             int pry;
             uint8_t shade = (uint8_t)(184 + ((ps >> 25) & 23u));
+            if (puff == 0) {
+                px = p.x - radius / 4;
+                py = p.y - (cloud_type == 2 ? radius * 2 / 3 : radius / 3);
+            } else if (puff == 1) {
+                px = p.x + radius / 4;
+                py = p.y - (cloud_type == 2 ? radius / 3 : radius / 4);
+            }
             if (pr < 2) pr = 2;
-            pry = pr * (3 + (int)((ps >> 22) & 1u)) / 5;
+            pry = cloud_type == 1 ? pr / 3 :
+                  cloud_type == 2 ? pr * 4 / 5 :
+                  pr * (3 + (int)((ps >> 22) & 1u)) / 5;
             if (pry < 2) pry = 2;
             ellipse(s, px, py + pry / 3, pr, pry,
                     rgb(s, 123, 132, 138));
