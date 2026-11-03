@@ -153,6 +153,12 @@
 #ifndef CANVAS_SAVE_PATH
 #define CANVAS_SAVE_PATH "PROGDIR:CanvasSkies.save"
 #endif
+#ifndef CANVAS_SAVE_NEW_PATH
+#define CANVAS_SAVE_NEW_PATH "PROGDIR:CanvasSkies.save.new"
+#endif
+#ifndef CANVAS_SAVE_BACKUP_PATH
+#define CANVAS_SAVE_BACKUP_PATH "PROGDIR:CanvasSkies.save.bak"
+#endif
 
 #define SCREEN_W 640
 #define SCREEN_H 400
@@ -404,6 +410,7 @@ typedef struct {
     int mission;
     int wingman_health[3];
     int has_save;
+    int save_loaded_from_backup;
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
@@ -464,9 +471,9 @@ static int is_perspective_mode(MissionMode mode)
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
 }
 
-static int load_campaign_save(Game *g)
+static int load_campaign_save_path(Game *g, const char *path)
 {
-    FILE *file = fopen(CANVAS_SAVE_PATH, "r");
+    FILE *file = fopen(path, "r");
     char magic[24];
     int version;
     int chapter, mission;
@@ -492,22 +499,59 @@ static int load_campaign_save(Game *g)
     return 1;
 }
 
+static int load_campaign_save(Game *g)
+{
+    if (load_campaign_save_path(g, CANVAS_SAVE_PATH)) {
+        g->save_loaded_from_backup = 0;
+        return 1;
+    }
+    /* A save is first written under a temporary name and the preceding save
+     * is retained as .bak.  If power is lost during replacement, continue
+     * from the last complete record instead of silently losing the campaign. */
+    if (load_campaign_save_path(g, CANVAS_SAVE_BACKUP_PATH)) {
+        g->save_loaded_from_backup = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int save_campaign(Game *g)
 {
-    FILE *file = fopen(CANVAS_SAVE_PATH, "w");
+    FILE *file = fopen(CANVAS_SAVE_NEW_PATH, "w");
     int ok;
+    int backed_up;
     if (!file) return 0;
     ok = fprintf(file, "CANVAS_SKIES_SAVE 1\n%d %d\n%d %d %d\n",
                  g->chapter, g->mission,
                  g->wingman_health[0], g->wingman_health[1],
                  g->wingman_health[2]) > 0;
     if (fclose(file) != 0) ok = 0;
-    if (!ok) return 0;
+    if (!ok) {
+        remove(CANVAS_SAVE_NEW_PATH);
+        return 0;
+    }
+    if (g->save_loaded_from_backup) {
+        /* The primary was already known bad.  Keep the valid backup in place
+         * until the replacement has landed instead of rotating corruption
+         * over the only recoverable campaign. */
+        remove(CANVAS_SAVE_PATH);
+        backed_up = 0;
+    } else {
+        remove(CANVAS_SAVE_BACKUP_PATH);
+        backed_up = rename(CANVAS_SAVE_PATH, CANVAS_SAVE_BACKUP_PATH) == 0;
+    }
+    if (rename(CANVAS_SAVE_NEW_PATH, CANVAS_SAVE_PATH) != 0) {
+        if (backed_up)
+            rename(CANVAS_SAVE_BACKUP_PATH, CANVAS_SAVE_PATH);
+        remove(CANVAS_SAVE_NEW_PATH);
+        return 0;
+    }
     g->saved_chapter = g->chapter;
     g->saved_mission = g->mission;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
     g->has_save = 1;
+    g->save_loaded_from_backup = 0;
     return 1;
 }
 
