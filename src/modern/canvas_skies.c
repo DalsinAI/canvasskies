@@ -30,6 +30,12 @@
 #ifndef CANVAS_BOARD_BMP
 #define CANVAS_BOARD_BMP "assets/canvas-skies/mission-board-v2.bmp"
 #endif
+#ifndef CANVAS_FATAL_MEMORIAL_BMP
+#define CANVAS_FATAL_MEMORIAL_BMP "assets/canvas-skies/fatal-memorial-wide.bmp"
+#endif
+#ifndef CANVAS_FIELD_HOSPITAL_BMP
+#define CANVAS_FIELD_HOSPITAL_BMP "assets/canvas-skies/field-hospital.bmp"
+#endif
 #ifndef CANVAS_JOURNAL_BMP
 #define CANVAS_JOURNAL_BMP "assets/canvas-skies/journal.bmp"
 #endif
@@ -150,6 +156,9 @@
 #ifndef CANVAS_MESS_WAV
 #define CANVAS_MESS_WAV "assets/canvas-skies/colonel-bogey-gramophone.wav"
 #endif
+#ifndef CANVAS_PIPER_WAV
+#define CANVAS_PIPER_WAV "assets/canvas-skies/amazing-grace-bagpipes.wav"
+#endif
 #ifndef CANVAS_SAVE_PATH
 #define CANVAS_SAVE_PATH "PROGDIR:CanvasSkies.save"
 #endif
@@ -170,6 +179,7 @@
 #define MAX_TARGETS 12
 #define MAX_EXPLOSIONS 24
 #define MAX_BULLET_HOLES 18
+#define PLAYER_DURABILITY_MULTIPLIER 8
 #define MIDGROUND_ELEMENT_COUNT 6
 #define NEAR_ELEMENT_COUNT 6
 #define SKY_PARALLAX 0.008f
@@ -193,7 +203,8 @@ typedef enum {
     MUSIC_TENSION,
     MUSIC_MOURNING,
     MUSIC_ARMISTICE,
-    MUSIC_MESS
+    MUSIC_MESS,
+    MUSIC_PIPER
 } MusicMood;
 
 typedef struct {
@@ -339,6 +350,9 @@ typedef struct {
     uint8_t *mess_data;
     uint32_t mess_len;
     uint32_t mess_pos;
+    uint8_t *piper_data;
+    uint32_t piper_len;
+    uint32_t piper_pos;
     volatile int scene;
     volatile int shot;
     volatile int blast;
@@ -368,6 +382,8 @@ typedef struct {
     SDL_Surface *title;
     SDL_Surface *title_banner;
     SDL_Surface *mission_board;
+    SDL_Surface *fatal_memorial;
+    SDL_Surface *field_hospital;
     SDL_Surface *journal;
     SDL_Surface *sky;
     SDL_Surface *battlefield;
@@ -412,7 +428,12 @@ typedef struct {
     int has_save;
     int save_loaded_from_backup;
     int campaign_complete;
+    int lives;
+    int life_lost_this_sortie;
+    int mission_save_state;
+    int fatal_sortie;
     int saved_campaign_complete;
+    int saved_lives;
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
@@ -481,11 +502,12 @@ static int load_campaign_save_path(Game *g, const char *path)
     int chapter, mission;
     int wingman0, wingman1, wingman2;
     int complete = 0;
+    int lives = 3;
     if (!file) return 0;
     if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
                &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
         strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
-        (version != 1 && version != 2) ||
+        (version != 1 && version != 2 && version != 3) ||
         chapter < 0 || chapter >= CHAPTER_COUNT ||
         mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
         wingman0 < 0 || wingman0 > 100 ||
@@ -494,9 +516,14 @@ static int load_campaign_save_path(Game *g, const char *path)
         fclose(file);
         return 0;
     }
-    if (version == 2 &&
+    if (version >= 2 &&
         (fscanf(file, "%d", &complete) != 1 ||
          (complete != 0 && complete != 1))) {
+        fclose(file);
+        return 0;
+    }
+    if (version >= 3 &&
+        (fscanf(file, "%d", &lives) != 1 || lives < 0 || lives > 3)) {
         fclose(file);
         return 0;
     }
@@ -507,6 +534,7 @@ static int load_campaign_save_path(Game *g, const char *path)
     g->saved_wingman_health[1] = wingman1;
     g->saved_wingman_health[2] = wingman2;
     g->saved_campaign_complete = complete;
+    g->saved_lives = lives;
     return 1;
 }
 
@@ -532,10 +560,10 @@ static int save_campaign(Game *g)
     int ok;
     int backed_up;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 2\n%d %d\n%d %d %d\n%d\n",
+    ok = fprintf(file, "CANVAS_SKIES_SAVE 3\n%d %d\n%d %d %d\n%d\n%d\n",
                  g->chapter, g->mission,
                  g->wingman_health[0], g->wingman_health[1],
-                 g->wingman_health[2], g->campaign_complete) > 0;
+                 g->wingman_health[2], g->campaign_complete, g->lives) > 0;
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(CANVAS_SAVE_NEW_PATH);
@@ -560,6 +588,7 @@ static int save_campaign(Game *g)
     g->saved_chapter = g->chapter;
     g->saved_mission = g->mission;
     g->saved_campaign_complete = g->campaign_complete;
+    g->saved_lives = g->lives;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
     g->has_save = 1;
@@ -567,9 +596,40 @@ static int save_campaign(Game *g)
     return 1;
 }
 
+static int save_mission_result(Game *g)
+{
+    int active_chapter = g->chapter;
+    int active_mission = g->mission;
+    int active_complete = g->campaign_complete;
+    int ok;
+    if (g->fatal_sortie && !g->life_lost_this_sortie) {
+        if (g->lives > 0) --g->lives;
+        g->life_lost_this_sortie = 1;
+    }
+    /* The debrief still describes the sortie just flown, but the durable
+     * continuation point must already describe what comes next.  A failed
+     * sortie deliberately saves the same mission so Retry remains honest. */
+    if (g->success) {
+        if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
+            ++g->mission;
+        } else if (g->chapter + 1 < CHAPTER_COUNT) {
+            ++g->chapter;
+            g->mission = 0;
+        } else {
+            g->campaign_complete = 1;
+        }
+    }
+    ok = save_campaign(g);
+    g->chapter = active_chapter;
+    g->mission = active_mission;
+    g->campaign_complete = active_complete;
+    g->mission_save_state = ok ? 1 : -1;
+    return ok;
+}
+
 static int campaign_menu_count(const Game *g)
 {
-    return g->has_save ? 7 : 6;
+    return (g->has_save && g->saved_lives > 0) ? 7 : 6;
 }
 
 static float gunner_traverse(const Game *g)
@@ -1156,6 +1216,14 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
          2,  5,  9,  7,  4,  2,  0,  0
     };
     static const int mess_bass[8] = {0, 7, 5, 7, 0, 4, 5, 7};
+    /* Public-domain Amazing Grace melody, phrased for a solo chanter.  This
+     * is our own synthesis, not audio or orchestration from a film score. */
+    static const int pipe_melody[64] = {
+         5,10,10,10,14,10,14,14,12,10,10,10, 7, 5, 5, 5,
+         5,10,10,10,14,10,14,14,12,12,12,17,17,17,17,17,
+        14,17,17,14,17,17,14,14,10,10,10, 5, 7,10,10,10,
+        10, 7, 7, 5, 5, 5,10,10,14,10,14,14,12,10,10,10
+    };
     int i;
     for (i = 0; i < frames; ++i) {
         float t = (float)a->sample_clock / 11025.0f;
@@ -1263,6 +1331,51 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                           triangle_wave(a->synth_phase[4]) * 0.055f) * phrase;
                 sample += triangle_wave(a->synth_phase[3]) * 0.105f;
             }
+        } else if (a->music_mood == MUSIC_PIPER) {
+            if (a->piper_data && a->piper_pos + 4 <= a->piper_len) {
+                int16_t *pipes = (int16_t *)(a->piper_data + a->piper_pos);
+                float piper_time = (float)a->piper_pos / 44100.0f;
+                float memorial_gain = piper_time < 0.45f ?
+                                      piper_time / 0.45f : 1.0f;
+                if (piper_time > 15.0f)
+                    memorial_gain = (19.0f - piper_time) / 4.0f;
+                if (memorial_gain < 0.0f) memorial_gain = 0.0f;
+                sample = ((float)pipes[0] + (float)pipes[1]) / 65536.0f;
+                sample *= 0.64f * memorial_gain;
+                a->piper_pos += 4;
+            } else if (a->piper_data) {
+                /* One respectful performance, then silence. */
+                sample = 0.0f;
+            } else {
+                float after_silence = cue_t - 0.85f;
+                if (after_silence <= 0.0f) {
+                    sample = 0.0f;
+                } else {
+                int pipe_step = (int)(after_silence * 2.15f) & 63;
+                float vibrato = sinf(2.0f * (float)M_PI *
+                                      after_silence * 5.15f) * 0.0028f;
+                float chanter_hz = note_hz(pipe_melody[pipe_step]) *
+                                   (1.0f + vibrato);
+                float drone_d = note_hz(-7);
+                float drone_a = note_hz(0);
+                float attack = after_silence / 1.15f;
+                float breath = (float)((a->noise >> 16) & 0xffff) /
+                               32768.0f - 1.0f;
+                if (attack > 1.0f) attack = 1.0f;
+                a->synth_phase[0] += drone_d / 11025.0f;
+                a->synth_phase[1] += drone_a / 11025.0f;
+                a->synth_phase[4] += chanter_hz / 11025.0f;
+                if (a->synth_phase[0] >= 1.0f) a->synth_phase[0] -= 1.0f;
+                if (a->synth_phase[1] >= 1.0f) a->synth_phase[1] -= 1.0f;
+                if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
+                sample = triangle_wave(a->synth_phase[0]) * 0.095f +
+                         triangle_wave(a->synth_phase[1]) * 0.055f +
+                         triangle_wave(a->synth_phase[4]) * 0.205f +
+                         sinf(4.0f * (float)M_PI * a->synth_phase[4]) *
+                         0.055f + breath * 0.006f;
+                sample *= attack;
+                }
+            }
         } else {
             if (mood_index < 0 || mood_index > 3) mood_index = 0;
             for (v = 0; v < 3; ++v) {
@@ -1292,7 +1405,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         /* No synthetic needle ticks or periodic drum impulses here.  The
          * gramophone character is continuous filtering and low-level hiss;
          * rhythmic transients were being heard as an irritating clock tick. */
-        if (a->scene != SCENE_SORTIE) {
+        if (a->scene != SCENE_SORTIE && a->music_mood != MUSIC_PIPER) {
             /* Narrow-band acoustic horn / shellac response.  This is a
              * continuous filter plus a low bed of surface hiss—not clicks. */
             float filtered;
@@ -1324,17 +1437,26 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         }
         if (a->crash > 0) {
             int elapsed = 7200 - a->crash;
-            float env = (float)a->crash / 7200.0f;
             float wreck = (float)((a->noise >> 14) & 0x3ffff) /
                           131072.0f - 1.0f;
-            float impact = elapsed < 520 ?
-                           (float)(520 - elapsed) / 520.0f : 0.0f;
-            /* Ground impact: a short timber/metal crack followed by a low
-             * airframe collapse and rough sliding tail. */
-            sample += sinf(2.0f * (float)M_PI * t * 34.0f) * env * env * 0.43f;
-            sample += wreck * (env * 0.24f + impact * 0.34f);
-            if (elapsed < 180)
-                sample += ((elapsed & 24) ? 0.28f : -0.24f) * impact;
+            float first_break = elapsed < 230 ?
+                                (float)(230 - elapsed) / 230.0f : 0.0f;
+            float second_break = elapsed >= 260 && elapsed < 610 ?
+                (float)(610 - elapsed) / 350.0f : 0.0f;
+            float slide = elapsed < 2400 ?
+                          (float)(2400 - elapsed) / 2400.0f : 0.0f;
+            /* A wooden-and-fabric airframe folds and scrapes; this is not an
+             * explosive blast.  Several irregular structural breaks lead
+             * into earth drag and a short metal/rigging shriek. */
+            sample += wreck * (first_break * 0.43f +
+                               second_break * 0.34f + slide * 0.19f);
+            sample += sinf(2.0f * (float)M_PI * t * 67.0f) *
+                      first_break * 0.17f;
+            sample += sinf(2.0f * (float)M_PI * t * 347.0f) *
+                      slide * slide * 0.12f;
+            if ((elapsed < 170) || (elapsed > 330 && elapsed < 470))
+                sample += ((elapsed & 20) ? 0.22f : -0.18f) *
+                          (first_break + second_break);
             --a->crash;
         }
         if (a->hit > 0) {
@@ -1366,7 +1488,9 @@ static int music_mood_for_scene(const Game *g, Scene scene)
     if (scene == SCENE_TITLE || scene == SCENE_MENU) return MUSIC_MARCH;
     if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
     if (scene == SCENE_DEBRIEF)
-        return g->success ? MUSIC_MESS : MUSIC_MOURNING;
+        return g->success ? MUSIC_MESS :
+               (g->fatal_sortie && g->lives <= 0) ?
+               MUSIC_PIPER : MUSIC_MOURNING;
     if (scene == SCENE_SORTIE)
         return MUSIC_TENSION; /* Muted: player-controlled scenes never score. */
     if (g->chapter == CHAPTER_COUNT - 1 && g->mission >= 6)
@@ -1379,6 +1503,9 @@ static int music_mood_for_scene(const Game *g, Scene scene)
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
+    if (scene == SCENE_DEBRIEF && g->mission_save_state == 0)
+        save_mission_result(g);
     g->scene = scene;
     g->scene_started = SDL_GetTicks();
     g->redraw_static = 1;
@@ -1403,6 +1530,9 @@ static void set_scene(Game *g, Scene scene)
         }
         if (scene == SCENE_TITLE) g->audio.music_pos = 0;
         if (scene == SCENE_DEBRIEF && g->success) g->audio.mess_pos = 0;
+        if (scene == SCENE_DEBRIEF && !g->success &&
+            g->fatal_sortie && g->lives <= 0)
+            g->audio.piper_pos = 0;
         SDL_UnlockAudioDevice(g->audio.device);
     }
 }
@@ -1472,6 +1602,40 @@ static int current_mission_goal(const Game *g)
     return chapters[g->chapter].goal;
 }
 
+static int player_machine_gun_damage(const Game *g)
+{
+    int enemy_hits = 3 + g->chapter / 2;
+    int player_hits = enemy_hits * PLAYER_DURABILITY_MULTIPLIER;
+    int damage = player_hits > 0 ? 100 / player_hits : 4;
+    /* Integer damage must never disappear.  Rounding down gives Neddy at
+     * least eight enemy-airframe lifetimes rather than quietly undercutting
+     * the promise in later chapters. */
+    return damage > 0 ? damage : 1;
+}
+
+static void add_dogfight_bullet_hole(Game *g, uint32_t seed)
+{
+    BulletHole *hole = &g->bullet_holes[g->next_bullet_hole];
+    uint32_t scatter = scene_hash(seed ^
+        (uint32_t)g->next_bullet_hole * 2654435761u);
+    int zone = (int)(scatter % 3u);
+    /* Hits accumulate on visible player structure, not in the empty sky:
+     * port wing, starboard wing or the cockpit/cowling. */
+    if (zone == 0) {
+        hole->x = 24.0f + (float)((scatter >> 4) % 154u);
+        hole->y = 284.0f + (float)((scatter >> 13) % 72u);
+    } else if (zone == 1) {
+        hole->x = 462.0f + (float)((scatter >> 4) % 154u);
+        hole->y = 284.0f + (float)((scatter >> 13) % 72u);
+    } else {
+        hole->x = 214.0f + (float)((scatter >> 4) % 212u);
+        hole->y = 252.0f + (float)((scatter >> 13) % 112u);
+    }
+    hole->active = 1;
+    g->next_bullet_hole =
+        (g->next_bullet_hole + 1) % MAX_BULLET_HOLES;
+}
+
 static int perspective_enemy_total(const Game *g)
 {
     return current_mission_goal(g);
@@ -1493,6 +1657,9 @@ static void reset_sortie(Game *g)
     int perspective_enemy_count;
     const Chapter *chapter = &chapters[g->chapter];
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    g->mission_save_state = 0;
+    g->fatal_sortie = 0;
+    g->life_lost_this_sortie = 0;
     if (mode == MISSION_TOP_DOWN) {
         g->player_x = 320.0f;
         g->player_y = 310.0f;
@@ -2191,6 +2358,7 @@ static void finish_alternate_sortie(Game *g)
     else
         g->success = g->objectives >= current_mission_goal(g) &&
                      g->health > 0 && g->fuel > 0;
+    if (g->health <= 0 || g->tail_integrity <= 0) g->fatal_sortie = 1;
     set_scene(g, SCENE_DEBRIEF);
 }
 
@@ -2449,7 +2617,8 @@ static void update_perspective_sortie(Game *g, float dt,
                 g->next_bullet_hole =
                     (g->next_bullet_hole + 1) % MAX_BULLET_HOLES;
             }
-            if (!g->qa_hold) g->health -= 4 + g->chapter / 2;
+            if (!g->qa_hold)
+                g->health -= player_machine_gun_damage(g);
             g->last_damage = now;
             b->active = 0;
             /* A bullet strike damages the airframe; it is not a mid-air
@@ -2559,7 +2728,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.engine_speed = 0.0f;
         g->audio.engine_load = 0.0f;
         g->audio.other_engine = 0.0f;
-        if (now - g->flight_crash_started > 1750u)
+        if (now - g->flight_crash_started > 3900u)
             finish_alternate_sortie(g);
         return;
     }
@@ -2592,8 +2761,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                        aileron_command, elevator_command);
     if (g->flight_doomed) {
         float doomed_age = (float)(now - g->flight_doomed_started) / 1000.0f;
-        float sink = 14.0f + doomed_age * 9.0f;
-        if (sink > 82.0f) sink = 82.0f;
+        float sink = 35.0f + doomed_age * 20.0f;
+        if (sink > 140.0f) sink = 140.0f;
         position.y -= sink * dt;
     }
     g->flight_x = position.x;
@@ -2612,9 +2781,10 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     if (g->flight_y <= 0.0f) {
         g->flight_y = 0.0f;
         g->health = 0;
+        g->fatal_sortie = 1;
         g->flight_crashed = 1;
         g->flight_crash_started = now;
-        g->audio.blast = 7000;
+        g->audio.blast = 0;
         g->audio.crash = 7200;
     }
     g->scroll += g->airspeed * dt;
@@ -2711,6 +2881,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                 g->flight_doomed = 1;
                 g->flight_doomed_started = now;
                 g->health = 0;
+                g->fatal_sortie = 1;
                 g->audio.hit_player = 1;
                 g->audio.hit = 1400;
                 g->audio.blast = 2400;
@@ -2782,8 +2953,10 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                 launch_dogfight_tracer(g, (float)attack_view.x,
                                        (float)attack_view.y,
                                        320.0f, 218.0f, 390.0f, 1);
-                if (!g->qa_hold || g->health > 30)
-                    g->health -= 2 + g->chapter / 4;
+                if (!g->qa_hold || g->health > 30) {
+                    g->health -= player_machine_gun_damage(g);
+                    add_dogfight_bullet_hole(g, now);
+                }
                 g->audio.hit_player = 1;
                 g->audio.hit = 1400;
                 g->last_damage = now;
@@ -2808,8 +2981,19 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     } else if (active > 0) {
         g->mission_clear_at = 0;
     }
-    if (!g->qa_hold && active > 0 &&
-        (g->fuel <= 0.0f || (g->health <= 0 && !g->flight_doomed))) {
+    if (!g->qa_hold && active > 0 && g->health <= 0 &&
+        !g->flight_doomed && !g->flight_crashed) {
+        /* Fatal gun damage first becomes a loss-of-control sequence.  Keep
+         * the pilot in the cockpit through the spiral and physical impact;
+         * only the completed wreck sequence may open the failed debrief. */
+        g->flight_doomed = 1;
+        g->flight_doomed_started = now;
+        g->fatal_sortie = 1;
+        g->audio.hit_player = 1;
+        g->audio.hit = 1400;
+        g->audio.blast = 1800;
+    }
+    if (!g->qa_hold && active > 0 && g->fuel <= 0.0f) {
         finish_alternate_sortie(g);
     }
 }
@@ -3017,6 +3201,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     }
     if (g->scroll > chapters[g->chapter].distance ||
         g->fuel <= 0.0f || g->health <= 0) {
+        if (g->health <= 0) g->fatal_sortie = 1;
         if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
             g->success = g->score / 250 >= current_mission_goal(g) &&
                          g->health > 0 && g->fuel > 0;
@@ -3100,6 +3285,7 @@ static void draw_campaign_menu(Game *g)
     };
     SDL_Surface *s = g->screen;
     int count = campaign_menu_count(g);
+    int has_continue = g->has_save && g->saved_lives > 0;
     int i;
     draw_title(g);
     blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 5, 7, 10, 150);
@@ -3118,7 +3304,7 @@ static void draw_campaign_menu(Game *g)
     for (i = 0; i < count; ++i) {
         const char *label;
         char continued[64];
-        if (g->has_save && i == 0) {
+        if (has_continue && i == 0) {
             if (g->saved_campaign_complete)
                 snprintf(continued, sizeof(continued),
                          "WAR RECORD COMPLETE - VIEW ARMISTICE");
@@ -3128,7 +3314,7 @@ static void draw_campaign_menu(Game *g)
                          g->saved_chapter + 1, g->saved_mission + 1);
             label = continued;
         } else {
-            int new_index = i - (g->has_save ? 1 : 0);
+            int new_index = i - (has_continue ? 1 : 0);
             label = new_campaign_items[new_index];
         }
         draw_victorian_plaque(g, 128, 112 + i * 31, 384, label,
@@ -4638,57 +4824,102 @@ static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
     }
 }
 
+static void draw_dogfight_bullet_holes(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int i;
+    for (i = 0; i < MAX_BULLET_HOLES; ++i) {
+        BulletHole *hole = &g->bullet_holes[i];
+        int x, y;
+        if (!hole->active) continue;
+        x = (int)hole->x;
+        y = (int)hole->y;
+        circle(s, x, y, 4, rgb(s, 151, 112, 66));
+        circle(s, x, y, 2, rgb(s, 24, 22, 20));
+        pixel(s, x - 1, y - 1, rgb(s, 220, 190, 127));
+        line(s, x - 7, y + 2, x - 3, y, rgb(s, 76, 58, 43));
+        line(s, x + 3, y - 1, x + 8, y - 4, rgb(s, 76, 58, 43));
+        if ((i & 2) == 0)
+            line(s, x + 1, y + 3, x + 3, y + 8, rgb(s, 76, 58, 43));
+    }
+}
+
 static void draw_player_crash_overlay(Game *g)
 {
     SDL_Surface *s = g->screen;
     float age;
+    float collapse;
     int i;
     if (!g->flight_crashed) return;
     age = (float)(SDL_GetTicks() - g->flight_crash_started) / 1000.0f;
-    if (age < 0.16f) {
-        int flash = 96 - (int)(age * 420.0f);
-        circle(s, 320, 314, flash, rgb(s, 255, 191, 71));
-        circle(s, 320, 314, flash / 2, rgb(s, 255, 246, 191));
+    collapse = age / 0.72f;
+    if (collapse > 1.0f) collapse = 1.0f;
+
+    /* Earth and chalk are driven out along the ground.  No fireball: the
+     * aircraft hits, folds, sheds fabric and slides to a broken stop. */
+    for (i = 0; i < 13; ++i) {
+        uint32_t seed = scene_hash(0x44555354u + (uint32_t)i * 113u);
+        float dust_age = age + (float)(i & 3) * 0.04f;
+        int spread = 20 + (int)(dust_age * (34 + (seed & 15u)));
+        int x = 320 + ((i & 1) ? spread : -spread) +
+                (int)((seed >> 8) % 31u) - 15;
+        int y = 352 - (int)(dust_age * (10 + (i % 5) * 3));
+        int radius = 11 + (i % 4) * 3 + (int)(dust_age * 2.0f);
+        uint8_t earth = (uint8_t)(76 + (i % 5) * 7);
+        if (dust_age < 2.6f)
+            circle(s, x, y, radius, rgb(s, earth, earth - 8, earth - 18));
     }
-    if (g->explosion_atlas && age < 1.55f) {
-        int frame = (int)(age / 1.55f * 8.0f);
-        int size = 160 + (int)(age * 54.0f);
-        if (frame > 7) frame = 7;
-        draw_explosion_frame(g, g->explosion_atlas, 8 + frame,
-                             320, 310 - (int)(age * 18.0f),
-                             size, 1, 255);
-    } else {
-        for (i = 0; i < 9; ++i) {
-            uint32_t seed = scene_hash(0x43524153u + (uint32_t)i * 97u);
-            int drift = (int)((int)(seed & 31u) - 15);
-            int rise = 28 + i * 11 + (int)(age * (9 + i));
-            int radius = 12 + i / 2 + (int)(age * 2.0f);
-            uint8_t grey = (uint8_t)(54 + i * 5);
-            circle(s, 320 + drift, 330 - rise, radius,
-                   rgb(s, grey, grey - 2, grey - 7));
-        }
-    }
-    /* Torn canvas, timber and metal leave the cockpit in different pieces;
-     * trajectories are deterministic so the effect is cheap on 68k. */
+
+    /* Canvas wings buckle inward and spars snap as the cockpit crumples. */
+    fill_triangle(s, 0, 340, 184, 333 + (int)(collapse * 38.0f),
+                  131, 400, rgb(s, 128, 106, 72));
+    fill_triangle(s, 640, 340, 455, 333 + (int)(collapse * 38.0f),
+                  514, 400, rgb(s, 123, 101, 69));
+    fill_triangle(s, 112, 353, 242, 340 + (int)(collapse * 51.0f),
+                  198, 400, rgb(s, 67, 54, 43));
+    fill_triangle(s, 528, 353, 399, 340 + (int)(collapse * 51.0f),
+                  444, 400, rgb(s, 64, 52, 42));
+    line(s, 18, 347, 205, 389, rgb(s, 66, 47, 30));
+    line(s, 622, 347, 434, 389, rgb(s, 66, 47, 30));
+    line(s, 126, 359, 235, 398, rgb(s, 45, 37, 31));
+    line(s, 514, 359, 406, 398, rgb(s, 45, 37, 31));
+
+    /* Short-range fragments tumble out of the collapsing structure rather
+     * than radiating from an explosion. */
     for (i = 0; i < 18; ++i) {
         uint32_t seed = scene_hash(0x44454252u + (uint32_t)i * 131u);
-        float life = age < 1.8f ? age : 1.8f;
-        int vx = (int)(seed % 121u) - 60;
-        int vy = -42 - (int)((seed >> 8) % 78u);
+        float life = age < 1.1f ? age : 1.1f;
+        int vx = (int)(seed % 69u) - 34;
+        int vy = -18 - (int)((seed >> 8) % 44u);
         int x = 320 + (int)(vx * life);
-        int y = 326 + (int)(vy * life + 58.0f * life * life);
+        int y = 344 + (int)(vy * life + 46.0f * life * life);
         uint32_t colour = (i % 3 == 0) ? rgb(s, 61, 49, 39) :
                           (i % 3 == 1) ? rgb(s, 137, 91, 48) :
                                          rgb(s, 111, 104, 89);
         line(s, x - 3 - (i & 3), y - 2, x + 4 + (i & 1), y + 3, colour);
         if ((i & 3) == 0) circle(s, x, y, 3, colour);
     }
+    /* The last view remains in the cockpit: cracked glass and torn rigging
+     * close around the pilot before the picture finally darkens. */
+    line(s, 319, 201, 276, 159, rgb(s, 35, 31, 28));
+    line(s, 319, 201, 356, 147, rgb(s, 35, 31, 28));
+    line(s, 319, 201, 401, 184, rgb(s, 35, 31, 28));
+    line(s, 319, 201, 247, 229, rgb(s, 35, 31, 28));
+    line(s, 276, 159, 261, 126, rgb(s, 64, 50, 39));
+    line(s, 356, 147, 378, 119, rgb(s, 64, 50, 39));
     /* Jagged black gaps make the foreground read as a broken airframe, not
      * an intact cockpit hidden behind a generic explosion. */
     fill_triangle(s, 55, 421, 205, 380, 144, 458, rgb(s, 27, 24, 21));
     fill_triangle(s, 585, 421, 438, 382, 503, 458, rgb(s, 27, 24, 21));
-    if (age > 0.55f)
-        draw_field_sign(g, 226, 270, 188, "AIRCRAFT DESTROYED");
+    if (age > 1.35f) {
+        int darkness = (int)((age - 1.35f) * 82.0f);
+        if (darkness > 178) darkness = 178;
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 16, 13, 12,
+                   (uint8_t)darkness);
+    }
+    if (age > 2.45f)
+        draw_field_sign(g, 213, 270, 214,
+                        age < 3.25f ? "AIRCRAFT WRECKED" : "NO RESPONSE");
 }
 
 static void draw_dogfight_particles(Game *g, int foreground)
@@ -4761,6 +4992,7 @@ static void draw_dogfight_simulator(Game *g)
     draw_dogfight_particles(g, 0);
     if (g->pilot_cockpit)
         SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
+    draw_dogfight_bullet_holes(g);
     draw_dogfight_particles(g, 1);
     if (now >= g->last_shot && now - g->last_shot < 45u) {
         fill_triangle(s, 288, 232, 292, 222, 297, 232,
@@ -5150,12 +5382,88 @@ static void draw_board_lighting(Game *g)
          rgb(s, 255, 224 - (int)(noise * 28.0f), 144));
 }
 
+static int draw_field_hospital(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t elapsed = SDL_GetTicks() - g->scene_started;
+    uint32_t ink = rgb(s, 55, 39, 27);
+    int fade;
+    char buf[48];
+    if (!g->fatal_sortie || g->lives <= 0) return 0;
+    if (g->field_hospital)
+        SDL_BlitSurface(g->field_hospital, NULL, s, NULL);
+    else
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 83, 64, 44));
+    /* An official paper memorandum, not another wooden game plaque. */
+    rect(s, 25, 22, 292, 157, rgb(s, 51, 40, 31));
+    rect(s, 20, 17, 292, 157, rgb(s, 225, 213, 180));
+    rect(s, 24, 21, 284, 149, rgb(s, 236, 226, 198));
+    line(s, 31, 63, 300, 63, rgb(s, 95, 75, 53));
+    display_text(g, 54, 29, "ROYAL FLYING CORPS", 12, 18,
+                 rgb(s, 72, 54, 38));
+    typewriter_text(g, 49, 51, "HEAD OFFICE - MEDICAL MEMORANDUM",
+                    7, 11, ink);
+    typewriter_text(g, 31, 73, "LT. N. SEAGOON WAS EXCEEDINGLY LUCKY.",
+                    7, 11, ink);
+    typewriter_text(g, 39, 90, "THE MACHINE IS FINISHED. HE IS NOT.",
+                    7, 11, ink);
+    snprintf(buf, sizeof(buf), "LIVES REMAINING: %d", g->lives);
+    typewriter_text(g, 39, 110, buf, 7, 11, ink);
+    rect(s, 158, 130, 137, 25, rgb(s, 128, 45, 37));
+    rect(s, 161, 133, 131, 19, rgb(s, 236, 226, 198));
+    typewriter_text(g, 168, 137, "RETURN TO DUTY", 7, 11,
+                    rgb(s, 128, 45, 37));
+    typewriter_text(g, 39, 151, "ENTER  ACKNOWLEDGE", 7, 11, ink);
+    fade = elapsed < 1600u ? 255 - (int)(elapsed * 255u / 1600u) : 0;
+    if (fade > 0)
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 0, 0, 0,
+                   (uint8_t)fade);
+    return 1;
+}
+
+static int draw_fatal_memorial(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t elapsed = SDL_GetTicks() - g->scene_started;
+    uint32_t inscription = rgb(s, 55, 47, 39);
+    int fade = 0;
+    if (!g->fatal_sortie || g->lives > 0 || elapsed >= 20000u) return 0;
+    if (g->fatal_memorial)
+        SDL_BlitSurface(g->fatal_memorial, NULL, s, NULL);
+    else
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 35, 32, 29));
+
+    /* Lettering is rendered by the game's native small typewriter face so
+     * the photographic asset can remain clean and localisation-safe. */
+    typewriter_text(g, 299, 217, "2ND LT", 7, 11, inscription);
+    typewriter_text(g, 303, 241, "NEDDY", 7, 11, inscription);
+    typewriter_text(g, 296, 254, "SEAGOON", 7, 11, inscription);
+    typewriter_text(g, 310, 276, "RFC", 7, 11, inscription);
+    typewriter_text(g, 293, 300, "LEST WE", 7, 11, inscription);
+    typewriter_text(g, 296, 313, "FORGET", 7, 11, inscription);
+
+    if (elapsed < 2000u)
+        fade = 255;
+    else if (elapsed < 4500u)
+        fade = 255 - (int)((elapsed - 2000u) * 255u / 2500u);
+    else if (elapsed > 15000u)
+        fade = (int)((elapsed - 15000u) * 255u / 4000u);
+    if (fade > 255) fade = 255;
+    if (fade > 0)
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 0, 0, 0,
+                   (uint8_t)fade);
+    return 1;
+}
+
 static void draw_debrief(Game *g)
 {
     SDL_Surface *s = g->screen;
     char buf[64];
+    uint32_t elapsed = SDL_GetTicks() - g->scene_started;
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
+    if (draw_field_hospital(g)) return;
+    if (draw_fatal_memorial(g)) return;
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
     draw_board_lighting(g);
@@ -5176,12 +5484,31 @@ static void draw_debrief(Game *g)
     snprintf(buf, sizeof(buf), "AIRFRAME REMAINING          %d", g->health);
     typewriter_text(g, 74, 178, buf, 7, 11, ink);
     display_text(g, 73, 226,
-         g->success ? "THE MESS WILL HEAR." : "WE FLY AGAIN AT DAWN.",
+         g->success ? "THE MESS WILL HEAR." :
+         g->fatal_sortie ? "A LONE PIPER PLAYS." :
+                           "WE FLY AGAIN AT DAWN.",
          12, 18, red);
-    typewriter_text(g, 74, 348,
+    if (g->mission_save_state > 0) {
+        if (g->saved_campaign_complete)
+            snprintf(buf, sizeof(buf), "WAR RECORD SAVED");
+        else
+            snprintf(buf, sizeof(buf), "POSITION SAVED - CHAPTER %d / MISSION %d",
+                     g->saved_chapter + 1, g->saved_mission + 1);
+    } else {
+        snprintf(buf, sizeof(buf), "SAVE FAILED - ENTER WILL RETRY");
+    }
+    draw_field_sign(g, 164, 303, 312, buf);
+    draw_field_sign(g, 176, 341, 288,
                     g->success ? "ENTER  CONTINUE THE CAMPAIGN" :
-                                 "ENTER  FLY THE MISSION AGAIN",
-                    7, 11, ink);
+                    (g->fatal_sortie && g->lives <= 0) ?
+                                 "ENTER  RETURN TO OFFICERS' MESS" :
+                                 "ENTER  FLY THE MISSION AGAIN");
+    if (g->fatal_sortie && elapsed < 21000u) {
+        int fade = 255 - (int)((elapsed - 20000u) * 255u / 1000u);
+        if (fade < 0) fade = 0;
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 0, 0, 0,
+                   (uint8_t)fade);
+    }
 }
 
 static void draw_epilogue(Game *g)
@@ -5266,6 +5593,36 @@ static int init_audio(Game *g)
         fprintf(stderr, "Colonel Bogey recording unavailable; using synth fallback: %s\n",
                 SDL_GetError());
     }
+    wav_data = NULL;
+    wav_len = 0;
+    if (SDL_LoadWAV(CANVAS_PIPER_WAV, &wav_spec, &wav_data, &wav_len)) {
+        int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
+                                           wav_spec.channels, wav_spec.freq,
+                                           AUDIO_S16SYS, 2, 11025);
+        if (cvt_result >= 0 && cvt.needed) {
+            cvt.len = (int)wav_len;
+            cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
+            if (cvt.buf) {
+                memcpy(cvt.buf, wav_data, wav_len);
+                SDL_FreeWAV(wav_data);
+                wav_data = NULL;
+                if (SDL_ConvertAudio(&cvt) == 0) {
+                    g->audio.piper_data = cvt.buf;
+                    g->audio.piper_len = (uint32_t)cvt.len_cvt;
+                } else {
+                    SDL_free(cvt.buf);
+                }
+            }
+        } else if (cvt_result >= 0) {
+            g->audio.piper_data = wav_data;
+            g->audio.piper_len = wav_len;
+            wav_data = NULL;
+        }
+        if (wav_data) SDL_FreeWAV(wav_data);
+    } else {
+        fprintf(stderr, "Amazing Grace pipes unavailable; using synth fallback: %s\n",
+                SDL_GetError());
+    }
     memset(&want, 0, sizeof(want));
     want.freq = 11025;
     want.format = AUDIO_S16SYS;
@@ -5287,6 +5644,7 @@ static int game_init(Game *g)
 {
     memset(g, 0, sizeof(*g));
     g->running = 1;
+    g->lives = 3;
     g->has_save = load_campaign_save(g);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
@@ -5320,6 +5678,30 @@ static int game_init(Game *g)
     if (!g->mission_board)
         fprintf(stderr, "Mission board unavailable (%s): %s\n",
                 CANVAS_BOARD_BMP, SDL_GetError());
+    g->fatal_memorial = SDL_LoadBMP(CANVAS_FATAL_MEMORIAL_BMP);
+    if (g->fatal_memorial) {
+        SDL_Surface *converted = SDL_ConvertSurface(g->fatal_memorial,
+                                                    g->screen->format, 0);
+        if (converted) {
+            SDL_FreeSurface(g->fatal_memorial);
+            g->fatal_memorial = converted;
+        }
+    } else {
+        fprintf(stderr, "Fatal memorial unavailable (%s): %s\n",
+                CANVAS_FATAL_MEMORIAL_BMP, SDL_GetError());
+    }
+    g->field_hospital = SDL_LoadBMP(CANVAS_FIELD_HOSPITAL_BMP);
+    if (g->field_hospital) {
+        SDL_Surface *converted = SDL_ConvertSurface(g->field_hospital,
+                                                    g->screen->format, 0);
+        if (converted) {
+            SDL_FreeSurface(g->field_hospital);
+            g->field_hospital = converted;
+        }
+    } else {
+        fprintf(stderr, "Field hospital unavailable (%s): %s\n",
+                CANVAS_FIELD_HOSPITAL_BMP, SDL_GetError());
+    }
     g->journal = SDL_LoadBMP(CANVAS_JOURNAL_BMP);
     if (!g->journal)
         fprintf(stderr, "Journal art unavailable (%s): %s\n",
@@ -5519,10 +5901,12 @@ static void handle_event(Game *g, SDL_Event *ev)
         else if (g->scene == SCENE_MENU) {
             static const int start_chapter[6] = {0, 0, 1, 2, 3, 5};
             int pilot;
-            if (g->has_save && g->menu_selection == 0) {
+            int has_continue = g->has_save && g->saved_lives > 0;
+            if (has_continue && g->menu_selection == 0) {
                 g->chapter = g->saved_chapter;
                 g->mission = g->saved_mission;
                 g->campaign_complete = g->saved_campaign_complete;
+                g->lives = g->saved_lives;
                 memcpy(g->wingman_health, g->saved_wingman_health,
                        sizeof(g->wingman_health));
                 if (g->campaign_complete) {
@@ -5530,10 +5914,11 @@ static void handle_event(Game *g, SDL_Event *ev)
                     break;
                 }
             } else {
-                int new_index = g->menu_selection - (g->has_save ? 1 : 0);
+                int new_index = g->menu_selection - (has_continue ? 1 : 0);
                 g->chapter = start_chapter[new_index];
                 g->mission = 0;
                 g->campaign_complete = 0;
+                g->lives = 3;
                 for (pilot = 0; pilot < 3; ++pilot)
                     g->wingman_health[pilot] = 100;
                 save_campaign(g);
@@ -5545,19 +5930,24 @@ static void handle_event(Game *g, SDL_Event *ev)
             reset_sortie(g);
             set_scene(g, SCENE_SORTIE);
         } else if (g->scene == SCENE_DEBRIEF) {
-            if (!g->success) set_scene(g, SCENE_BRIEFING);
+            if (g->mission_save_state < 0) {
+                g->mission_save_state = 0;
+                if (!save_mission_result(g)) break;
+            }
+            if (!g->success && g->fatal_sortie && g->lives <= 0) {
+                g->menu_selection = 0;
+                set_scene(g, SCENE_TITLE);
+            }
+            else if (!g->success) set_scene(g, SCENE_BRIEFING);
             else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
                 ++g->mission;
-                save_campaign(g);
                 set_scene(g, SCENE_STORY);
             } else if (g->chapter + 1 >= CHAPTER_COUNT) {
                 g->campaign_complete = 1;
-                save_campaign(g);
                 set_scene(g, SCENE_EPILOGUE);
             } else {
                 ++g->chapter;
                 g->mission = 0;
-                save_campaign(g);
                 set_scene(g, SCENE_STORY);
             }
         } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);
@@ -5592,6 +5982,37 @@ int main(int argc, char **argv)
         reset_sortie(&g);
         g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "DEATH") == 0) {
+        int damage_mark;
+        /* Deterministic first-person fatal sequence: loss of control, ground
+         * impact, wreck hold, failed debrief and solo-piper cue.  The staged
+         * holes make accumulated battle damage visible during this QA path. */
+        g.chapter = 6;
+        g.mission = 5;
+        g.lives = 1;
+        reset_sortie(&g);
+        for (damage_mark = 0; damage_mark < 12; ++damage_mark)
+            add_dogfight_bullet_hole(&g,
+                0x19180000u + (uint32_t)damage_mark * 977u);
+        g.flight_y = 420.0f;
+        g.health = 0;
+        g.fatal_sortie = 1;
+        g.flight_doomed = 1;
+        g.flight_doomed_started = SDL_GetTicks();
+        set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "HOSPITAL") == 0) {
+        /* The same fatal crash with lives in reserve must recover into the
+         * field hospital rather than the final memorial. */
+        g.chapter = 3;
+        g.mission = 4;
+        g.lives = 3;
+        reset_sortie(&g);
+        g.flight_y = 260.0f;
+        g.health = 0;
+        g.fatal_sortie = 1;
+        g.flight_doomed = 1;
+        g.flight_doomed_started = SDL_GetTicks();
+        set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "GUNNER") == 0) {
         /* Late-war QA keeps more durable attackers in view long enough to
          * inspect the full rail traverse and approach paths. */
@@ -5605,7 +6026,7 @@ int main(int argc, char **argv)
         g.mission = 2;
         reset_sortie(&g);
         g.success = 0;
-        g.health = 0;
+        g.health = 25;
         set_scene(&g, SCENE_DEBRIEF);
     } else if (argc > 1 && strcmp(argv[1], "DEBRIEF_SUCCESS") == 0) {
         /* Direct listening/visual test for the mission-complete board and its
@@ -5655,7 +6076,7 @@ int main(int argc, char **argv)
         keys = SDL_GetKeyboardState(NULL);
         if (g.scene == SCENE_SORTIE) update_sortie(&g, dt, keys);
         if (g.scene == SCENE_TITLE || g.scene == SCENE_MENU ||
-            g.scene == SCENE_SORTIE ||
+            g.scene == SCENE_SORTIE || g.scene == SCENE_DEBRIEF ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
@@ -5677,6 +6098,8 @@ int main(int argc, char **argv)
     if (g.title) SDL_FreeSurface(g.title);
     if (g.title_banner) SDL_FreeSurface(g.title_banner);
     if (g.mission_board) SDL_FreeSurface(g.mission_board);
+    if (g.fatal_memorial) SDL_FreeSurface(g.fatal_memorial);
+    if (g.field_hospital) SDL_FreeSurface(g.field_hospital);
     if (g.journal) SDL_FreeSurface(g.journal);
     if (g.sky) SDL_FreeSurface(g.sky);
     if (g.battlefield) SDL_FreeSurface(g.battlefield);
@@ -5712,6 +6135,7 @@ int main(int argc, char **argv)
     if (g.enemy_sprites) SDL_FreeSurface(g.enemy_sprites);
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
+    if (g.audio.piper_data) SDL_free(g.audio.piper_data);
     if (g.screen) SDL_FreeSurface(g.screen);
     SDL_DestroyWindow(g.window);
     SDL_Quit();

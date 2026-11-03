@@ -32,3 +32,27 @@ but the exact recording supplied for this development cue does not yet have a
 complete provenance and redistribution record in this repository. Do not put
 this recording in a public release until that record is added, or replace it
 with a project-made render from a documented compatible source.
+
+## Amazing Grace — fatal-sortie piper
+
+`amazing-grace-bagpipes.wav` is the solo-pipes cue used after a fatal failed
+sortie. It is a conversion of `amazing_grace.mp3` from the Internet Archive
+item *Amazing Grace Bagpipes*:
+
+- https://archive.org/details/AmazingGraceBagpipes
+- identifier: `AmazingGraceBagpipes`
+- recording artist: Band of the U.S. Air Force Reserve
+- creator credited by the item: Air Force Bands Program
+- album metadata: *Our Citizen Airmen*, track 17
+
+The Internet Archive item marks the recording Public Domain and says that the
+Air Force public information may be distributed or copied, requesting an
+appropriate byline/credit. The game and this repository therefore credit the
+Band of the U.S. Air Force Reserve and Air Force Bands Program even though the
+item does not require a copyright licence.
+
+The supplied MP3 had SHA-256
+`17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0`.
+For the Amiga build it was converted, without creative rearrangement, from
+44.1 kHz stereo MP3 to 11.025 kHz, signed 16-bit stereo PCM WAV. The hymn text
+by John Newton and the traditional New Britain tune are also public domain.

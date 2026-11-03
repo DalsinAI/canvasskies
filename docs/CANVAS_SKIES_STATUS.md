@@ -4,7 +4,7 @@ Status date: 3 November 2026
 
 Branch: `canvas-skies-vertical-slice`
 
-Code state before this documentation update: `c699a33`
+Code state: pending the `0.1.0-alpha.1` checkpoint described below.
 
 Repository: `DalsinAI/amigasdlsopwith`
 
@@ -78,6 +78,8 @@ CanvasSkies SIDE
 CanvasSkies TOPDOWN
 CanvasSkies DOGFIGHT
 CanvasSkies GUNNER
+CanvasSkies HOSPITAL
+CanvasSkies DEATH
 CanvasSkies DEBRIEF
 CanvasSkies DEBRIEF_SUCCESS
 CanvasSkies CHAPTER_SUCCESS
@@ -115,7 +117,9 @@ Current controls:
 - Journal before every mission and a commander-in-chief briefing board.
 - Named allied pilots Eccles, Gridpipe Thyne and Bluebottle.
 - A versioned `PROGDIR:CanvasSkies.save` file records the next chapter,
-  mission and all three wingmen. The officers' menu adds a Continue plaque
+  mission, all three wingmen and Neddy's remaining lives. Save version 3 adds
+  the three-life value while versions 1 and 2 remain loadable. The officers'
+  menu adds a Continue plaque
   only when a valid save is present; malformed or out-of-range saves are
   ignored.
 - Save replacement is transactional at the file level: the new record is
@@ -207,6 +211,9 @@ Current controls:
 - Enemy aircraft take multiple hits, smoke and spiral down rather than simply
   exploding in the air.
 - The mission completes after all enemies are down in normal campaign play.
+- Neddy's aircraft withstands at least eight enemy-airframe equivalents of
+  machine-gun damage. Hits leave persistent punctures and torn fabric across
+  the visible cockpit and wings.
 - The bottom instrument strip now shows `ENEMIES remaining/total`.
 - Ammunition was increased by 50%; the early-war base is 390 rather than 260,
   while the later-chapter reduction remains proportional.
@@ -222,6 +229,24 @@ Current controls:
 - The officers' mess/mission-complete recording is de-clicked offline and its
   runtime loop crossfades the final 186 ms into the opening instead of wrapping
   at a discontinuity.
+- A fatal ground impact now uses a layered timber, metal and earth crumple
+  rather than the explosion cue. The third and final death uses the supplied
+  public-domain Band of the U.S. Air Force Reserve *Amazing Grace* recording:
+  pipes begin over black, the memorial fades in after two seconds, and both
+  fade away before the ordinary saved-position board.
+
+### Lives, recovery and final death
+
+- A campaign starts with three lives. Fatal crashes consume one life before
+  the mission result is transactionally saved.
+- With lives remaining, Neddy wakes in a field hospital. An RFC Head Office
+  medical memorandum records that he was lucky, shows lives remaining and
+  returns him to the same mission.
+- With no lives remaining, a wide sepia-toned cemetery scene shows Neddy's
+  grave, poppies, and Eccles, Gridpipe Thyne and Bluebottle standing bareheaded
+  with their caps in hand. The image and pipe cue have timed fades.
+- Direct `HOSPITAL` and `DEATH` routes qualify the two outcomes without
+  consuming a complete campaign.
 
 ## Known problems and incomplete work
 
