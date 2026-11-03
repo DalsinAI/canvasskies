@@ -163,6 +163,14 @@ Current controls:
 - Journal and briefing now consistently describe the intended single Lewis gun;
   the abandoned twin-gun presentation is no longer part of the active UI.
 - Aim range, tail obstruction and muzzle-origin calculations exist.
+- Muzzle origin now uses measured barrel-bore coordinates for all 25
+  elevation/traverse frames. The earlier separable X/Y approximation was
+  wrong at oblique angles; a live burst now begins at the painted barrel and
+  passes through the independent crosshair.
+- Keyed surfaces normalise dark antialiased purple fringe to the magenta key at
+  load time. The conspicuous purple outline around the Lewis sight and Scarff
+  rail is gone in the visible Amiga test; the measured launch-to-window time
+  remained about two seconds.
 - Attackers approach in depth rather than being a static row of sprites.
 - Bullet holes, player damage, ammunition and enemy damage exist.
 - Spawn count, remaining-enemy sign, debrief target and success condition now
@@ -226,9 +234,10 @@ These are not optional polish if the game is to become an RC.
 
 - The active atlas does not yet convincingly redraw the gun for every traverse
   and elevation angle. It can look bent or detached from its mounting.
-- Verify that the muzzle is correct in every frame, tracers begin at it, the
-  sight reaches the useful screen limits, the tail blocks fire correctly, and
-  attackers face and move toward the rear quarter.
+- The initial oblique frame and a live burst have been qualified after the
+  muzzle-table change. Sweep all 25 frames to confirm the measured muzzle,
+  sight limits, tail obstruction, and rail anchoring at both extremes.
+- Verify that attackers face and move toward the rear quarter.
 - Pilot evasive movement, gunner movement and the visible horizon/airframe must
   be clearly separated.
 
@@ -325,9 +334,9 @@ These are not optional polish if the game is to become an RC.
 ## Safe resume point
 
 At this handoff, the build succeeds with `ports/amigaos3/Makefile.canvas`, and
-the visible lab has the latest build open on the Chapter 2 / Mission 1 journal
-after the qualified chapter-rollover test. The primary save contains version 2
-coordinates `1 0` with the campaign-active flag. The next developer should
+the visible lab has the latest build open in direct `GUNNER` mode after a live
+muzzle-origin and purple-fringe check. The primary save still contains version
+2 coordinates `1 0` with the campaign-active flag. The next developer should
 first pull the branch, read these two documents, run the direct `DOGFIGHT` test
 and inspect `git status` before touching the three untracked gunner experiments.
 

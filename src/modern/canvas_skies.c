@@ -606,18 +606,34 @@ static float gunner_aim_elevation(const Game *g)
 
 static void gunner_muzzle_position(const Game *g, float *x, float *y)
 {
-    static const int muzzle_x_in_frame[5] = {28, 108, 210, 312, 392};
-    static const int muzzle_y_in_frame[5] = {25, 28, 31, 34, 37};
+    /* Measured barrel-bore centres for every painted atlas frame, arranged as
+     * [elevation][traverse].  X is not separable from elevation and Y is not
+     * separable from traverse: the former one-dimensional approximation made
+     * tracers visibly begin beside the Lewis gun at oblique angles. */
+    static const int muzzle_x_in_frame[5][5] = {
+        { 58, 108, 210, 311, 362 },
+        { 60, 106, 209, 312, 359 },
+        { 72, 109, 210, 309, 346 },
+        { 91, 116, 210, 299, 327 },
+        {103, 136, 210, 281, 318 }
+    };
+    static const int muzzle_y_in_frame[5][5] = {
+        {80, 58, 50, 58, 80},
+        {64, 54, 50, 54, 65},
+        {59, 49, 48, 49, 59},
+        {51, 43, 52, 43, 51},
+        {35, 36, 36, 36, 35}
+    };
     float traverse = gunner_aim_traverse(g);
     float elevation = gunner_aim_elevation(g);
     int column = (int)(traverse * 4.999f);
     int row = (int)(elevation * 4.999f);
     int carriage_x = 320 + (int)((traverse - 0.5f) * 74.0f);
     int carriage_y = 176 + (int)(fabsf(traverse - 0.5f) * 8.0f);
-    /* These points are the painted muzzle-ring centres in each atlas frame,
-     * not an estimate from screen centre. */
-    *x = (float)(carriage_x - 210 + muzzle_x_in_frame[column]);
-    *y = (float)(carriage_y + muzzle_y_in_frame[row]);
+    /* These are the painted barrel openings, below the separate ring sights,
+     * not an estimate from the screen centre or the sight itself. */
+    *x = (float)(carriage_x - 210 + muzzle_x_in_frame[row][column]);
+    *y = (float)(carriage_y + muzzle_y_in_frame[row][column]);
 }
 
 static int gunner_tail_blocks_shot(const Game *g, int aim_x, int aim_y)
@@ -948,6 +964,55 @@ static uint32_t surface_pixel(SDL_Surface *s, int x, int y)
 #endif
     default: return *(uint32_t *)p;
     }
+}
+
+static void surface_set_pixel(SDL_Surface *s, int x, int y, uint32_t value)
+{
+    uint8_t *p = (uint8_t *)s->pixels + y * s->pitch
+               + x * s->format->BytesPerPixel;
+    switch (s->format->BytesPerPixel) {
+    case 1: *p = (uint8_t)value; break;
+    case 2: *(uint16_t *)p = (uint16_t)value; break;
+    case 3:
+#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+        p[0] = (uint8_t)(value >> 16);
+        p[1] = (uint8_t)(value >> 8);
+        p[2] = (uint8_t)value;
+#else
+        p[0] = (uint8_t)value;
+        p[1] = (uint8_t)(value >> 8);
+        p[2] = (uint8_t)(value >> 16);
+#endif
+        break;
+    default: *(uint32_t *)p = value; break;
+    }
+}
+
+static void prepare_magenta_key(SDL_Surface *surface)
+{
+    uint32_t key;
+    int x, y;
+    if (!surface) return;
+    key = SDL_MapRGB(surface->format, 255, 0, 255);
+    if (SDL_MUSTLOCK(surface) && SDL_LockSurface(surface) != 0) {
+        SDL_SetColorKey(surface, SDL_TRUE, key);
+        return;
+    }
+    for (y = 0; y < surface->h; ++y) {
+        for (x = 0; x < surface->w; ++x) {
+            uint8_t r, g, b;
+            SDL_GetRGB(surface_pixel(surface, x, y), surface->format,
+                       &r, &g, &b);
+            /* Authored sprites use pure magenta.  Antialiasing left nearby
+             * purple pixels around silhouettes, which an exact SDL colour
+             * key cannot remove and which showed as a neon outline in game. */
+            if (r > 60 && b > 50 && (int)g + 20 < (int)r &&
+                (int)g + 20 < (int)b && abs((int)r - (int)b) < 64)
+                surface_set_pixel(surface, x, y, key);
+        }
+    }
+    if (SDL_MUSTLOCK(surface)) SDL_UnlockSurface(surface);
+    SDL_SetColorKey(surface, SDL_TRUE, key);
 }
 
 /* Pre-rasterised native-size faces: serif display and field typewriter. */
@@ -5217,8 +5282,7 @@ static int game_init(Game *g)
         fprintf(stderr, "Title art unavailable (%s): %s\n", CANVAS_TITLE_BMP, SDL_GetError());
     g->title_banner = SDL_LoadBMP(CANVAS_TITLE_BANNER_BMP);
     if (g->title_banner)
-        SDL_SetColorKey(g->title_banner, SDL_TRUE,
-                        SDL_MapRGB(g->title_banner->format, 255, 0, 255));
+        prepare_magenta_key(g->title_banner);
     else
         fprintf(stderr, "Stitched title banner unavailable (%s): %s\n",
                 CANVAS_TITLE_BANNER_BMP, SDL_GetError());
@@ -5249,16 +5313,14 @@ static int game_init(Game *g)
             SDL_FreeSurface(g->battlefield);
             g->battlefield = converted;
         }
-        SDL_SetColorKey(g->battlefield, SDL_TRUE,
-                        SDL_MapRGB(g->battlefield->format, 255, 0, 255));
+        prepare_magenta_key(g->battlefield);
     } else {
         fprintf(stderr, "Battlefield panorama unavailable (%s): %s\n",
                 CANVAS_BATTLEFIELD_BMP, SDL_GetError());
     }
     g->foreground_panorama = SDL_LoadBMP(CANVAS_FOREGROUND_BMP);
     if (g->foreground_panorama)
-        SDL_SetColorKey(g->foreground_panorama, SDL_TRUE,
-                        SDL_MapRGB(g->foreground_panorama->format, 255, 0, 255));
+        prepare_magenta_key(g->foreground_panorama);
     else
         fprintf(stderr, "Foreground panorama unavailable (%s): %s\n",
                 CANVAS_FOREGROUND_BMP, SDL_GetError());
@@ -5277,8 +5339,7 @@ static int game_init(Game *g)
         for (i = 0; i < MIDGROUND_ELEMENT_COUNT; ++i) {
             g->midground[i] = SDL_LoadBMP(mid_paths[i]);
             if (g->midground[i])
-                SDL_SetColorKey(g->midground[i], SDL_TRUE,
-                    SDL_MapRGB(g->midground[i]->format, 255, 0, 255));
+                prepare_magenta_key(g->midground[i]);
             else
                 fprintf(stderr, "Midground element unavailable (%s): %s\n",
                         mid_paths[i], SDL_GetError());
@@ -5286,8 +5347,7 @@ static int game_init(Game *g)
         for (i = 0; i < NEAR_ELEMENT_COUNT; ++i) {
             g->near_props[i] = SDL_LoadBMP(near_paths[i]);
             if (g->near_props[i])
-                SDL_SetColorKey(g->near_props[i], SDL_TRUE,
-                    SDL_MapRGB(g->near_props[i]->format, 255, 0, 255));
+                prepare_magenta_key(g->near_props[i]);
             else
                 fprintf(stderr, "Near-ground element unavailable (%s): %s\n",
                         near_paths[i], SDL_GetError());
@@ -5299,8 +5359,7 @@ static int game_init(Game *g)
         SDL_Surface *sprites[] = {g->machine_gun_sprite, g->aa_gun_sprite};
         int i;
         for (i = 0; i < 2; ++i) if (sprites[i])
-            SDL_SetColorKey(sprites[i], SDL_TRUE,
-                            SDL_MapRGB(sprites[i]->format, 255, 0, 255));
+            prepare_magenta_key(sprites[i]);
     }
     g->topdown_battlefield = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
     g->topdown_player = SDL_LoadBMP(CANVAS_TOPDOWN_PLAYER_BMP);
@@ -5339,8 +5398,7 @@ static int game_init(Game *g)
                                 g->gunner_moving_guns};
         int i;
         for (i = 0; i < 7; ++i) if (keyed[i])
-            SDL_SetColorKey(keyed[i], SDL_TRUE,
-                            SDL_MapRGB(keyed[i]->format, 255, 0, 255));
+            prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
         !g->dogfight_background || !g->dogfight_enemy ||
