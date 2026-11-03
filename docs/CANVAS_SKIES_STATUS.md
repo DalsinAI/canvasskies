@@ -2,11 +2,11 @@
 
 Status date: 3 November 2026
 
-Branch: `canvas-skies-vertical-slice`
+Branch: `main`
 
 Code state: pending the `0.1.0-alpha.1` checkpoint described below.
 
-Repository: `DalsinAI/amigasdlsopwith`
+Repository: `DalsinAI/canvasskies` (split from `DalsinAI/amigasdlsopwith` branch `canvas-skies-vertical-slice`)
 
 This file is the resumable handoff. Update it when a significant feature is
 finished, a test result changes, or a new release blocker is found. Do not rely

@@ -1,45 +1,70 @@
+# Canvas Skies
 
-SDL Sopwith is a port of the game "Sopwith", which was originally
-by BMB Compuscience Canada. The original author David L. Clark
-has kindly released the source code under the GNU GPL.
+Canvas Skies is an original First World War flying game for AmigaOS 3. You
+follow pilot Neddy Seagoon of the Royal Flying Corps through an eight-chapter,
+96-mission campaign, from observation flights in August 1914 to 11:00 on
+Armistice Day.
 
-Features:
+It grew out of the Sopwith porting work in
+[amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
+game: no SDL Sopwith code is used.
 
-* Uses LibSDL, so will run on most modern operating systems, and also
-  the web (via emscripten)
-* Support for loading custom mission files (new levels)
-* TCP/IP multiplayer
-* PC speaker emulation
-* Multiple palettes that emulate a selection of old monitors
-* Medals and high score table
+Current release: **0.1.0-alpha.1**, a playable vertical slice. See
+[docs/ALPHA_RELEASE_NOTES.md](docs/ALPHA_RELEASE_NOTES.md).
 
-## More Info
+## Features
 
-More information about SDL Sopwith is available in some of the files
-included here:
+- Side-on, top-down, first-person dogfight and rear-gunner mission modes
+- Pilot's journal and General Headquarters briefing before every sortie
+- Six-axis dogfight flight model with stalls, damage and crashes
+- Three-life campaign with field hospital recovery and a graveside memorial
+- Resumable campaign saves
+- Period fonts, painted art and gramophone-style music
+- F9 toggles aspect-correct fullscreen
 
-* AUTHORS - People responsible for this
-* COPYING - License information (GNU GPL)
-* FAQ - Frequently asked questions about SDL Sopwith
-* NEWS - What's new, ChangeLog
+## Requirements
 
-## Canvas Skies
+- AmigaOS 3.x on a 68040 with FPU (or an AmiCradle instance)
+- SDL2 for AmigaOS 3
 
-This repository also contains the in-development Amiga game *Canvas Skies*, an
-original First World War campaign that grew from the Sopwith porting work.
+## Building
 
-* [Story and design bible](docs/CANVAS_SKIES_STORY_AND_DESIGN.md)
-* [Implementation status and resumable handoff](docs/CANVAS_SKIES_STATUS.md)
-* Campaign data: `src/modern/canvas_campaign.h`
-* Amiga build: `make -f ports/amigaos3/Makefile.canvas -j2`
+Cross-compile with the GFOpenAmigaGCC `os32-gcc16` stove:
 
-You can find lots more information about the original Sopwith here:
+```sh
+make -f ports/amigaos3/Makefile.canvas -j2
+```
 
-* http://www.sopwith.org/
-* https://fragglet.github.io/sdl-sopwith
-* https://en.wikipedia.org/wiki/Sopwith_(video_game)
+Set `AMIGA_STOVE` if your stove is not at `~/AmiCradle/stoves/os32-gcc16`.
+The binary is `build-canvas-skies/CanvasSkies`. It loads its art and sound
+from `PROGDIR:assets/canvas-skies/`, so keep the `assets` drawer beside it.
 
-## Feedback
+## Controls
 
-If you like SDL Sopwith, [join the Discord community](https://discord.gg/S2P5wUUzNU)
-where you can chat with other fans of the game!
+| Context | Controls |
+|---|---|
+| Menus | Up/Down select, Enter accepts, Escape returns |
+| Side/top-down | Arrow keys move, X/Z adjust speed, Space fires, B bombs |
+| Pilot dogfight | Left/Right bank, Down pulls up, Up pushes down, X/Z throttle, Space fires |
+| Rear gunner | Arrow keys traverse/elevate, Space fires |
+| Display | F9 toggles fullscreen |
+
+## Documentation
+
+- [Overview](CANVAS_SKIES.md)
+- [Story and design](docs/CANVAS_SKIES_STORY_AND_DESIGN.md)
+- [Implementation status](docs/CANVAS_SKIES_STATUS.md)
+- [Delivery vision](CANVAS_SKIES_DELIVERY_VISION.md)
+- [Historical sources](CANVAS_SKIES_SOURCES.md)
+
+## Credits
+
+Designed, tested and delivered by The AmiCradle Team.
+
+Music, font and art credits are in
+[assets/canvas-skies/MUSIC_LICENSE.md](assets/canvas-skies/MUSIC_LICENSE.md),
+[assets/canvas-skies/ART_PROVENANCE.md](assets/canvas-skies/ART_PROVENANCE.md)
+and the font copyright files in `assets/canvas-skies/`.
+
+Neddy Seagoon, Eccles, Bluebottle and Gridpipe Thyne are an affectionate nod
+to *The Goon Show*.

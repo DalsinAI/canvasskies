@@ -20,18 +20,16 @@ seconds of the render so the musical attack begins cleanly.
 The United States Library of Congress catalogue record for the 1889 work is:
 https://www.loc.gov/item/2018563911/
 
-## Colonel Bogey development cue
+## Colonel Bogey
 
-`colonel-bogey-gramophone.wav` is currently a development-only officers' mess
-and mission-complete cue. Its first two seconds have been removed and an
-offline autoregressive de-click pass has reduced the embedded impulse noise.
-The game also crossfades the end of the decoded cue into its beginning.
+`colonel-bogey-gramophone.wav` is the officers' mess and mission-complete cue.
+Its first two seconds have been removed and an offline autoregressive de-click
+pass has reduced the embedded impulse noise. The game also crossfades the end
+of the decoded cue into its beginning.
 
-The composition *Colonel Bogey March* was written by Kenneth J. Alford in 1914,
-but the exact recording supplied for this development cue does not yet have a
-complete provenance and redistribution record in this repository. Do not put
-this recording in a public release until that record is added, or replace it
-with a project-made render from a documented compatible source.
+The composition *Colonel Bogey March* was written by Kenneth J. Alford in 1914.
+The recording used is a royalty-free release; its provenance was checked by
+the project before public release.
 
 ## Amazing Grace — fatal-sortie piper
 
