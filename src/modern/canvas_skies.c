@@ -381,6 +381,7 @@ typedef struct {
     SDL_Surface *screen;
     SDL_Surface *title;
     SDL_Surface *title_banner;
+    SDL_Surface *title_backdrop;
     SDL_Surface *mission_board;
     SDL_Surface *fatal_memorial;
     SDL_Surface *field_hospital;
@@ -422,6 +423,7 @@ typedef struct {
     uint8_t key_latched[SDL_NUM_SCANCODES];
     uint32_t last_action_key;
     int menu_selection;
+    int confirm_overwrite;
     int chapter;
     int mission;
     int wingman_health[3];
@@ -493,6 +495,18 @@ static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
 static int is_perspective_mode(MissionMode mode)
 {
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
+}
+
+/* Wingmen follow the written story rather than a damage simulation.
+ * Gridpipe Thyne turns east and is lost in "Thyne's Last Turn" (Chapter 5,
+ * Mission 9); from the next sortie onward his place stays empty. */
+static void apply_story_wingmen(Game *g)
+{
+    int pilot;
+    for (pilot = 0; pilot < 3; ++pilot)
+        g->wingman_health[pilot] = 100;
+    if (g->chapter > 4 || (g->chapter == 4 && g->mission > 8))
+        g->wingman_health[1] = 0;
 }
 
 static int load_campaign_save_path(Game *g, const char *path)
@@ -616,14 +630,19 @@ static int save_mission_result(Game *g)
         } else if (g->chapter + 1 < CHAPTER_COUNT) {
             ++g->chapter;
             g->mission = 0;
+            /* A fresh chapter brings a fresh start: three lives again, so
+             * one bad spell costs a chapter rather than the whole war. */
+            g->lives = 3;
         } else {
             g->campaign_complete = 1;
         }
     }
+    apply_story_wingmen(g);
     ok = save_campaign(g);
     g->chapter = active_chapter;
     g->mission = active_mission;
     g->campaign_complete = active_complete;
+    apply_story_wingmen(g);
     g->mission_save_state = ok ? 1 : -1;
     return ok;
 }
@@ -756,9 +775,39 @@ static void draw_element_layer(Game *g, SDL_Surface **elements, int count,
     }
 }
 
+/* Direct 32-bit pixel packing.  Every surface the renderer touches per
+ * pixel is converted to the screen's 32-bit format at load, so the common
+ * case avoids an SDL_GetRGB/SDL_MapRGB call for each pixel. */
+static int fast_format(const SDL_PixelFormat *f)
+{
+    return f->BytesPerPixel == 4 && f->Rloss == 0 && f->Gloss == 0 &&
+           f->Bloss == 0 && !f->palette;
+}
+
+static void unpack_rgb(const SDL_PixelFormat *f, uint32_t p,
+                       uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    if (fast_format(f)) {
+        *r = (uint8_t)((p & f->Rmask) >> f->Rshift);
+        *g = (uint8_t)((p & f->Gmask) >> f->Gshift);
+        *b = (uint8_t)((p & f->Bmask) >> f->Bshift);
+    } else {
+        SDL_GetRGB(p, f, r, g, b);
+    }
+}
+
+static uint32_t pack_rgb(const SDL_PixelFormat *f, uint8_t r, uint8_t g,
+                         uint8_t b)
+{
+    if (fast_format(f))
+        return ((uint32_t)r << f->Rshift) | ((uint32_t)g << f->Gshift) |
+               ((uint32_t)b << f->Bshift) | f->Amask;
+    return SDL_MapRGB(f, r, g, b);
+}
+
 static uint32_t rgb(SDL_Surface *s, uint8_t r, uint8_t g, uint8_t b)
 {
-    return SDL_MapRGB(s->format, r, g, b);
+    return pack_rgb(s->format, r, g, b);
 }
 
 static void present_frame(Game *g)
@@ -885,6 +934,8 @@ static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
                        uint8_t r, uint8_t g, uint8_t b, uint8_t alpha)
 {
     int px, py;
+    int keep = 255 - alpha;
+    int add_r = r * alpha, add_g = g * alpha, add_b = b * alpha;
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
     for (py = y; py < y + h && py < s->h; ++py) {
         uint32_t *row;
@@ -895,11 +946,11 @@ static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
             uint32_t p;
             if (px < 0) continue;
             p = row[px];
-            SDL_GetRGB(p, s->format, &or_, &og, &ob);
-            or_ = (uint8_t)((or_ * (255 - alpha) + r * alpha) / 255);
-            og = (uint8_t)((og * (255 - alpha) + g * alpha) / 255);
-            ob = (uint8_t)((ob * (255 - alpha) + b * alpha) / 255);
-            row[px] = rgb(s, or_, og, ob);
+            unpack_rgb(s->format, p, &or_, &og, &ob);
+            or_ = (uint8_t)((or_ * keep + add_r) / 255);
+            og = (uint8_t)((og * keep + add_g) / 255);
+            ob = (uint8_t)((ob * keep + add_b) / 255);
+            row[px] = pack_rgb(s->format, or_, og, ob);
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
@@ -926,11 +977,11 @@ static void blend_circle(SDL_Surface *s, int cx, int cy, int radius,
             aa = alpha * (radius * radius - px * px - py * py) /
                  (radius * radius);
             p = row[xx];
-            SDL_GetRGB(p, s->format, &or_, &og, &ob);
+            unpack_rgb(s->format, p, &or_, &og, &ob);
             or_ = (uint8_t)((or_ * (255 - aa) + r * aa) / 255);
             og = (uint8_t)((og * (255 - aa) + g * aa) / 255);
             ob = (uint8_t)((ob * (255 - aa) + b * aa) / 255);
-            row[xx] = rgb(s, or_, og, ob);
+            row[xx] = pack_rgb(s->format, or_, og, ob);
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
@@ -1099,7 +1150,7 @@ static void period_text(SDL_Surface *dst, SDL_Surface *atlas,
                 for (px = 0; px < cell_w; ++px) {
                     int sx = sx0 + px;
                     uint8_t r, g, b;
-                    SDL_GetRGB(surface_pixel(atlas, sx, sy), atlas->format,
+                    unpack_rgb(atlas->format, surface_pixel(atlas, sx, sy),
                                &r, &g, &b);
                     if ((int)r + (int)g + (int)b > 150)
                         pixel(dst, x + px, y + py, color);
@@ -1176,14 +1227,51 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
     }
 }
 
+/* The 68040 has no hardware sine or power instructions, so the audio
+ * callback must not call sinf/powf per sample.  Both come from tables built
+ * once at start-up. */
+#define SINE_TABLE_SIZE 1024
+#define NOTE_TABLE_LOW (-36)
+#define NOTE_TABLE_HIGH 48
+static float sine_table[SINE_TABLE_SIZE];
+static float note_table[NOTE_TABLE_HIGH - NOTE_TABLE_LOW + 1];
+
+static void init_audio_tables(void)
+{
+    int i;
+    for (i = 0; i < SINE_TABLE_SIZE; ++i)
+        sine_table[i] = sinf(2.0f * (float)M_PI * (float)i /
+                             (float)SINE_TABLE_SIZE);
+    for (i = NOTE_TABLE_LOW; i <= NOTE_TABLE_HIGH; ++i)
+        note_table[i - NOTE_TABLE_LOW] =
+            220.0f * powf(2.0f, (float)i / 12.0f);
+}
+
+/* sin(2 * pi * cycles), for any positive or negative cycle count. */
+static float fast_sin_cycles(float cycles)
+{
+    float frac = cycles - (float)(int)cycles;
+    if (frac < 0.0f) frac += 1.0f;
+    return sine_table[(int)(frac * (float)SINE_TABLE_SIZE) &
+                      (SINE_TABLE_SIZE - 1)];
+}
+
+static float wrap_unit(float value)
+{
+    float frac = value - (float)(int)value;
+    return frac < 0.0f ? frac + 1.0f : frac;
+}
+
 static float note_hz(int semitone)
 {
+    if (semitone >= NOTE_TABLE_LOW && semitone <= NOTE_TABLE_HIGH)
+        return note_table[semitone - NOTE_TABLE_LOW];
     return 220.0f * powf(2.0f, (float)semitone / 12.0f);
 }
 
 static float triangle_wave(float p)
 {
-    float v = p - floorf(p);
+    float v = wrap_unit(p);
     return 1.0f - 4.0f * fabsf(v - 0.5f);
 }
 
@@ -1253,7 +1341,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             sample = triangle_wave(a->engine_phase) * (0.17f + speed * 0.09f);
             /* This must have its own continuous phase. Deriving a half-cycle
              * from engine_phase inverted its slope at every wrap: the tick. */
-            sample += sinf(2.0f * (float)M_PI * a->engine_sub_phase) * 0.11f;
+            sample += fast_sin_cycles(a->engine_sub_phase) * 0.11f;
             sample += noise_sample * (0.012f + speed * 0.035f); /* slipstream */
             if (a->other_engine > 0.001f) {
                 float hz = 53.0f + a->other_pitch * 31.0f;
@@ -1268,32 +1356,31 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                           a->vehicle_engine * 0.13f;
             }
         } else if (a->music_mood == MUSIC_MARCH &&
-                   a->music_data && a->music_len >= 4) {
-            uint32_t total_frames = a->music_len / 4;
-            uint32_t frame = a->music_pos / 4;
+                   a->music_data && a->music_len >= 2) {
+            uint32_t total_frames = a->music_len / 2;
+            uint32_t frame = a->music_pos / 2;
             uint32_t fade_frames = total_frames > 8192 ? 2048 : total_frames / 4;
             int16_t *music = (int16_t *)(a->music_data + a->music_pos);
-            float music_sample = ((float)music[0] + (float)music[1]) / 65536.0f;
+            float music_sample = (float)music[0] / 32768.0f;
             if (fade_frames > 0 && frame >= total_frames - fade_frames) {
                 uint32_t intro_frame = frame - (total_frames - fade_frames);
-                int16_t *intro = (int16_t *)(a->music_data + intro_frame * 4);
-                float intro_sample = ((float)intro[0] + (float)intro[1]) / 65536.0f;
+                int16_t *intro = (int16_t *)(a->music_data + intro_frame * 2);
+                float intro_sample = (float)intro[0] / 32768.0f;
                 float crossfade = (float)intro_frame / (float)fade_frames;
                 music_sample = music_sample * (1.0f - crossfade) +
                                intro_sample * crossfade;
             }
             sample = music_sample * 0.48f;
-            a->music_pos += 4;
-            if (a->music_pos + 4 > a->music_len) a->music_pos = 0;
+            a->music_pos += 2;
+            if (a->music_pos + 2 > a->music_len) a->music_pos = 0;
         } else if (a->music_mood == MUSIC_MESS) {
-            if (a->mess_data && a->mess_len >= 4) {
-                uint32_t total_frames = a->mess_len / 4;
-                uint32_t frame = a->mess_pos / 4;
+            if (a->mess_data && a->mess_len >= 2) {
+                uint32_t total_frames = a->mess_len / 2;
+                uint32_t frame = a->mess_pos / 2;
                 uint32_t fade_frames = total_frames > 8192 ?
                                        2048 : total_frames / 4;
                 int16_t *music = (int16_t *)(a->mess_data + a->mess_pos);
-                float music_sample =
-                    ((float)music[0] + (float)music[1]) / 65536.0f;
+                float music_sample = (float)music[0] / 32768.0f;
                 /* The source finishes close to silence but not at the same
                  * waveform phase as its opening.  Crossfade the final 186 ms
                  * into the beginning so a long debrief cannot expose a click
@@ -1302,17 +1389,16 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                     uint32_t intro_frame =
                         frame - (total_frames - fade_frames);
                     int16_t *intro =
-                        (int16_t *)(a->mess_data + intro_frame * 4);
-                    float intro_sample =
-                        ((float)intro[0] + (float)intro[1]) / 65536.0f;
+                        (int16_t *)(a->mess_data + intro_frame * 2);
+                    float intro_sample = (float)intro[0] / 32768.0f;
                     float crossfade =
                         (float)intro_frame / (float)fade_frames;
                     music_sample = music_sample * (1.0f - crossfade) +
                                    intro_sample * crossfade;
                 }
                 sample = music_sample * 0.52f;
-                a->mess_pos += 4;
-                if (a->mess_pos + 4 > a->mess_len) a->mess_pos = 0;
+                a->mess_pos += 2;
+                if (a->mess_pos + 2 > a->mess_len) a->mess_pos = 0;
             } else {
                 /* Original synth fallback when the supplied recording is not
                  * installed. */
@@ -1321,29 +1407,29 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 int bass_step = ((int)(position * 0.5f)) & 7;
                 float melody_hz = note_hz(mess_melody[step] + 7);
                 float bass_hz = note_hz(mess_bass[bass_step] - 17);
-                float beat_phase = position - floorf(position);
+                float beat_phase = wrap_unit(position);
                 float phrase = 0.72f + 0.28f *
-                               sinf((float)M_PI * beat_phase);
+                               fast_sin_cycles(0.5f * beat_phase);
                 a->synth_phase[4] += melody_hz / 11025.0f;
                 a->synth_phase[3] += bass_hz / 11025.0f;
                 if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
                 if (a->synth_phase[3] >= 1.0f) a->synth_phase[3] -= 1.0f;
-                sample = (sinf(2.0f * (float)M_PI * a->synth_phase[4]) * 0.14f +
+                sample = (fast_sin_cycles(a->synth_phase[4]) * 0.14f +
                           triangle_wave(a->synth_phase[4]) * 0.055f) * phrase;
                 sample += triangle_wave(a->synth_phase[3]) * 0.105f;
             }
         } else if (a->music_mood == MUSIC_PIPER) {
-            if (a->piper_data && a->piper_pos + 4 <= a->piper_len) {
+            if (a->piper_data && a->piper_pos + 2 <= a->piper_len) {
                 int16_t *pipes = (int16_t *)(a->piper_data + a->piper_pos);
-                float piper_time = (float)a->piper_pos / 44100.0f;
+                float piper_time = (float)a->piper_pos / 22050.0f;
                 float memorial_gain = piper_time < 0.45f ?
                                       piper_time / 0.45f : 1.0f;
                 if (piper_time > 15.0f)
                     memorial_gain = (19.0f - piper_time) / 4.0f;
                 if (memorial_gain < 0.0f) memorial_gain = 0.0f;
-                sample = ((float)pipes[0] + (float)pipes[1]) / 65536.0f;
+                sample = (float)pipes[0] / 32768.0f;
                 sample *= 0.64f * memorial_gain;
-                a->piper_pos += 4;
+                a->piper_pos += 2;
             } else if (a->piper_data) {
                 /* One respectful performance, then silence. */
                 sample = 0.0f;
@@ -1353,8 +1439,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                     sample = 0.0f;
                 } else {
                 int pipe_step = (int)(after_silence * 2.15f) & 63;
-                float vibrato = sinf(2.0f * (float)M_PI *
-                                      after_silence * 5.15f) * 0.0028f;
+                float vibrato = fast_sin_cycles(after_silence * 5.15f) * 0.0028f;
                 float chanter_hz = note_hz(pipe_melody[pipe_step]) *
                                    (1.0f + vibrato);
                 float drone_d = note_hz(-7);
@@ -1372,7 +1457,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 sample = triangle_wave(a->synth_phase[0]) * 0.095f +
                          triangle_wave(a->synth_phase[1]) * 0.055f +
                          triangle_wave(a->synth_phase[4]) * 0.205f +
-                         sinf(4.0f * (float)M_PI * a->synth_phase[4]) *
+                         fast_sin_cycles(2.0f * a->synth_phase[4]) *
                          0.055f + breath * 0.006f;
                 sample *= attack;
                 }
@@ -1395,9 +1480,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
             }
             bass = triangle_wave(a->synth_phase[3]) * 0.13f;
-            melody = sinf(2.0f * (float)M_PI * a->synth_phase[4]) * 0.07f;
+            melody = fast_sin_cycles(a->synth_phase[4]) * 0.07f;
             if (a->music_mood == MUSIC_TENSION && (beat & 1) == 0 &&
-                fmodf(cue_t * tempo, 1.0f) < 0.09f)
+                wrap_unit(cue_t * tempo) < 0.09f)
                 drums = ((float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f) * 0.08f;
             sample = pad * (a->music_mood == MUSIC_ARMISTICE ? 0.48f : 0.72f) +
                      bass * 0.42f + melody * 0.36f + drums;
@@ -1432,7 +1517,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             float env = (float)a->blast / 7000.0f;
             float roar = (float)((a->noise >> 16) & 0xffff) / 32768.0f - 1.0f;
             if (env > 1.0f) env = 1.0f;
-            sample += sinf(2.0f * (float)M_PI * t * 49.0f) * env * 0.36f;
+            sample += fast_sin_cycles(t * 49.0f) * env * 0.36f;
             sample += roar * env * 0.31f;
             --a->blast;
         }
@@ -1451,9 +1536,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
              * into earth drag and a short metal/rigging shriek. */
             sample += wreck * (first_break * 0.43f +
                                second_break * 0.34f + slide * 0.19f);
-            sample += sinf(2.0f * (float)M_PI * t * 67.0f) *
+            sample += fast_sin_cycles(t * 67.0f) *
                       first_break * 0.17f;
-            sample += sinf(2.0f * (float)M_PI * t * 347.0f) *
+            sample += fast_sin_cycles(t * 347.0f) *
                       slide * slide * 0.12f;
             if ((elapsed < 170) || (elapsed > 330 && elapsed < 470))
                 sample += ((elapsed & 20) ? 0.22f : -0.18f) *
@@ -1466,10 +1551,10 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                            65536.0f - 1.0f;
             if (env > 1.0f) env = 1.0f;
             if (a->hit_player) {
-                sample += sinf(2.0f * (float)M_PI * t * 73.0f) * env * 0.27f;
+                sample += fast_sin_cycles(t * 73.0f) * env * 0.27f;
                 sample += strike * env * 0.30f;
             } else {
-                sample += sinf(2.0f * (float)M_PI * t * 186.0f) * env * 0.18f;
+                sample += fast_sin_cycles(t * 186.0f) * env * 0.18f;
                 sample += strike * env * 0.22f;
             }
             --a->hit;
@@ -1574,10 +1659,11 @@ static void draw_plane(Game *g, int x, int y, int enemy, int pitch_frame)
             int sx = pitch_frame * source_w + dx * source_w / draw_w;
             int tx = x - draw_w / 2 + dx;
             uint8_t r, green, b;
-            SDL_GetRGB(surface_pixel(atlas, sx, sy), atlas->format,
-                       &r, &green, &b);
+            uint32_t source = surface_pixel(atlas, sx, sy);
+            unpack_rgb(atlas->format, source, &r, &green, &b);
             if (r > 180 && b > 180 && green < 130) continue;
-            pixel(dst, tx, ty, rgb(dst, r, green, b));
+            pixel(dst, tx, ty, atlas->format->format == dst->format->format ?
+                  source : rgb(dst, r, green, b));
         }
     }
     if (SDL_MUSTLOCK(atlas)) SDL_UnlockSurface(atlas);
@@ -1674,6 +1760,7 @@ static void reset_sortie(Game *g)
     g->mission_save_state = 0;
     g->fatal_sortie = 0;
     g->life_lost_this_sortie = 0;
+    apply_story_wingmen(g);
     if (mode == MISSION_TOP_DOWN) {
         g->player_x = 320.0f;
         g->player_y = 310.0f;
@@ -3270,10 +3357,27 @@ static void draw_title(Game *g)
     const char *title = "CANVAS SKIES";
     uint32_t now = SDL_GetTicks();
     int i;
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 20, 31, 48));
-    if (g->title) SDL_BlitSurface(g->title, NULL, s, NULL);
-    blend_rect(s, 0, 0, 640, 112, 5, 12, 24, 112);
-    blend_rect(s, 0, 300, SCREEN_W, SCREEN_H - 300, 5, 10, 18, 150);
+    /* The painting and its two shade bands never change: compose them once
+     * and copy the result each frame, so only the banner is redrawn. */
+    if (!g->title_backdrop) {
+        SDL_Surface *b = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
+            32, s->format->format);
+        if (b) {
+            rect(b, 0, 0, SCREEN_W, SCREEN_H, rgb(b, 20, 31, 48));
+            if (g->title) SDL_BlitSurface(g->title, NULL, b, NULL);
+            blend_rect(b, 0, 0, 640, 112, 5, 12, 24, 112);
+            blend_rect(b, 0, 300, SCREEN_W, SCREEN_H - 300, 5, 10, 18, 150);
+            g->title_backdrop = b;
+        }
+    }
+    if (g->title_backdrop) {
+        SDL_BlitSurface(g->title_backdrop, NULL, s, NULL);
+    } else {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 20, 31, 48));
+        if (g->title) SDL_BlitSurface(g->title, NULL, s, NULL);
+        blend_rect(s, 0, 0, 640, 112, 5, 12, 24, 112);
+        blend_rect(s, 0, 300, SCREEN_W, SCREEN_H - 300, 5, 10, 18, 150);
+    }
     /* The lettering is embroidered into the cloth asset, so the complete
      * banner—thread, seams and fabric—moves as one wind-distorted object. */
     if (g->title_banner) {
@@ -3345,6 +3449,15 @@ static void draw_campaign_menu(Game *g)
         }
         draw_victorian_plaque(g, 128, 112 + i * 31, 384, label,
                               i == g->menu_selection);
+    }
+    if (g->confirm_overwrite) {
+        blend_rect(s, 106, 69, 428, 266, 5, 7, 10, 170);
+        rect(s, 140, 160, 360, 84, rgb(s, 183, 139, 63));
+        rect(s, 144, 164, 352, 76, rgb(s, 52, 37, 27));
+        display_text(g, 158, 176, "OVERWRITE SAVED CAMPAIGN?", 12, 18,
+                     rgb(s, 239, 215, 155));
+        typewriter_text(g, 186, 210, "ENTER  YES      ESCAPE  NO", 7, 11,
+                        rgb(s, 225, 199, 137));
     }
 }
 
@@ -4335,18 +4448,29 @@ static void draw_simulator_terrain(Game *g)
         /* Signed perpendicular distance gives a solid sky and ground at any
          * bank angle.  Parallel raster lines left the regular pinholes seen
          * in the steep-bank screenshots. */
-        for (y = 0; y < SCREEN_H; ++y) {
-            uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
-            for (x = 0; x < SCREEN_W; ++x) {
-                float side = (horizon_dx * ((float)y - horizon_left) -
-                              horizon_dy * (float)x) / horizon_length;
-                int is_ground = ground_positive ? side >= 0.0f : side <= 0.0f;
-                if (is_ground) {
-                    row[x] = ground;
-                } else {
-                    int haze_distance = (int)fabsf(side);
-                    if (haze_distance > 260) haze_distance = 260;
-                    row[x] = sky_colour[haze_distance];
+        /* The signed distance is linear along a row, so it is stepped in
+         * 16.16 fixed point: one float setup per row, integer work per
+         * pixel, no per-pixel divide. */
+        {
+            int32_t step = (int32_t)(-horizon_dy / horizon_length * 65536.0f);
+            for (y = 0; y < SCREEN_H; ++y) {
+                uint32_t *row = (uint32_t *)((uint8_t *)s->pixels +
+                                             y * s->pitch);
+                float start = horizon_dx * ((float)y - horizon_left) /
+                              horizon_length;
+                int32_t side;
+                if (start > 30000.0f) start = 30000.0f;
+                if (start < -30000.0f) start = -30000.0f;
+                side = (int32_t)(start * 65536.0f);
+                for (x = 0; x < SCREEN_W; ++x, side += step) {
+                    int is_ground = ground_positive ? side >= 0 : side <= 0;
+                    if (is_ground) {
+                        row[x] = ground;
+                    } else {
+                        int32_t haze_distance = (side < 0 ? -side : side) >> 16;
+                        if (haze_distance > 260) haze_distance = 260;
+                        row[x] = sky_colour[haze_distance];
+                    }
                 }
             }
         }
@@ -5100,7 +5224,8 @@ static void draw_dogfight_3d_sortie(Game *g)
         }
     }
     /* Eccles, Gridpipe Thyne and Bluebottle hold a loose formation around us. */
-    for (i = 0; i < 3; ++i) if (g->wingman_health[i] > 0) {
+    /* Tom flies the two-seater alone; the scouts only escort dogfights. */
+    for (i = 0; i < 3; ++i) if (!gunner && g->wingman_health[i] > 0) {
         int wx = i == 0 ? 175 : (i == 1 ? 455 : 110);
         int wy = i == 2 ? 252 : 278;
         draw_perspective_plane(g, wx, wy, i == 2 ? 20 : 27, 0, 0.0f);
@@ -5567,10 +5692,13 @@ static int init_audio(Game *g)
     uint8_t *wav_data = NULL;
     uint32_t wav_len = 0;
     SDL_AudioCVT cvt;
+    /* Recordings are kept as mono 11 kHz: the mixer sums them to one
+     * channel anyway, and mono halves their memory. */
+    init_audio_tables();
     if (SDL_LoadWAV(CANVAS_MARCH_WAV, &wav_spec, &wav_data, &wav_len)) {
         int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
                                            wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 2, 11025);
+                                           AUDIO_S16SYS, 1, 11025);
         if (cvt_result >= 0 && cvt.needed) {
             cvt.len = (int)wav_len;
             cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
@@ -5600,7 +5728,7 @@ static int init_audio(Game *g)
     if (SDL_LoadWAV(CANVAS_MESS_WAV, &wav_spec, &wav_data, &wav_len)) {
         int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
                                            wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 2, 11025);
+                                           AUDIO_S16SYS, 1, 11025);
         if (cvt_result >= 0 && cvt.needed) {
             cvt.len = (int)wav_len;
             cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
@@ -5630,7 +5758,7 @@ static int init_audio(Game *g)
     if (SDL_LoadWAV(CANVAS_PIPER_WAV, &wav_spec, &wav_data, &wav_len)) {
         int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
                                            wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 2, 11025);
+                                           AUDIO_S16SYS, 1, 11025);
         if (cvt_result >= 0 && cvt.needed) {
             cvt.len = (int)wav_len;
             cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
@@ -5867,6 +5995,27 @@ static int game_init(Game *g)
     g->enemy_sprites = SDL_LoadBMP(CANVAS_ENEMY_SPRITES_BMP);
     if (!g->player_sprites || !g->enemy_sprites)
         fprintf(stderr, "Aircraft sprite atlas unavailable; using vector fallback\n");
+    {
+        /* Fonts and aircraft atlases are read pixel by pixel every frame.
+         * Holding them in the screen's 32-bit format lets the renderer read
+         * them directly instead of decoding 24-bit BMP pixels through SDL. */
+        SDL_Surface **atlases[] = {
+            &g->font_display_36x42, &g->font_display_22x28,
+            &g->font_display_16x23, &g->font_display_12x18,
+            &g->font_typewriter_10x15, &g->font_typewriter_7x11,
+            &g->font_journal_8x12, &g->player_sprites, &g->enemy_sprites
+        };
+        int i;
+        for (i = 0; i < (int)(sizeof(atlases) / sizeof(atlases[0])); ++i)
+            if (*atlases[i]) {
+                SDL_Surface *converted = SDL_ConvertSurface(*atlases[i],
+                                                            g->screen->format, 0);
+                if (converted) {
+                    SDL_FreeSurface(*atlases[i]);
+                    *atlases[i] = converted;
+                }
+            }
+    }
     init_audio(g);
     set_scene(g, SCENE_TITLE);
     return 1;
@@ -5906,18 +6055,23 @@ static void handle_event(Game *g, SDL_Event *ev)
         toggle_fullscreen(g);
         break;
     case SDLK_ESCAPE:
-        if (g->scene == SCENE_TITLE) g->running = 0;
+        if (g->scene == SCENE_MENU && g->confirm_overwrite) {
+            g->confirm_overwrite = 0;
+            g->redraw_static = 1;
+        } else if (g->scene == SCENE_TITLE) g->running = 0;
         else set_scene(g, SCENE_TITLE);
         break;
     case SDLK_UP:
         if (g->scene == SCENE_MENU) {
             int count = campaign_menu_count(g);
+            g->confirm_overwrite = 0;
             g->menu_selection = (g->menu_selection + count - 1) % count;
             g->redraw_static = 1;
         }
         break;
     case SDLK_DOWN:
         if (g->scene == SCENE_MENU) {
+            g->confirm_overwrite = 0;
             g->menu_selection = (g->menu_selection + 1) %
                                 campaign_menu_count(g);
             g->redraw_static = 1;
@@ -5928,6 +6082,7 @@ static void handle_event(Game *g, SDL_Event *ev)
         g->last_action_key = SDL_GetTicks();
         if (g->scene == SCENE_TITLE) {
             g->menu_selection = 0;
+            g->confirm_overwrite = 0;
             set_scene(g, SCENE_MENU);
         }
         else if (g->scene == SCENE_MENU) {
@@ -5947,12 +6102,21 @@ static void handle_event(Game *g, SDL_Event *ev)
                 }
             } else {
                 int new_index = g->menu_selection - (has_continue ? 1 : 0);
+                if (has_continue && !g->confirm_overwrite) {
+                    /* A new commission replaces the saved campaign, so ask
+                     * once before the old record is overwritten. */
+                    g->confirm_overwrite = 1;
+                    g->redraw_static = 1;
+                    break;
+                }
+                g->confirm_overwrite = 0;
                 g->chapter = start_chapter[new_index];
                 g->mission = 0;
                 g->campaign_complete = 0;
                 g->lives = 3;
                 for (pilot = 0; pilot < 3; ++pilot)
                     g->wingman_health[pilot] = 100;
+                apply_story_wingmen(g);
                 save_campaign(g);
             }
             set_scene(g, SCENE_STORY);
@@ -6110,7 +6274,9 @@ int main(int argc, char **argv)
         if (dt > 0.05f) dt = 0.05f;
         keys = SDL_GetKeyboardState(NULL);
         if (g.scene == SCENE_SORTIE) update_sortie(&g, dt, keys);
-        if (g.scene == SCENE_TITLE || g.scene == SCENE_MENU ||
+        /* The officers' menu is static: it is redrawn only when the selection
+         * or prompt changes (redraw_static), not every frame. */
+        if (g.scene == SCENE_TITLE ||
             g.scene == SCENE_SORTIE || g.scene == SCENE_DEBRIEF ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
@@ -6132,6 +6298,7 @@ int main(int argc, char **argv)
     if (g.audio.device) SDL_CloseAudioDevice(g.audio.device);
     if (g.title) SDL_FreeSurface(g.title);
     if (g.title_banner) SDL_FreeSurface(g.title_banner);
+    if (g.title_backdrop) SDL_FreeSurface(g.title_backdrop);
     if (g.mission_board) SDL_FreeSurface(g.mission_board);
     if (g.fatal_memorial) SDL_FreeSurface(g.fatal_memorial);
     if (g.field_hospital) SDL_FreeSurface(g.field_hospital);

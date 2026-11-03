@@ -67,3 +67,21 @@ $(OUT): $(SRC) $(HDR)
 
 clean:
 	rm -rf build-canvas-skies
+
+# Release drawer: the executable, icons, licences and only the assets the
+# game loads at run time.  Source PNGs and unused experiments stay out.
+PACKAGE := build-canvas-skies/package/CanvasSkies
+RUNTIME_ASSETS := $(sort $(patsubst PROGDIR:%,%,$(filter PROGDIR:%,$(subst \", ,$(subst =, ,$(CFLAGS))))))
+
+.PHONY: package
+package: $(OUT)
+	rm -rf $(PACKAGE)
+	mkdir -p $(PACKAGE)/assets/canvas-skies
+	cp $(OUT) $(PACKAGE)/CanvasSkies
+	cp "ports/amigaos3/package/Start Canvas Skies" "ports/amigaos3/package/Start Canvas Skies.info" $(PACKAGE)/
+	cp ports/amigaos3/package/Drawer.info build-canvas-skies/package/CanvasSkies.info
+	cp $(RUNTIME_ASSETS) $(PACKAGE)/assets/canvas-skies/
+	cp LICENSE README.md assets/canvas-skies/MUSIC_LICENSE.md \
+	   assets/canvas-skies/ART_PROVENANCE.md \
+	   assets/canvas-skies/Liberation-font-copyright.txt \
+	   assets/canvas-skies/Noto-font-copyright.txt $(PACKAGE)/
