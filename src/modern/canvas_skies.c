@@ -468,6 +468,7 @@ typedef struct {
     int health;
     int tail_integrity;
     int score;
+    int kills;
     int objectives;
     int ammunition;
     int bombs_remaining;
@@ -1641,14 +1642,27 @@ static int perspective_enemy_total(const Game *g)
     return current_mission_goal(g);
 }
 
-static int perspective_enemies_remaining(const Game *g)
+/* Every enemy machine brought down counts towards the goal, whether it fell
+ * to our guns, flew into the ground or was lost in a collision. */
+static void credit_air_kill(Game *g)
 {
-    int i, remaining = 0;
-    for (i = 0; i < MAX_ENEMIES; ++i) {
-        if (g->enemies[i].active && !g->enemies[i].crashing)
-            ++remaining;
-    }
-    return remaining;
+    ++g->kills;
+    g->score += 250;
+}
+
+/* Rear attackers make a single pass, so spare machines give the gunner
+ * room to miss one without the sortie becoming unwinnable.  In the unarmed
+ * 1914 sorties one enemy observer shares the sky and nobody fires. */
+static int perspective_spawn_count(const Game *g)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    int goal = current_mission_goal(g);
+    int count;
+    if (!is_perspective_mode(mode)) return 0;
+    if (!chapters[g->chapter].armed) return 1;
+    count = mode == MISSION_GUNNER_3D ? goal + 2 : goal;
+    if (count > MAX_ENEMIES) count = MAX_ENEMIES;
+    return count;
 }
 
 static void reset_sortie(Game *g)
@@ -1708,6 +1722,7 @@ static void reset_sortie(Game *g)
     g->health = 100;
     g->tail_integrity = 100;
     g->score = 0;
+    g->kills = 0;
     g->objectives = 0;
     g->ammunition = 260 - g->chapter * 13;
     if (g->ammunition < 160) g->ammunition = 160;
@@ -1731,8 +1746,7 @@ static void reset_sortie(Game *g)
     g->audio.crash = 0;
     g->audio.hit = 0;
     g->audio.hit_player = 0;
-    perspective_enemy_count = is_perspective_mode(mode) ?
-                              current_mission_goal(g) : 0;
+    perspective_enemy_count = perspective_spawn_count(g);
     for (i = 0; i < MAX_ENEMIES; ++i) {
         g->enemies[i].x = 760.0f + i * 620.0f;
         g->enemies[i].y = 90.0f + (float)((i * 47) % 120);
@@ -2353,7 +2367,7 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
 static void finish_alternate_sortie(Game *g)
 {
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
-        g->success = g->score / 250 >= current_mission_goal(g) &&
+        g->success = g->kills >= current_mission_goal(g) &&
                      g->health > 0 && g->fuel > 0;
     else
         g->success = g->objectives >= current_mission_goal(g) &&
@@ -2664,12 +2678,13 @@ static void update_perspective_sortie(Game *g, float dt,
                     enemy->crash_size = size;
                     --active_enemies;
                     ++crashing_enemies;
-                    g->score += 250;
+                    credit_air_kill(g);
                 }
             }
         }
         if (enemy->crashing) continue;
-        if (depth < 1250.0f && depth > 140.0f &&
+        if (chapters[g->chapter].armed &&
+            depth < 1250.0f && depth > 140.0f &&
             now >= enemy->last_shot &&
             now - enemy->last_shot >
             (uint32_t)(1500 - g->chapter * 95 + i * 57 % 330)) {
@@ -2708,6 +2723,8 @@ static void update_perspective_sortie(Game *g, float dt,
         g->qa_hold = hold;
     } else if (!g->qa_hold && ((active_enemies == 0 && crashing_enemies == 0 &&
         g->scroll > 520.0f) ||
+        (current_mission_goal(g) > 0 && g->kills >= current_mission_goal(g) &&
+         crashing_enemies == 0) ||
         g->scroll > chapters[g->chapter].distance ||
         g->fuel <= 0.0f || g->health <= 0))
         finish_alternate_sortie(g);
@@ -2825,7 +2842,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                 g->audio.hit = 950;
                 if (g->enemies[i].hp <= 0) {
                     g->enemies[i].crashing = 1;
-                    g->score += 250;
+                    credit_air_kill(g);
                 }
                 break;
             }
@@ -2876,6 +2893,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
              * contact, rather than exploding or disappearing in mid-air. */
             enemy->crashing = 1;
             enemy->hp = 0;
+            credit_air_kill(g);
             if (enemy->vy > -16.0f) enemy->vy = -16.0f;
             if (!g->flight_doomed) {
                 g->flight_doomed = 1;
@@ -2930,6 +2948,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         if (enemy->world_y <= 0.0f) {
             enemy->world_y = 0.0f;
             enemy->crashing = 1;
+            credit_air_kill(g);
             enemy->crash_x = 320.0f;
             enemy->crash_y = 300.0f;
             enemy->crash_size = 18;
@@ -2941,7 +2960,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             /* An attacker can only hit while it is actually in the player's
              * forward view and has settled its nose.  This prevents several
              * unseen aircraft draining the airframe during their entrance. */
-            if (now - g->scene_started > 5200u && distance < 900.0f &&
+            if (chapters[g->chapter].armed &&
+                now - g->scene_started > 5200u && distance < 900.0f &&
                 attack_view.visible && attack_view.x > 24 &&
                 attack_view.x < SCREEN_W - 24 && attack_view.y > 18 &&
                 attack_view.y < SCREEN_H - 80 &&
@@ -2994,6 +3014,12 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.blast = 1800;
     }
     if (!g->qa_hold && active > 0 && g->fuel <= 0.0f) {
+        finish_alternate_sortie(g);
+    } else if (!g->qa_hold && !chapters[g->chapter].armed && active > 0 &&
+               !g->flight_doomed && !g->flight_crashed &&
+               g->scroll > chapters[g->chapter].distance) {
+        /* 1914: nobody is armed.  Shadowing the other machine for the
+         * length of the patrol is the whole task. */
         finish_alternate_sortie(g);
     }
 }
@@ -3203,7 +3229,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         g->fuel <= 0.0f || g->health <= 0) {
         if (g->health <= 0) g->fatal_sortie = 1;
         if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
-            g->success = g->score / 250 >= current_mission_goal(g) &&
+            g->success = g->kills >= current_mission_goal(g) &&
                          g->health > 0 && g->fuel > 0;
         else
             g->success = g->objectives >= current_mission_goal(g) &&
@@ -5002,8 +5028,11 @@ static void draw_dogfight_simulator(Game *g)
         circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
         circle(s, 350, 228, 2, rgb(s, 255, 238, 157));
     }
-    snprintf(buf, sizeof(buf), "ENEMIES %d/%d",
-             perspective_enemies_remaining(g), perspective_enemy_total(g));
+    if (perspective_enemy_total(g) > 0)
+        snprintf(buf, sizeof(buf), "DOWNED %d/%d",
+                 g->kills, perspective_enemy_total(g));
+    else
+        snprintf(buf, sizeof(buf), "UNARMED PATROL");
     draw_field_sign(g, 8, 342, 130, buf);
     snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
     draw_field_sign(g, 8, 371, 130, buf);
@@ -5153,8 +5182,11 @@ static void draw_dogfight_3d_sortie(Game *g)
         line(s, ax - 12, ay + 12, ax - 6, ay + 16, sight);
         line(s, ax + 12, ay + 12, ax + 6, ay + 16, sight);
     }
-    snprintf(buf, sizeof(buf), "ENEMIES %d/%d",
-             perspective_enemies_remaining(g), perspective_enemy_total(g));
+    if (perspective_enemy_total(g) > 0)
+        snprintf(buf, sizeof(buf), "DOWNED %d/%d",
+                 g->kills, perspective_enemy_total(g));
+    else
+        snprintf(buf, sizeof(buf), "UNARMED PATROL");
     draw_field_sign(g, 8, 342, 130, buf);
     snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
     draw_field_sign(g, 8, 371, 130, buf);
@@ -5328,7 +5360,7 @@ static void draw_sortie(Game *g)
     snprintf(buf, sizeof(buf), "SCORE %05d", g->score);
     draw_field_sign(g, 8, 8, 112, buf);
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
-        snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->score / 250,
+        snprintf(buf, sizeof(buf), "AIR KILLS %d/%d", g->kills,
                  current_mission_goal(g));
     else if (current_mission_goal(g) > 0)
         snprintf(buf, sizeof(buf), "TARGETS %d/%d", g->objectives,
@@ -5472,7 +5504,7 @@ static void draw_debrief(Game *g)
          12, 18, red);
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
         snprintf(buf, sizeof(buf), "ENEMY AIRCRAFT              %d/%d",
-                 g->score / 250, current_mission_goal(g));
+                 g->kills, current_mission_goal(g));
     else
         snprintf(buf, sizeof(buf), "MISSION OBJECTIVES          %d/%d",
                  g->objectives, current_mission_goal(g));
@@ -6035,7 +6067,8 @@ int main(int argc, char **argv)
         g.mission = 2;
         reset_sortie(&g);
         g.success = 1;
-        g.score = current_mission_goal(&g) * 250;
+        g.kills = current_mission_goal(&g);
+        g.score = g.kills * 250;
         set_scene(&g, SCENE_DEBRIEF);
     } else if (argc > 1 && strcmp(argv[1], "FINAL_SUCCESS") == 0) {
         /* Direct campaign-completion test.  Enter must save a completed war
@@ -6047,7 +6080,8 @@ int main(int argc, char **argv)
         g.wingman_health[2] = 100;
         reset_sortie(&g);
         g.success = 1;
-        g.score = current_mission_goal(&g) * 250;
+        g.kills = current_mission_goal(&g);
+        g.score = g.kills * 250;
         set_scene(&g, SCENE_DEBRIEF);
     } else if (argc > 1 && strcmp(argv[1], "CHAPTER_SUCCESS") == 0) {
         /* Direct chapter-boundary test.  Enter must advance mission 12 to
@@ -6059,7 +6093,8 @@ int main(int argc, char **argv)
         g.wingman_health[2] = 100;
         reset_sortie(&g);
         g.success = 1;
-        g.score = current_mission_goal(&g) * 250;
+        g.kills = current_mission_goal(&g);
+        g.score = g.kills * 250;
         set_scene(&g, SCENE_DEBRIEF);
     }
     previous = SDL_GetTicks();
