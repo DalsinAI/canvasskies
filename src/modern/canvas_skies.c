@@ -8729,6 +8729,20 @@ int main(int argc, char **argv)
         g.mission = 4;
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && (strcmp(argv[1], "TRUCE") == 0 ||
+                            strcmp(argv[1], "AIRSHIP") == 0 ||
+                            strcmp(argv[1], "GOTHA") == 0)) {
+        /* The three special sorties of the war-news chapters. */
+        g.chapter = argv[1][0] == 'T' ? 0 : argv[1][0] == 'A' ? 2 : 3;
+        g.mission = argv[1][0] == 'T' ? 11 : 10;
+        reset_sortie(&g);
+        g.qa_hold = argv[1][0] != 'T';
+        set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "NEWS") == 0) {
+        /* The front page before the first day of the Somme. */
+        g.chapter = 2;
+        g.mission = 4;
+        set_scene(&g, SCENE_STORY);
     } else if (argc > 1 && strcmp(argv[1], "TOPDOWN") == 0) {
         g.chapter = 2;
         g.mission = 1;
