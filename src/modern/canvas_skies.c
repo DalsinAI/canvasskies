@@ -1285,6 +1285,8 @@ static int current_mission_goal(const Game *g)
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
             goal = chapters[g->chapter].enemy_count;
+        if (mode == MISSION_GUNNER_3D && goal > 2) goal = 2;
+        if (mode == MISSION_DOGFIGHT_3D && goal > 4) goal = 4;
         return goal;
     }
     return chapters[g->chapter].goal;
@@ -1292,11 +1294,7 @@ static int current_mission_goal(const Game *g)
 
 static int perspective_enemy_total(const Game *g)
 {
-    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
-    int total = chapters[g->chapter].enemy_count;
-    if (mode == MISSION_GUNNER_3D && total > 2) total = 2;
-    if (mode == MISSION_DOGFIGHT_3D && total > 4) total = 4;
-    return total;
+    return current_mission_goal(g);
 }
 
 static int perspective_enemies_remaining(const Game *g)
@@ -1386,11 +1384,8 @@ static void reset_sortie(Game *g)
     g->audio.crash = 0;
     g->audio.hit = 0;
     g->audio.hit_player = 0;
-    perspective_enemy_count = chapter->enemy_count;
-    if (mode == MISSION_GUNNER_3D && perspective_enemy_count > 2)
-        perspective_enemy_count = 2;
-    if (mode == MISSION_DOGFIGHT_3D && perspective_enemy_count > 4)
-        perspective_enemy_count = 4;
+    perspective_enemy_count = is_perspective_mode(mode) ?
+                              current_mission_goal(g) : 0;
     for (i = 0; i < MAX_ENEMIES; ++i) {
         g->enemies[i].x = 760.0f + i * 620.0f;
         g->enemies[i].y = 90.0f + (float)((i * 47) % 120);

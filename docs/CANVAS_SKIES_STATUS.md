@@ -133,6 +133,9 @@ Current controls:
 - Aim range, tail obstruction and muzzle-origin calculations exist.
 - Attackers approach in depth rather than being a static row of sprites.
 - Bullet holes, player damage, ammunition and enemy damage exist.
+- Spawn count, remaining-enemy sign, debrief target and success condition now
+  share the same capped mission goal. Gunner missions can no longer spawn two
+  attackers while incorrectly demanding four victories.
 
 ### Pilot dogfight mode
 
