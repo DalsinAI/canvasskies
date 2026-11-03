@@ -2654,7 +2654,7 @@ static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
     flight_euler(f, &bank, &pitch, &heading);
     /* Roll: proportional, with a gentle self-levelling when centred. */
     if (fabsf(aileron) > 0.05f)
-        f->p = flight_approach(f->p, aileron * 2.3f * agility, 9.0f * dt);
+        f->p = flight_approach(f->p, aileron * 1.45f * agility, 6.0f * dt);
     else
         f->p = flight_approach(f->p,
                                fabsf(bank) < 1.2f ? -bank * 0.7f : 0.0f,
@@ -3750,7 +3750,7 @@ static void enemy_think(Game *g, Enemy *enemy, int index, float dt,
         lead_pursuit(enemy, target, target_v, heading, pitch, &distance);
         *heading += sinf(g->scroll * 0.0021f + enemy->phase) * 0.08f *
                     (1.0f - skill);
-        if (distance < 140.0f + (1.0f - skill) * 80.0f) {
+        if (distance < 190.0f + (1.0f - skill) * 110.0f) {
             enemy->ai_state = AI_BREAK;
             enemy->ai_timer = 2.0f + random_unit(g) * 1.5f;
             enemy->ai_side = (index & 1) ? 1.0f : -1.0f;
@@ -4020,7 +4020,11 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         dz = g->flight_z - enemy->world_z;
         horizontal = sqrtf(dx * dx + dz * dz);
         distance = sqrtf(horizontal * horizontal + dy * dy);
-        if (distance < 18.0f) {
+        if (distance < 18.0f && g->qa_hold) {
+            /* Visual QA keeps the pilot alive: the attacker sheers off. */
+            enemy->ai_state = AI_BREAK;
+            enemy->ai_timer = 2.5f;
+        } else if (distance < 18.0f) {
             /* A failed break-away damages both machines.  The enemy enters
              * the same physical spiral used for gun damage; the player loses
              * control and descends through the flight model until ground
@@ -4704,7 +4708,8 @@ static void draw_story(Game *g)
         journal_text(g, 348, journal_line_y(12), "TOM AT THE CONTROLS", ink);
         journal_text(g, 348, journal_line_y(13), "LEWIS GUN READY", ink);
     }
-    journal_text(g, 348, journal_line_y(14), "ENTER - READ ORDERS", red);
+    typewriter_text(g, 348, 374, "ENTER - READ ORDERS", 7, 11,
+                    PIX_PACK(226, 206, 166));
 }
 
 static void draw_medal(SDL_Surface *s, int x, int y, const Decoration *d)
@@ -5792,11 +5797,17 @@ static void prepare_world_textures(Game *g)
      * melts into the painted horizon instead of meeting it at a hard line. */
     g->world_haze = pix_mix(g->sky_haze, g->ground_haze_tint, 9);
     for (level = 0; level < MIDGROUND_ELEMENT_COUNT; ++level)
-        if (g->midground[level] && !convert_to_screen(g, &g->midground[level]))
-            fprintf(stderr, "Midground element %d not converted\n", level);
+        if (g->midground[level]) {
+            if (!convert_to_screen(g, &g->midground[level]))
+                fprintf(stderr, "Midground element %d not converted\n", level);
+            prepare_magenta_key(g->midground[level]);
+        }
     for (level = 0; level < NEAR_ELEMENT_COUNT; ++level)
-        if (g->near_props[level] && !convert_to_screen(g, &g->near_props[level]))
-            fprintf(stderr, "Near element %d not converted\n", level);
+        if (g->near_props[level]) {
+            if (!convert_to_screen(g, &g->near_props[level]))
+                fprintf(stderr, "Near element %d not converted\n", level);
+            prepare_magenta_key(g->near_props[level]);
+        }
 }
 
 static void free_world_textures(Game *g)
@@ -6036,6 +6047,7 @@ static void draw_world_sprite(Game *g, SDL_Surface *sprite, Projected3D foot,
     float ox, oy, min_x, max_x, min_y, max_y;
     float cxs[4], cys[4];
     uint32_t key = 0;
+    pix_t magenta;
     int has_key, x, y, x0, x1, y0, y1, i, sw, sh;
     if (!sprite || height < 3.0f || height > 700.0f) return;
     sw = sprite->w; sh = sprite->h;
@@ -6064,6 +6076,7 @@ static void draw_world_sprite(Game *g, SDL_Surface *sprite, Projected3D foot,
     det = rx * uy - ry * ux;
     if (fabsf(det) < 1e-3f) return;
     has_key = SDL_GetColorKey(sprite, &key) == 0;
+    magenta = PIX_PACK(255, 0, 255);
     if (fog > 32) fog = 32;
     {
         /* a runs 0..1 across the sprite, b 0..1 from foot to top. */
@@ -6084,7 +6097,9 @@ static void draw_world_sprite(Game *g, SDL_Surface *sprite, Projected3D foot,
                 pix_t c;
                 if (sa < 0 || sb < 0 || tx >= sw || ty >= sh) continue;
                 c = PIX_ROW(sprite, ty)[tx];
-                if (has_key && c == (pix_t)key) continue;
+                /* Converted sprites keep pure magenta as their clear
+                 * colour; test it directly as well as the surface key. */
+                if (c == magenta || (has_key && c == (pix_t)key)) continue;
                 if (fog > 0) c = pix_mix(c, g->world_haze, fog);
                 row[x] = c;
             }
