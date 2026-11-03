@@ -164,6 +164,9 @@ Current controls:
   crash states are represented in the SDL audio callback.
 - The Washington Post cue has a recorded licence/provenance chain and its first
   two seconds were removed for a cleaner start.
+- The officers' mess/mission-complete recording is de-clicked offline and its
+  runtime loop crossfades the final 186 ms into the opening instead of wrapping
+  at a discontinuity.
 
 ## Known problems and incomplete work
 
@@ -224,8 +227,9 @@ These are not optional polish if the game is to become an RC.
 
 ### Audio and licensing
 
-- Re-test for the recurring tick previously heard in music/game audio. It has
-  not received a final signed-off listening test on the real instance.
+- Re-test for the recurring tick previously heard in music/game audio. The
+  largest embedded impulses and the loop discontinuity have been removed, but
+  this has not received a final signed-off listening test on the real instance.
 - Mission-complete music still needs a better period-appropriate cue and a
   selection matched to drama.
 - `colonel-bogey-gramophone.wav` is used by the build, but its exact recording

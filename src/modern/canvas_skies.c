@@ -1038,8 +1038,30 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             if (a->music_pos + 4 > a->music_len) a->music_pos = 0;
         } else if (a->music_mood == MUSIC_MESS) {
             if (a->mess_data && a->mess_len >= 4) {
+                uint32_t total_frames = a->mess_len / 4;
+                uint32_t frame = a->mess_pos / 4;
+                uint32_t fade_frames = total_frames > 8192 ?
+                                       2048 : total_frames / 4;
                 int16_t *music = (int16_t *)(a->mess_data + a->mess_pos);
-                sample = ((float)music[0] + (float)music[1]) / 65536.0f * 0.52f;
+                float music_sample =
+                    ((float)music[0] + (float)music[1]) / 65536.0f;
+                /* The source finishes close to silence but not at the same
+                 * waveform phase as its opening.  Crossfade the final 186 ms
+                 * into the beginning so a long debrief cannot expose a click
+                 * at the loop boundary. */
+                if (fade_frames > 0 && frame >= total_frames - fade_frames) {
+                    uint32_t intro_frame =
+                        frame - (total_frames - fade_frames);
+                    int16_t *intro =
+                        (int16_t *)(a->mess_data + intro_frame * 4);
+                    float intro_sample =
+                        ((float)intro[0] + (float)intro[1]) / 65536.0f;
+                    float crossfade =
+                        (float)intro_frame / (float)fade_frames;
+                    music_sample = music_sample * (1.0f - crossfade) +
+                                   intro_sample * crossfade;
+                }
+                sample = music_sample * 0.52f;
                 a->mess_pos += 4;
                 if (a->mess_pos + 4 > a->mess_len) a->mess_pos = 0;
             } else {
