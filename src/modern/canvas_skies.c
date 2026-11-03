@@ -150,6 +150,9 @@
 #ifndef CANVAS_MESS_WAV
 #define CANVAS_MESS_WAV "assets/canvas-skies/colonel-bogey-gramophone.wav"
 #endif
+#ifndef CANVAS_SAVE_PATH
+#define CANVAS_SAVE_PATH "PROGDIR:CanvasSkies.save"
+#endif
 
 #define SCREEN_W 640
 #define SCREEN_H 400
@@ -400,6 +403,10 @@ typedef struct {
     int chapter;
     int mission;
     int wingman_health[3];
+    int has_save;
+    int saved_chapter;
+    int saved_mission;
+    int saved_wingman_health[3];
     uint32_t scene_started;
     float player_x;
     float player_y;
@@ -455,6 +462,58 @@ static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
 static int is_perspective_mode(MissionMode mode)
 {
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
+}
+
+static int load_campaign_save(Game *g)
+{
+    FILE *file = fopen(CANVAS_SAVE_PATH, "r");
+    char magic[24];
+    int version;
+    int chapter, mission;
+    int wingman0, wingman1, wingman2;
+    if (!file) return 0;
+    if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
+               &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
+        strcmp(magic, "CANVAS_SKIES_SAVE") != 0 || version != 1 ||
+        chapter < 0 || chapter >= CHAPTER_COUNT ||
+        mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
+        wingman0 < 0 || wingman0 > 100 ||
+        wingman1 < 0 || wingman1 > 100 ||
+        wingman2 < 0 || wingman2 > 100) {
+        fclose(file);
+        return 0;
+    }
+    fclose(file);
+    g->saved_chapter = chapter;
+    g->saved_mission = mission;
+    g->saved_wingman_health[0] = wingman0;
+    g->saved_wingman_health[1] = wingman1;
+    g->saved_wingman_health[2] = wingman2;
+    return 1;
+}
+
+static int save_campaign(Game *g)
+{
+    FILE *file = fopen(CANVAS_SAVE_PATH, "w");
+    int ok;
+    if (!file) return 0;
+    ok = fprintf(file, "CANVAS_SKIES_SAVE 1\n%d %d\n%d %d %d\n",
+                 g->chapter, g->mission,
+                 g->wingman_health[0], g->wingman_health[1],
+                 g->wingman_health[2]) > 0;
+    if (fclose(file) != 0) ok = 0;
+    if (!ok) return 0;
+    g->saved_chapter = g->chapter;
+    g->saved_mission = g->mission;
+    memcpy(g->saved_wingman_health, g->wingman_health,
+           sizeof(g->wingman_health));
+    g->has_save = 1;
+    return 1;
+}
+
+static int campaign_menu_count(const Game *g)
+{
+    return g->has_save ? 7 : 6;
 }
 
 static float gunner_traverse(const Game *g)
@@ -2910,7 +2969,7 @@ static void draw_title(Game *g)
 
 static void draw_campaign_menu(Game *g)
 {
-    static const char *items[6] = {
+    static const char *new_campaign_items[6] = {
         "BEGIN FULL CAMPAIGN - AUGUST 1914",
         "JOIN THE CONFLICT - 1914",
         "JOIN THE CONFLICT - 1915",
@@ -2919,6 +2978,7 @@ static void draw_campaign_menu(Game *g)
         "JOIN THE CONFLICT - 1918"
     };
     SDL_Surface *s = g->screen;
+    int count = campaign_menu_count(g);
     int i;
     draw_title(g);
     blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 5, 7, 10, 150);
@@ -2934,9 +2994,21 @@ static void draw_campaign_menu(Game *g)
                  rgb(s, 239, 215, 155));
     typewriter_text(g, 205, 101, "UP / DOWN  CHOOSE   ENTER  ACCEPT", 7, 11,
                     rgb(s, 191, 170, 125));
-    for (i = 0; i < 6; ++i)
-        draw_victorian_plaque(g, 128, 128 + i * 33, 384, items[i],
+    for (i = 0; i < count; ++i) {
+        const char *label;
+        char continued[64];
+        if (g->has_save && i == 0) {
+            snprintf(continued, sizeof(continued),
+                     "CONTINUE CAMPAIGN - CHAPTER %d / MISSION %d",
+                     g->saved_chapter + 1, g->saved_mission + 1);
+            label = continued;
+        } else {
+            int new_index = i - (g->has_save ? 1 : 0);
+            label = new_campaign_items[new_index];
+        }
+        draw_victorian_plaque(g, 128, 112 + i * 31, 384, label,
                               i == g->menu_selection);
+    }
 }
 
 static void gradient(SDL_Surface *s, uint8_t r0, uint8_t g0, uint8_t b0,
@@ -5060,6 +5132,7 @@ static int game_init(Game *g)
 {
     memset(g, 0, sizeof(*g));
     g->running = 1;
+    g->has_save = load_campaign_save(g);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
         return 0;
@@ -5274,13 +5347,15 @@ static void handle_event(Game *g, SDL_Event *ev)
         break;
     case SDLK_UP:
         if (g->scene == SCENE_MENU) {
-            g->menu_selection = (g->menu_selection + 5) % 6;
+            int count = campaign_menu_count(g);
+            g->menu_selection = (g->menu_selection + count - 1) % count;
             g->redraw_static = 1;
         }
         break;
     case SDLK_DOWN:
         if (g->scene == SCENE_MENU) {
-            g->menu_selection = (g->menu_selection + 1) % 6;
+            g->menu_selection = (g->menu_selection + 1) %
+                                campaign_menu_count(g);
             g->redraw_static = 1;
         }
         break;
@@ -5294,9 +5369,19 @@ static void handle_event(Game *g, SDL_Event *ev)
         else if (g->scene == SCENE_MENU) {
             static const int start_chapter[6] = {0, 0, 1, 2, 3, 5};
             int pilot;
-            g->chapter = start_chapter[g->menu_selection];
-            g->mission = 0;
-            for (pilot = 0; pilot < 3; ++pilot) g->wingman_health[pilot] = 100;
+            if (g->has_save && g->menu_selection == 0) {
+                g->chapter = g->saved_chapter;
+                g->mission = g->saved_mission;
+                memcpy(g->wingman_health, g->saved_wingman_health,
+                       sizeof(g->wingman_health));
+            } else {
+                int new_index = g->menu_selection - (g->has_save ? 1 : 0);
+                g->chapter = start_chapter[new_index];
+                g->mission = 0;
+                for (pilot = 0; pilot < 3; ++pilot)
+                    g->wingman_health[pilot] = 100;
+                save_campaign(g);
+            }
             set_scene(g, SCENE_STORY);
         }
         else if (g->scene == SCENE_STORY) set_scene(g, SCENE_BRIEFING);
@@ -5307,12 +5392,14 @@ static void handle_event(Game *g, SDL_Event *ev)
             if (!g->success) set_scene(g, SCENE_BRIEFING);
             else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
                 ++g->mission;
+                save_campaign(g);
                 set_scene(g, SCENE_STORY);
             } else if (g->chapter + 1 >= CHAPTER_COUNT) {
                 set_scene(g, SCENE_EPILOGUE);
             } else {
                 ++g->chapter;
                 g->mission = 0;
+                save_campaign(g);
                 set_scene(g, SCENE_STORY);
             }
         } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);

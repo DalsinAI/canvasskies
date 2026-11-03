@@ -108,6 +108,10 @@ Current controls:
   1914 to the Armistice.
 - Journal before every mission and a commander-in-chief briefing board.
 - Named allied pilots Eccles, Gridpipe Thyne and Bluebottle.
+- A versioned `PROGDIR:CanvasSkies.save` file records the next chapter,
+  mission and all three wingmen. The officers' menu adds a Continue plaque
+  only when a valid save is present; malformed or out-of-range saves are
+  ignored.
 - Debrief and epilogue scene paths exist.
 - Fonts are provided as separately rendered sizes; field-sign text is centred.
 - Amiga drawer icon and obvious start icon are present in the package folder.
@@ -231,8 +235,8 @@ These are not optional polish if the game is to become an RC.
   final number.
 - Wingman persistence, survival consequences and named-friend story outcomes
   are scaffolded but not yet a proven campaign system.
-- Save/load and campaign continuation need explicit implementation or
-  qualification before RC.
+- Campaign continuation is implemented, but still needs a clean-instance test
+  covering creation, restart, Continue, chapter rollover and a malformed save.
 
 ### Audio and licensing
 
