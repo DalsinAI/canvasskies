@@ -39,6 +39,10 @@ Set `AMIGA_STOVE` if your stove is not at `~/AmiCradle/stoves/os32-gcc16`.
 The binary is `build-canvas-skies/CanvasSkies`. It loads its art and sound
 from `PROGDIR:assets/canvas-skies/`, so keep the `assets` drawer beside it.
 
+`make -f ports/amigaos3/Makefile.canvas package` builds a release drawer in
+`build-canvas-skies/package/` holding the executable, icons, licences and only
+the assets the game loads, without the source PNGs.
+
 ## Controls
 
 | Context | Controls |
@@ -56,6 +60,12 @@ from `PROGDIR:assets/canvas-skies/`, so keep the `assets` drawer beside it.
 - [Implementation status](docs/CANVAS_SKIES_STATUS.md)
 - [Delivery vision](CANVAS_SKIES_DELIVERY_VISION.md)
 - [Historical sources](CANVAS_SKIES_SOURCES.md)
+
+## Licence
+
+Canvas Skies is free software under the
+[GNU General Public License, version 3](LICENSE). Music, font and art
+licences are listed below.
 
 ## Credits
 
