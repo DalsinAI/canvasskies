@@ -80,13 +80,16 @@ CanvasSkies DOGFIGHT
 CanvasSkies GUNNER
 CanvasSkies DEBRIEF
 CanvasSkies DEBRIEF_SUCCESS
+CanvasSkies FINAL_SUCCESS
 ```
 
 `DOGFIGHT` and `GUNNER` deliberately use a durable late-war test and keep the
 sortie open for visual inspection. The normal executable starts at the title
 and campaign menu. `DEBRIEF_SUCCESS` is the direct listening test for the
 mission-complete board and de-clicked officers' mess cue; `DEBRIEF` exercises
-the failure board and mourning cue.
+the failure board and mourning cue. `FINAL_SUCCESS` opens the successful 96th
+mission debrief so Enter can qualify the completed-war-record and Armistice
+path without playing the whole campaign.
 
 Current controls:
 
@@ -118,6 +121,12 @@ Current controls:
   primary is missing or invalid. When running from backup recovery, the next
   save preserves that known-good backup until the replacement primary has
   landed; it never rotates the known-bad primary over the recovery copy.
+- Save version 2 records campaign completion. Finishing mission 96 writes a
+  completed war record; the officers' menu then offers `WAR RECORD COMPLETE -
+  VIEW ARMISTICE` instead of sending Neddy back into the last battle. Version
+  1 saves remain loadable as active campaigns. The direct final-success route
+  has been qualified in the visible Amiga lab through successful debrief,
+  persisted record, Armistice board and completed-record menu.
 - The normal Amiga build has now been restarted in the visible lab with a
   known Chapter 3 / Mission 5 save. It reached the title and displayed
   `CONTINUE CAMPAIGN - CHAPTER 3 / MISSION 5`, proving the persisted values
@@ -251,8 +260,9 @@ These are not optional polish if the game is to become an RC.
   recovered the expected Chapter 3 / Mission 5 menu from `.bak`. Starting a
   fresh campaign from that recovered state then produced a valid Chapter 1 /
   Mission 1 primary, preserved the known-good Chapter 3 / Mission 5 backup and
-  left no `.new` file behind. It still needs tests covering chapter rollover
-  and an externally interrupted replacement.
+  left no `.new` file behind. The final-completion path is also qualified. It
+  still needs tests covering ordinary chapter rollover and an externally
+  interrupted replacement.
 
 ### Audio and licensing
 
@@ -311,9 +321,8 @@ These are not optional polish if the game is to become an RC.
 ## Safe resume point
 
 At this handoff, the build succeeds with `ports/amigaos3/Makefile.canvas`, and
-the visible lab has the latest normal build open in the newly started 1914
-campaign. Its primary save is Chapter 1 / Mission 1 and the recovery backup is
-the qualified Chapter 3 / Mission 5 fixture. The next developer should first
-pull the branch, read these two documents, run the direct `DOGFIGHT` test and
+the visible lab has the latest build open at the officers' menu with `WAR
+RECORD COMPLETE - VIEW ARMISTICE` visible. The next developer should first pull
+the branch, read these two documents, run the direct `DOGFIGHT` test and
 inspect `git status` before touching the three untracked gunner experiments.
 

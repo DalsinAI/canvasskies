@@ -411,6 +411,8 @@ typedef struct {
     int wingman_health[3];
     int has_save;
     int save_loaded_from_backup;
+    int campaign_complete;
+    int saved_campaign_complete;
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
@@ -478,15 +480,23 @@ static int load_campaign_save_path(Game *g, const char *path)
     int version;
     int chapter, mission;
     int wingman0, wingman1, wingman2;
+    int complete = 0;
     if (!file) return 0;
     if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
                &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
-        strcmp(magic, "CANVAS_SKIES_SAVE") != 0 || version != 1 ||
+        strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
+        (version != 1 && version != 2) ||
         chapter < 0 || chapter >= CHAPTER_COUNT ||
         mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
         wingman0 < 0 || wingman0 > 100 ||
         wingman1 < 0 || wingman1 > 100 ||
         wingman2 < 0 || wingman2 > 100) {
+        fclose(file);
+        return 0;
+    }
+    if (version == 2 &&
+        (fscanf(file, "%d", &complete) != 1 ||
+         (complete != 0 && complete != 1))) {
         fclose(file);
         return 0;
     }
@@ -496,6 +506,7 @@ static int load_campaign_save_path(Game *g, const char *path)
     g->saved_wingman_health[0] = wingman0;
     g->saved_wingman_health[1] = wingman1;
     g->saved_wingman_health[2] = wingman2;
+    g->saved_campaign_complete = complete;
     return 1;
 }
 
@@ -521,10 +532,10 @@ static int save_campaign(Game *g)
     int ok;
     int backed_up;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 1\n%d %d\n%d %d %d\n",
+    ok = fprintf(file, "CANVAS_SKIES_SAVE 2\n%d %d\n%d %d %d\n%d\n",
                  g->chapter, g->mission,
                  g->wingman_health[0], g->wingman_health[1],
-                 g->wingman_health[2]) > 0;
+                 g->wingman_health[2], g->campaign_complete) > 0;
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(CANVAS_SAVE_NEW_PATH);
@@ -548,6 +559,7 @@ static int save_campaign(Game *g)
     }
     g->saved_chapter = g->chapter;
     g->saved_mission = g->mission;
+    g->saved_campaign_complete = g->campaign_complete;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
     g->has_save = 1;
@@ -3042,9 +3054,13 @@ static void draw_campaign_menu(Game *g)
         const char *label;
         char continued[64];
         if (g->has_save && i == 0) {
-            snprintf(continued, sizeof(continued),
-                     "CONTINUE CAMPAIGN - CHAPTER %d / MISSION %d",
-                     g->saved_chapter + 1, g->saved_mission + 1);
+            if (g->saved_campaign_complete)
+                snprintf(continued, sizeof(continued),
+                         "WAR RECORD COMPLETE - VIEW ARMISTICE");
+            else
+                snprintf(continued, sizeof(continued),
+                         "CONTINUE CAMPAIGN - CHAPTER %d / MISSION %d",
+                         g->saved_chapter + 1, g->saved_mission + 1);
             label = continued;
         } else {
             int new_index = i - (g->has_save ? 1 : 0);
@@ -5416,12 +5432,18 @@ static void handle_event(Game *g, SDL_Event *ev)
             if (g->has_save && g->menu_selection == 0) {
                 g->chapter = g->saved_chapter;
                 g->mission = g->saved_mission;
+                g->campaign_complete = g->saved_campaign_complete;
                 memcpy(g->wingman_health, g->saved_wingman_health,
                        sizeof(g->wingman_health));
+                if (g->campaign_complete) {
+                    set_scene(g, SCENE_EPILOGUE);
+                    break;
+                }
             } else {
                 int new_index = g->menu_selection - (g->has_save ? 1 : 0);
                 g->chapter = start_chapter[new_index];
                 g->mission = 0;
+                g->campaign_complete = 0;
                 for (pilot = 0; pilot < 3; ++pilot)
                     g->wingman_health[pilot] = 100;
                 save_campaign(g);
@@ -5439,6 +5461,8 @@ static void handle_event(Game *g, SDL_Event *ev)
                 save_campaign(g);
                 set_scene(g, SCENE_STORY);
             } else if (g->chapter + 1 >= CHAPTER_COUNT) {
+                g->campaign_complete = 1;
+                save_campaign(g);
                 set_scene(g, SCENE_EPILOGUE);
             } else {
                 ++g->chapter;
@@ -5498,6 +5522,18 @@ int main(int argc, char **argv)
          * de-clicked officers' mess cue. */
         g.chapter = 2;
         g.mission = 2;
+        reset_sortie(&g);
+        g.success = 1;
+        g.score = current_mission_goal(&g) * 250;
+        set_scene(&g, SCENE_DEBRIEF);
+    } else if (argc > 1 && strcmp(argv[1], "FINAL_SUCCESS") == 0) {
+        /* Direct campaign-completion test.  Enter must save a completed war
+         * record and open the Armistice rather than replaying mission 96. */
+        g.chapter = CHAPTER_COUNT - 1;
+        g.mission = MISSIONS_PER_CHAPTER - 1;
+        g.wingman_health[0] = 100;
+        g.wingman_health[1] = 100;
+        g.wingman_health[2] = 100;
         reset_sortie(&g);
         g.success = 1;
         g.score = current_mission_goal(&g) * 250;
