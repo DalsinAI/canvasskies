@@ -221,6 +221,17 @@ static inline pix_t pix_mix(pix_t a, pix_t b, int t)
 #define MAX_BULLET_HOLES 18
 #define MAX_ROUNDS 96
 #define MAX_SPARKS 160
+#define WORLD_SPAN 16
+#define SKY_SPAN 32
+#define GROUND_METRES_PER_TEXEL 2.0f
+#define GROUND_FOG_NEAR 450.0f
+#define GROUND_FOG_FAR 9500.0f
+#define GROUND_MAX_RANGE 14000.0f
+#define SKY_AZIMUTH_OFFSET 1.572f
+#define SKY_ROWS_PER_RADIAN 330.0f
+#define SUN_AZIMUTH 0.44f
+#define SUN_ELEVATION 0.07f
+#define WORLD_FOCAL 330.0f
 #define AI_ATTACK 0
 #define AI_BREAK 1
 #define AI_EVADE 2
@@ -594,6 +605,7 @@ typedef struct {
 static void flight_state_init(FlightState *f, float heading, float pitch,
                               float bank, float speed, float throttle);
 static void reset_wingmen(Game *g);
+static void show_notice(Game *g, const char *text);
 static float wrap_angle(float angle);
 static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
                                    float east, float down);
@@ -5681,17 +5693,6 @@ static void draw_gunner_bullet_holes(Game *g)
  * through the flight quaternion, so both roll and pitch with the aircraft.
  * Rays are solved exactly every WORLD_SPAN pixels and interpolated between,
  * which keeps divides and arctangents out of the inner loops. */
-#define WORLD_SPAN 16
-#define SKY_SPAN 32
-#define GROUND_METRES_PER_TEXEL 2.0f
-#define GROUND_FOG_NEAR 450.0f
-#define GROUND_FOG_FAR 9500.0f
-#define GROUND_MAX_RANGE 14000.0f
-#define SKY_AZIMUTH_OFFSET 1.572f
-#define SKY_ROWS_PER_RADIAN 330.0f
-#define SUN_AZIMUTH 0.44f
-#define SUN_ELEVATION 0.07f
-#define WORLD_FOCAL 330.0f
 
 static float fast_atan2f(float y, float x)
 {
@@ -6446,7 +6447,7 @@ static void draw_dogfight_particles(Game *g, int foreground)
  * pale under surfaces depending on which side faces the camera, and the
  * national markings sit on the panels as their own faces.  Model axes are
  * metres: x right, y up, z forward. */
-#define MESH_MAX_VERTS 96
+#define MESH_MAX_VERTS 128
 #define MESH_MAX_FACES 72
 #define FACE_TWO_SIDED 1
 #define FACE_OUTLINE 2
@@ -6498,6 +6499,7 @@ static const AircraftLivery allied_livery = {
 
 static int mesh_vertex(AircraftMesh *m, float x, float y, float z)
 {
+    if (m->verts >= MESH_MAX_VERTS) return MESH_MAX_VERTS - 1;
     m->v[m->verts][0] = x;
     m->v[m->verts][1] = y;
     m->v[m->verts][2] = z;
@@ -6507,8 +6509,10 @@ static int mesh_vertex(AircraftMesh *m, float x, float y, float z)
 static void mesh_face(AircraftMesh *m, int count, const int *index,
                       int material, int under, int flags, float bias)
 {
-    MeshFace *f = &m->f[m->faces++];
+    MeshFace *f;
     int i;
+    if (m->faces >= MESH_MAX_FACES) return;
+    f = &m->f[m->faces++];
     f->count = count;
     for (i = 0; i < count; ++i) f->index[i] = (unsigned char)index[i];
     f->material = (unsigned char)material;
