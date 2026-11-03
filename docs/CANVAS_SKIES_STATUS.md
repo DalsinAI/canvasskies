@@ -167,6 +167,10 @@ Current controls:
   elevation/traverse frames. The earlier separable X/Y approximation was
   wrong at oblique angles; a live burst now begins at the painted barrel and
   passes through the independent crosshair.
+- Player and enemy tracers are now short exposed rounds rather than long lines
+  back toward the weapon. Lewis cadence is 110 ms per round and the fixed
+  forward gun 130 ms; projectile velocity, collision and hit timing are
+  unchanged.
 - Keyed surfaces normalise dark antialiased purple fringe to the magenta key at
   load time. The conspicuous purple outline around the Lewis sight and Scarff
   rail is gone in the visible Amiga test; the measured launch-to-window time

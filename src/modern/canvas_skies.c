@@ -2311,7 +2311,7 @@ static void update_perspective_sortie(Game *g, float dt,
     int aim_y;
     int firing = keys[SDL_SCANCODE_SPACE] && chapters[g->chapter].armed &&
                  g->ammunition > 0 &&
-                 now - g->last_shot >= (gunner ? 95u : 115u);
+                 now - g->last_shot >= (gunner ? 110u : 130u);
     if (gunner) {
         float aim_elevation;
         float follow;
@@ -4823,8 +4823,11 @@ static void draw_dogfight_3d_sortie(Game *g)
         Bullet *b = &g->bullets[i];
         uint32_t tracer = b->enemy ? rgb(s, 255, 113, 57) :
                                      rgb(s, 255, 239, 157);
-        int tail_x = (int)b->x - (int)(b->vx * (b->enemy ? 0.045f : 0.095f));
-        int tail_y = (int)b->y - (int)(b->vy * (b->enemy ? 0.045f : 0.095f));
+        /* A tracer is a short bright round, not a continuous beam back to its
+         * weapon.  Projectile velocity and collision remain unchanged; only
+         * the exposed luminous length is shortened. */
+        int tail_x = (int)b->x - (int)(b->vx * (b->enemy ? 0.028f : 0.024f));
+        int tail_y = (int)b->y - (int)(b->vy * (b->enemy ? 0.028f : 0.024f));
         line(s, (int)b->x, (int)b->y, tail_x, tail_y, tracer);
         if (!b->enemy)
             line(s, (int)b->x, (int)b->y + 1, tail_x, tail_y + 1, tracer);
