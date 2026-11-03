@@ -128,6 +128,8 @@ Current controls:
 ### Rear-gunner mode
 
 - Rear cockpit, tail/airframe view, separate crosshair and movable gun atlas.
+- Journal and briefing now consistently describe the intended single Lewis gun;
+  the abandoned twin-gun presentation is no longer part of the active UI.
 - Aim range, tail obstruction and muzzle-origin calculations exist.
 - Attackers approach in depth rather than being a static row of sprites.
 - Bullet holes, player damage, ammunition and enemy damage exist.
@@ -184,9 +186,6 @@ These are not optional polish if the game is to become an RC.
 
 ### Rear gunner
 
-- The intended design is one British Lewis gun on a moving rail, but some
-  briefing text and legacy art still refer to twin Lewis guns. Make code, art
-  and text agree on the single-gun design.
 - The active atlas does not yet convincingly redraw the gun for every traverse
   and elevation angle. It can look bent or detached from its mounting.
 - Verify that the muzzle is correct in every frame, tracers begin at it, the

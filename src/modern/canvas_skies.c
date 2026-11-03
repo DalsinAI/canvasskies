@@ -2965,7 +2965,7 @@ static void draw_story(Game *g)
     } else if (mission->mode == MISSION_GUNNER_3D) {
         journal_text(g, 348, journal_line_y(11), "REAR COCKPIT:", red);
         journal_text(g, 348, journal_line_y(12), "TOM AT THE CONTROLS", ink);
-        journal_text(g, 348, journal_line_y(13), "LEWIS GUNS READY", ink);
+        journal_text(g, 348, journal_line_y(13), "LEWIS GUN READY", ink);
     }
     journal_text(g, 348, journal_line_y(14), "ENTER - READ ORDERS", red);
 }
@@ -2993,7 +2993,7 @@ static void draw_briefing(Game *g)
         order2 = "BRING YOUR WINGMEN HOME.";
     } else if (mission->mode == MISSION_GUNNER_3D) {
         order0 = "TOM WILL HOLD THE RECONNAISSANCE COURSE.";
-        order1 = "DEFEND THE REAR QUARTER WITH THE LEWIS GUNS.";
+        order1 = "DEFEND THE REAR QUARTER WITH THE LEWIS GUN.";
         order2 = "KEEP THE TWO-SEATER IN THE AIR.";
     } else {
         order0 = chapter->orders[0];
@@ -3021,7 +3021,7 @@ static void draw_briefing(Game *g)
     if (chapter->armed) {
         typewriter_text(g, 73, 237,
                         mission->mode == MISSION_GUNNER_3D ?
-                        "SPACE       TWIN LEWIS GUNS" :
+                        "SPACE       LEWIS GUN" :
                         "SPACE       MACHINE GUN", 7, 11, ink);
         typewriter_text(g, 73, 253,
                         is_perspective_mode(mission->mode) ?
