@@ -120,3 +120,26 @@ turning every noun into period slang.
 - Do not erase routine, failed sorties, weather cancellations and repairs; they
   are what make the exceptional missions credible.
 
+
+## The morning paper
+
+Before many sorties the player reads a front page of *The Western Courier*, an
+invented paper, and after each debrief a short "late edition" clipping. Every
+cutting is collected in the Book of Press Cuttings on the officers' menu.
+
+- Every headline and line of copy is written for this game. The events are real
+  and dated; the wording is not taken from any newspaper of the period.
+- The paper is deliberately cheerful and vague, as the censored press was. The
+  diary on the next page tells the pilot's version. The first day of the Somme
+  is the clearest example: "THE DAY GOES WELL FOR ENGLAND."
+- The Christmas truce of 1914 has its own sortie, "THE SILENT FRONT". Nobody
+  fires, men of both armies gather in no man's land, and the mess sends a plum
+  pudding to the enemy aerodrome. A British airman's pudding drop over the
+  German field at Lille was reported in newspapers at the end of December 1914.
+- Two sorties bring the raids home: a night Home Defence patrol against an
+  airship over Essex (September 1916, after the Cuffley airship fell) and a
+  daylight interception of the Gotha bombers over the Thames (June 1917).
+- From 1 April 1918 the pilot belongs to the Royal Air Force rather than the
+  Royal Flying Corps, and the summer influenza of 1918 keeps one wingman in bed.
+- The epilogue records only the fact that Wilfred Owen's parents received the
+  telegram of his death as the Armistice bells rang. None of his poetry is used.
