@@ -171,6 +171,46 @@
 
 #define SCREEN_W 640
 #define SCREEN_H 400
+
+/* The game draws into a hi-res 16-bit (RGB565) buffer by default.  It halves
+ * the memory traffic of a 32-bit buffer, which matters most on a 68060 or a
+ * PiStorm, and matches a 16-bit RTG screen without conversion.  Build with
+ * -DCANVAS_SCREEN_BITS=32 for the previous ARGB8888 buffer. */
+#ifndef CANVAS_SCREEN_BITS
+#define CANVAS_SCREEN_BITS 16
+#endif
+#if CANVAS_SCREEN_BITS == 16
+typedef uint16_t pix_t;
+#define CANVAS_SCREEN_FORMAT SDL_PIXELFORMAT_RGB565
+#define PIX_PACK(r, g, b) ((pix_t)((((unsigned)(r) & 0xf8u) << 8) | \
+                                   (((unsigned)(g) & 0xfcu) << 3) | \
+                                   ((unsigned)(b) >> 3)))
+#else
+typedef uint32_t pix_t;
+#define CANVAS_SCREEN_FORMAT SDL_PIXELFORMAT_ARGB8888
+#define PIX_PACK(r, g, b) ((pix_t)(0xff000000u | ((uint32_t)(r) << 16) | \
+                                   ((uint32_t)(g) << 8) | (uint32_t)(b)))
+#endif
+#define PIX_ROW(s, y) ((pix_t *)((uint8_t *)(s)->pixels + (y) * (s)->pitch))
+
+/* Mix two screen pixels; t runs 0 (all a) to 32 (all b).  The channels are
+ * spread apart in one register so a single multiply blends all three. */
+static inline pix_t pix_mix(pix_t a, pix_t b, int t)
+{
+#if CANVAS_SCREEN_BITS == 16
+    uint32_t x = ((uint32_t)a | ((uint32_t)a << 16)) & 0x07e0f81fu;
+    uint32_t y = ((uint32_t)b | ((uint32_t)b << 16)) & 0x07e0f81fu;
+    uint32_t r = ((x * (uint32_t)(32 - t) + y * (uint32_t)t) >> 5) &
+                 0x07e0f81fu;
+    return (pix_t)(r | (r >> 16));
+#else
+    uint32_t rb = (((a & 0xff00ffu) * (uint32_t)(32 - t) +
+                    (b & 0xff00ffu) * (uint32_t)t) >> 5) & 0xff00ffu;
+    uint32_t gg = (((a & 0x00ff00u) * (uint32_t)(32 - t) +
+                    (b & 0x00ff00u) * (uint32_t)t) >> 5) & 0x00ff00u;
+    return (pix_t)(0xff000000u | rb | gg);
+#endif
+}
 #define ART_H 360
 #define GAMEPLAY_Y_OFFSET (SCREEN_H - ART_H)
 #define MAX_BULLETS 80
@@ -181,6 +221,7 @@
 #define MAX_BULLET_HOLES 18
 #define PLAYER_DURABILITY_MULTIPLIER 8
 #define MIDGROUND_ELEMENT_COUNT 6
+#define GROUND_MIPS 6
 #define NEAR_ELEMENT_COUNT 6
 #define SKY_PARALLAX 0.008f
 #define HILLS_PARALLAX 0.055f
@@ -413,6 +454,20 @@ typedef struct {
     SDL_Surface *font_journal_8x12;
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
+    SDL_Surface *cockpit_composite;
+    pix_t *ground_mip[GROUND_MIPS];
+    int ground_mips;
+    pix_t ground_haze_tint;
+    pix_t sky_top;
+    pix_t sky_haze;
+    pix_t world_haze;
+    int half_res_world;
+    int realistic_flight;
+    char notice[48];
+    uint32_t notice_until;
+    float shake;
+    float gun_recoil;
+    SDL_Joystick *joystick;
     AudioState audio;
     Scene scene;
     int running;
@@ -788,22 +843,28 @@ static void draw_element_layer(Game *g, SDL_Surface **elements, int count,
     }
 }
 
-/* Direct 32-bit pixel packing.  Every surface the renderer touches per
- * pixel is converted to the screen's 32-bit format at load, so the common
- * case avoids an SDL_GetRGB/SDL_MapRGB call for each pixel. */
+/* Direct pixel packing.  Every surface the renderer touches per pixel is
+ * converted to the screen's format at load, so the common case avoids an
+ * SDL_GetRGB/SDL_MapRGB call for each pixel. */
 static int fast_format(const SDL_PixelFormat *f)
 {
-    return f->BytesPerPixel == 4 && f->Rloss == 0 && f->Gloss == 0 &&
-           f->Bloss == 0 && !f->palette;
+    return f->format == CANVAS_SCREEN_FORMAT;
 }
 
 static void unpack_rgb(const SDL_PixelFormat *f, uint32_t p,
                        uint8_t *r, uint8_t *g, uint8_t *b)
 {
     if (fast_format(f)) {
-        *r = (uint8_t)((p & f->Rmask) >> f->Rshift);
-        *g = (uint8_t)((p & f->Gmask) >> f->Gshift);
-        *b = (uint8_t)((p & f->Bmask) >> f->Bshift);
+#if CANVAS_SCREEN_BITS == 16
+        unsigned r5 = (p >> 11) & 31u, g6 = (p >> 5) & 63u, b5 = p & 31u;
+        *r = (uint8_t)((r5 << 3) | (r5 >> 2));
+        *g = (uint8_t)((g6 << 2) | (g6 >> 4));
+        *b = (uint8_t)((b5 << 3) | (b5 >> 2));
+#else
+        *r = (uint8_t)(p >> 16);
+        *g = (uint8_t)(p >> 8);
+        *b = (uint8_t)p;
+#endif
     } else {
         SDL_GetRGB(p, f, r, g, b);
     }
@@ -813,8 +874,7 @@ static uint32_t pack_rgb(const SDL_PixelFormat *f, uint8_t r, uint8_t g,
                          uint8_t b)
 {
     if (fast_format(f))
-        return ((uint32_t)r << f->Rshift) | ((uint32_t)g << f->Gshift) |
-               ((uint32_t)b << f->Bshift) | f->Amask;
+        return PIX_PACK(r, g, b);
     return SDL_MapRGB(f, r, g, b);
 }
 
@@ -871,7 +931,7 @@ static void pixel(SDL_Surface *s, int x, int y, uint32_t c)
 {
     if (x < 0 || y < 0 || x >= s->w || y >= s->h)
         return;
-    ((uint32_t *)((uint8_t *)s->pixels + y * s->pitch))[x] = c;
+    PIX_ROW(s, y)[x] = (pix_t)c;
 }
 
 static void line(SDL_Surface *s, int x0, int y0, int x1, int y1, uint32_t c)
@@ -891,34 +951,38 @@ static void line(SDL_Surface *s, int x0, int y0, int x1, int y1, uint32_t c)
     }
 }
 
-static int edge2d(int ax, int ay, int bx, int by, int px, int py)
-{
-    return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
-}
-
+/* Scanline triangle fill: sort the corners by height, walk the long edge
+ * against the two short ones and fill whole spans.  The old bounding-box
+ * test evaluated three edge functions for every pixel in the box. */
 static void fill_triangle(SDL_Surface *s, int x0, int y0, int x1, int y1,
                           int x2, int y2, uint32_t colour)
 {
-    int min_x = x0 < x1 ? (x0 < x2 ? x0 : x2) : (x1 < x2 ? x1 : x2);
-    int max_x = x0 > x1 ? (x0 > x2 ? x0 : x2) : (x1 > x2 ? x1 : x2);
-    int min_y = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
-    int max_y = y0 > y1 ? (y0 > y2 ? y0 : y2) : (y1 > y2 ? y1 : y2);
-    int area = edge2d(x0, y0, x1, y1, x2, y2);
-    int x, y;
-    if (area == 0) return;
-    if (min_x < 0) min_x = 0;
-    if (max_x >= s->w) max_x = s->w - 1;
-    if (min_y < 0) min_y = 0;
-    if (max_y >= s->h) max_y = s->h - 1;
-    for (y = min_y; y <= max_y; ++y) {
-        for (x = min_x; x <= max_x; ++x) {
-            int w0 = edge2d(x1, y1, x2, y2, x, y);
-            int w1 = edge2d(x2, y2, x0, y0, x, y);
-            int w2 = edge2d(x0, y0, x1, y1, x, y);
-            if ((area > 0 && w0 >= 0 && w1 >= 0 && w2 >= 0) ||
-                (area < 0 && w0 <= 0 && w1 <= 0 && w2 <= 0))
-                pixel(s, x, y, colour);
-        }
+    pix_t c = (pix_t)colour;
+    float long_step, top_step, bottom_step;
+    int y, y_start, y_end, t;
+    if (y1 < y0) { t = y0; y0 = y1; y1 = t; t = x0; x0 = x1; x1 = t; }
+    if (y2 < y0) { t = y0; y0 = y2; y2 = t; t = x0; x0 = x2; x2 = t; }
+    if (y2 < y1) { t = y1; y1 = y2; y2 = t; t = x1; x1 = x2; x2 = t; }
+    if (y2 == y0 || y2 < 0 || y0 >= s->h) return;
+    if ((x0 < 0 && x1 < 0 && x2 < 0) ||
+        (x0 >= s->w && x1 >= s->w && x2 >= s->w)) return;
+    long_step = (float)(x2 - x0) / (float)(y2 - y0);
+    top_step = y1 != y0 ? (float)(x1 - x0) / (float)(y1 - y0) : 0.0f;
+    bottom_step = y2 != y1 ? (float)(x2 - x1) / (float)(y2 - y1) : 0.0f;
+    y_start = y0 < 0 ? 0 : y0;
+    y_end = y2 >= s->h ? s->h - 1 : y2;
+    for (y = y_start; y <= y_end; ++y) {
+        float xa = (float)x0 + long_step * (float)(y - y0);
+        float xb = y < y1 ? (float)x0 + top_step * (float)(y - y0)
+                          : (float)x1 + bottom_step * (float)(y - y1);
+        int left, right;
+        pix_t *row;
+        if (xa > xb) { float tmp = xa; xa = xb; xb = tmp; }
+        if (xb < 0.0f || xa >= (float)s->w) continue;
+        left = xa < 0.0f ? 0 : (int)(xa + 0.5f);
+        right = xb >= (float)(s->w - 1) ? s->w - 1 : (int)(xb + 0.5f);
+        row = PIX_ROW(s, y);
+        while (left <= right) row[left++] = c;
     }
 }
 
@@ -951,9 +1015,9 @@ static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
     int add_r = r * alpha, add_g = g * alpha, add_b = b * alpha;
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
     for (py = y; py < y + h && py < s->h; ++py) {
-        uint32_t *row;
+        pix_t *row;
         if (py < 0) continue;
-        row = (uint32_t *)((uint8_t *)s->pixels + py * s->pitch);
+        row = PIX_ROW(s, py);
         for (px = x; px < x + w && px < s->w; ++px) {
             uint8_t or_, og, ob;
             uint32_t p;
@@ -963,7 +1027,7 @@ static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
             or_ = (uint8_t)((or_ * keep + add_r) / 255);
             og = (uint8_t)((og * keep + add_g) / 255);
             ob = (uint8_t)((ob * keep + add_b) / 255);
-            row[px] = pack_rgb(s->format, or_, og, ob);
+            row[px] = (pix_t)pack_rgb(s->format, or_, og, ob);
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
@@ -977,9 +1041,9 @@ static void blend_circle(SDL_Surface *s, int cx, int cy, int radius,
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
     for (py = -radius; py <= radius; ++py) {
         int yy = cy + py;
-        uint32_t *row;
+        pix_t *row;
         if (yy < 0 || yy >= s->h) continue;
-        row = (uint32_t *)((uint8_t *)s->pixels + yy * s->pitch);
+        row = PIX_ROW(s, yy);
         for (px = -radius; px <= radius; ++px) {
             int xx = cx + px;
             int aa;
@@ -994,7 +1058,7 @@ static void blend_circle(SDL_Surface *s, int cx, int cy, int radius,
             or_ = (uint8_t)((or_ * (255 - aa) + r * aa) / 255);
             og = (uint8_t)((og * (255 - aa) + g * aa) / 255);
             ob = (uint8_t)((ob * (255 - aa) + b * aa) / 255);
-            row[xx] = pack_rgb(s->format, or_, og, ob);
+            row[xx] = (pix_t)pack_rgb(s->format, or_, og, ob);
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
@@ -1854,9 +1918,10 @@ static void reset_sortie(Game *g)
         /* Staggered WWI engagements, not a modern fighter formation.  The
          * first machine approaches nearly head-on, the next crosses our
          * nose, and the later aircraft enter from wider offsets. */
-        g->enemies[i].world_x = (float)((i & 1) ? 145 + i * 72 : -85 - i * 88);
+        g->enemies[i].world_x = (float)((i & 1) ? 145 + i * 72 : -85 - i * 88) *
+                                0.6f;
         g->enemies[i].world_y = 600.0f + (float)((i * 57) % 150);
-        g->enemies[i].world_z = 820.0f + (float)i * 470.0f;
+        g->enemies[i].world_z = 560.0f + (float)i * 320.0f;
         if (i == 0)
             g->enemies[i].heading = 2.92f;
         else if (i == 1)
@@ -2127,22 +2192,6 @@ static Projected3D project_world_point(const Game *g, Vec3 point)
     return out;
 }
 
-static Vec3 enemy_model_point(const Enemy *enemy, float x, float y, float z)
-{
-    Vec3 out;
-    float cr = cosf(enemy->bank), sr = sinf(enemy->bank);
-    float cp = cosf(enemy->pitch), sp = sinf(enemy->pitch);
-    float ch = cosf(enemy->heading), sh = sinf(enemy->heading);
-    float rolled_x = cr * x - sr * y;
-    float rolled_y = sr * x + cr * y;
-    float pitched_y = cp * rolled_y - sp * z;
-    float pitched_z = sp * rolled_y + cp * z;
-    out.x = enemy->world_x + ch * rolled_x + sh * pitched_z;
-    out.y = enemy->world_y + pitched_y;
-    out.z = enemy->world_z - sh * rolled_x + ch * pitched_z;
-    return out;
-}
-
 static float flight_clamp(float value, float low, float high)
 {
     if (value < low) return low;
@@ -2373,6 +2422,117 @@ static void flight_outputs(const FlightState *f, float *heading, float *pitch,
     *vz = velocity_ned.x;
     *speed_mph = f->speed * 2.23694f;
 }
+
+/* ---- Arcade flight ------------------------------------------------------
+ *
+ * The default handling flies like an arcade biplane: the stick rolls and
+ * pitches the aircraft, turns are coordinated for you, speed comes from the
+ * throttle and is traded with height in climbs and dives, and a slow
+ * aircraft drops its nose.  F8 switches to the full six-axis model. */
+static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
+                               float aileron, float elevator)
+{
+    float bank, pitch, heading, speed = f->u, turn;
+    float target_speed, accel;
+    Vec3 velocity;
+    float dw, dx, dy, dz, norm;
+    flight_euler(f, &bank, &pitch, &heading);
+    /* Roll: proportional, with a gentle self-levelling when centred. */
+    if (fabsf(aileron) > 0.05f)
+        f->p = flight_approach(f->p, aileron * 2.3f, 9.0f * dt);
+    else
+        f->p = flight_approach(f->p,
+                               fabsf(bank) < 1.2f ? -bank * 0.7f : 0.0f,
+                               6.0f * dt);
+    /* Pitch authority fades as the aircraft slows. */
+    f->q = flight_approach(f->q, elevator * 1.05f *
+                           flight_clamp(speed / 44.0f, 0.3f, 1.15f),
+                           5.0f * dt);
+    /* Coordinated turn: bank turns the nose round the horizon. */
+    turn = 9.81f * sinf(bank) / (speed > 15.0f ? speed : 15.0f);
+    f->r = turn * cosf(bank) * cosf(pitch);
+    {
+        float q = f->q + turn * sinf(bank) * cosf(pitch);
+        float stall_drop = speed < 27.0f ? (27.0f - speed) * 0.06f : 0.0f;
+        /* A slow aircraft's nose falls toward the ground, whichever way up. */
+        q -= stall_drop * cosf(bank);
+        f->r += stall_drop * sinf(bank);
+        dw = -0.5f * (f->qx * f->p + f->qy * q + f->qz * f->r);
+        dx =  0.5f * (f->qw * f->p + f->qy * f->r - f->qz * q);
+        dy =  0.5f * (f->qw * q + f->qz * f->p - f->qx * f->r);
+        dz =  0.5f * (f->qw * f->r + f->qx * q - f->qy * f->p);
+    }
+    f->qw += dw * dt; f->qx += dx * dt; f->qy += dy * dt; f->qz += dz * dt;
+    norm = sqrtf(f->qw * f->qw + f->qx * f->qx + f->qy * f->qy + f->qz * f->qz);
+    if (norm > 0.0001f) {
+        f->qw /= norm; f->qx /= norm; f->qy /= norm; f->qz /= norm;
+    }
+    /* Speed: throttle sets the level speed, gravity trades it with height. */
+    target_speed = 30.0f + f->throttle * 30.0f;
+    accel = (target_speed - speed) * 0.32f - 9.81f * sinf(pitch);
+    speed += accel * dt;
+    if (speed < 14.0f) speed = 14.0f;
+    if (speed > 82.0f) speed = 82.0f;
+    f->u = speed; f->v = 0.0f; f->w = 0.0f;
+    velocity = flight_rotate_to_ned(f, speed, 0.0f, 0.0f);
+    position->x += velocity.y * dt;
+    position->y -= velocity.z * dt;
+    position->z += velocity.x * dt;
+    f->speed = speed;
+    f->alpha = 0.0f;
+    f->beta = 0.0f;
+    f->stalled = speed < 24.0f;
+}
+
+static void arcade_flight_advance(FlightState *f, Vec3 *position,
+                                  float frame_dt, float aileron,
+                                  float elevator)
+{
+    const float step = 0.02f;
+    int iterations = 0;
+    if (frame_dt > 0.10f) frame_dt = 0.10f;
+    f->accumulator += frame_dt;
+    while (f->accumulator >= step && iterations < 5) {
+        arcade_flight_step(f, position, step, aileron, elevator);
+        f->accumulator -= step;
+        ++iterations;
+    }
+}
+
+/* ---- Joystick -----------------------------------------------------------
+ *
+ * The first joystick or pad flies the aircraft: the stick maps onto the
+ * arrow keys and the first button onto the guns (and Enter in menus). */
+static void open_joystick(Game *g)
+{
+    if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) != 0) return;
+    if (SDL_NumJoysticks() > 0) g->joystick = SDL_JoystickOpen(0);
+}
+
+static void merge_joystick_keys(Game *g, uint8_t *keys)
+{
+    int x, y;
+    if (!g->joystick) return;
+    x = SDL_JoystickGetAxis(g->joystick, 0);
+    y = SDL_JoystickGetAxis(g->joystick, 1);
+    if (x < -9000) keys[SDL_SCANCODE_LEFT] = 1;
+    if (x > 9000) keys[SDL_SCANCODE_RIGHT] = 1;
+    if (y < -9000) keys[SDL_SCANCODE_UP] = 1;
+    if (y > 9000) keys[SDL_SCANCODE_DOWN] = 1;
+    if (SDL_JoystickNumHats(g->joystick) > 0) {
+        uint8_t hat = SDL_JoystickGetHat(g->joystick, 0);
+        if (hat & SDL_HAT_LEFT) keys[SDL_SCANCODE_LEFT] = 1;
+        if (hat & SDL_HAT_RIGHT) keys[SDL_SCANCODE_RIGHT] = 1;
+        if (hat & SDL_HAT_UP) keys[SDL_SCANCODE_UP] = 1;
+        if (hat & SDL_HAT_DOWN) keys[SDL_SCANCODE_DOWN] = 1;
+    }
+    if (SDL_JoystickGetButton(g->joystick, 0)) keys[SDL_SCANCODE_SPACE] = 1;
+    if (SDL_JoystickNumButtons(g->joystick) > 1 &&
+        SDL_JoystickGetButton(g->joystick, 1)) keys[SDL_SCANCODE_X] = 1;
+    if (SDL_JoystickNumButtons(g->joystick) > 2 &&
+        SDL_JoystickGetButton(g->joystick, 2)) keys[SDL_SCANCODE_Z] = 1;
+}
+
 
 static float enemy_depth_3d(const Game *g, const Enemy *enemy, int index)
 {
@@ -2874,8 +3034,14 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     position.x = g->flight_x;
     position.y = g->flight_y;
     position.z = g->flight_z;
-    ww1_flight_advance(&g->flight, &position, dt,
-                       aileron_command, elevator_command);
+    if (g->realistic_flight)
+        ww1_flight_advance(&g->flight, &position, dt,
+                           aileron_command, elevator_command);
+    else
+        arcade_flight_advance(&g->flight, &position, dt,
+                              aileron_command, elevator_command);
+    g->gun_recoil = flight_approach(g->gun_recoil, 0.0f, dt * 9.0f);
+    g->shake = flight_approach(g->shake, 0.0f, dt * 2.6f);
     if (g->flight_doomed) {
         float doomed_age = (float)(now - g->flight_doomed_started) / 1000.0f;
         float sink = 35.0f + doomed_age * 20.0f;
@@ -2918,6 +3084,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = 1500;
+        g->gun_recoil = 1.0f;
         launch_dogfight_tracer(g, 292.0f, 231.0f,
                                320.0f, 210.0f, 300.0f, 0);
         launch_dogfight_tracer(g, 350.0f, 231.0f,
@@ -2933,9 +3100,9 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                 g->enemies[i].world_z});
             int radius;
             if (!p.visible) continue;
-            radius = (int)(1300.0f / p.depth);
-            if (radius < 7) radius = 7;
-            if (radius > 48) radius = 48;
+            radius = (int)(650.0f / p.depth);
+            if (radius < 5) radius = 5;
+            if (radius > 40) radius = 40;
             if (abs(p.x - 320) <= radius && abs(p.y - 218) <= radius) {
                 --g->enemies[i].hp;
                 g->audio.hit_player = 0;
@@ -2961,8 +3128,11 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             if (enemy->vy > -12.0f) enemy->vy = -12.0f;
             enemy->vy -= (31.0f + i * 1.7f) * dt;
             enemy->bank += dt * (1.7f + 0.16f * i);
-            enemy->pitch = flight_approach(enemy->pitch, 0.82f, 0.64f * dt);
+            enemy->pitch = flight_approach(enemy->pitch, -0.82f, 0.64f * dt);
             enemy->heading += sinf(enemy->bank) * 0.24f * dt;
+            /* The renderer reads the attitude from the quaternion. */
+            flight_quaternion_from_euler(&enemy->flight, enemy->bank,
+                                         enemy->pitch, enemy->heading);
             enemy->world_y += enemy->vy * dt;
             enemy->world_x += sinf(enemy->heading) * enemy->speed * 0.42f * dt;
             enemy->world_z += cosf(enemy->heading) * enemy->speed * 0.42f * dt;
@@ -2986,7 +3156,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         dz = g->flight_z - enemy->world_z;
         horizontal = sqrtf(dx * dx + dz * dz);
         distance = sqrtf(horizontal * horizontal + dy * dy);
-        if (distance < 34.0f) {
+        if (distance < 18.0f) {
             /* A failed break-away damages both machines.  The enemy enters
              * the same physical spiral used for gun damage; the player loses
              * control and descends through the flight model until ground
@@ -3009,8 +3179,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         }
         desired_heading = atan2f(dx, dz) +
             sinf(g->scroll * 0.0021f + enemy->phase) * 0.12f;
-        if (distance < 360.0f) {
-            float urgency = (360.0f - distance) / 360.0f;
+        if (distance < 220.0f) {
+            float urgency = (220.0f - distance) / 220.0f;
             float break_side = (i & 1) ? 1.0f : -1.0f;
             /* Stop pointing at the player's centre and cross clear of the
              * collision cone.  Alternating sides prevent several attackers
@@ -3061,7 +3231,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
              * forward view and has settled its nose.  This prevents several
              * unseen aircraft draining the airframe during their entrance. */
             if (chapters[g->chapter].armed &&
-                now - g->scene_started > 5200u && distance < 900.0f &&
+                now - g->scene_started > 5200u && distance < 600.0f &&
                 attack_view.visible && attack_view.x > 24 &&
                 attack_view.x < SCREEN_W - 24 && attack_view.y > 18 &&
                 attack_view.y < SCREEN_H - 80 &&
@@ -3077,6 +3247,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
                     g->health -= player_machine_gun_damage(g);
                     add_dogfight_bullet_hole(g, now);
                 }
+                g->shake = 1.0f;
                 g->audio.hit_player = 1;
                 g->audio.hit = 1400;
                 g->last_damage = now;
@@ -3374,7 +3545,7 @@ static void draw_title(Game *g)
      * and copy the result each frame, so only the banner is redrawn. */
     if (!g->title_backdrop) {
         SDL_Surface *b = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
-            32, s->format->format);
+            CANVAS_SCREEN_BITS, s->format->format);
         if (b) {
             rect(b, 0, 0, SCREEN_W, SCREEN_H, rgb(b, 20, 31, 48));
             if (g->title) SDL_BlitSurface(g->title, NULL, b, NULL);
@@ -3795,8 +3966,7 @@ static void draw_explosion_frame(Game *g, SDL_Surface *atlas, int frame,
                 pixel(dst, tx, ty, rgb(dst, r, green, b));
             } else {
                 uint8_t dr, dg, db;
-                uint32_t bg = ((uint32_t *)((uint8_t *)dst->pixels +
-                                              ty * dst->pitch))[tx];
+                uint32_t bg = surface_pixel(dst, tx, ty);
                 SDL_GetRGB(bg, dst->format, &dr, &dg, &db);
                 dr = (uint8_t)((dr * (255 - alpha) + r * alpha) / 255);
                 dg = (uint8_t)((dg * (255 - alpha) + green * alpha) / 255);
@@ -4404,90 +4574,509 @@ static void draw_gunner_bullet_holes(Game *g)
     }
 }
 
-static void draw_simulator_terrain(Game *g)
+/* ---- Painted world for the cockpit view --------------------------------
+ *
+ * The sky is the painted sunset panorama wrapped round the horizon; the
+ * ground is the painted battlefield map laid flat under the aircraft and
+ * faded into haze with distance.  Every screen pixel is turned into a ray
+ * through the flight quaternion, so both roll and pitch with the aircraft.
+ * Rays are solved exactly every WORLD_SPAN pixels and interpolated between,
+ * which keeps divides and arctangents out of the inner loops. */
+#define WORLD_SPAN 16
+#define SKY_SPAN 32
+#define GROUND_METRES_PER_TEXEL 2.0f
+#define GROUND_FOG_NEAR 450.0f
+#define GROUND_FOG_FAR 9500.0f
+#define GROUND_MAX_RANGE 14000.0f
+#define SKY_AZIMUTH_OFFSET 1.572f
+#define SKY_ROWS_PER_RADIAN 330.0f
+#define SUN_AZIMUTH 0.44f
+#define SUN_ELEVATION 0.07f
+#define WORLD_FOCAL 330.0f
+
+static float fast_atan2f(float y, float x)
+{
+    float ax = fabsf(x), ay = fabsf(y), a, s2, r;
+    if (ax < 1e-9f && ay < 1e-9f) return 0.0f;
+    a = ax > ay ? ay / ax : ax / ay;
+    s2 = a * a;
+    r = ((-0.0464964749f * s2 + 0.15931422f) * s2 - 0.327622764f) * s2 * a + a;
+    if (ay > ax) r = 1.57079637f - r;
+    if (x < 0.0f) r = 3.14159274f - r;
+    if (y < 0.0f) r = -r;
+    return r;
+}
+
+static int convert_to_screen(Game *g, SDL_Surface **surface)
+{
+    SDL_Surface *converted;
+    if (!*surface) return 0;
+    if ((*surface)->format->format == g->screen->format->format) return 1;
+    converted = SDL_ConvertSurface(*surface, g->screen->format, 0);
+    if (!converted) return 0;
+    SDL_FreeSurface(*surface);
+    *surface = converted;
+    return 1;
+}
+
+static pix_t average_pixels(SDL_Surface *s, int x0, int y0, int w, int h)
+{
+    uint32_t r = 0, gr = 0, b = 0, n = 0;
+    int x, y;
+    for (y = y0; y < y0 + h && y < s->h; ++y)
+        for (x = x0; x < x0 + w && x < s->w; ++x) {
+            uint8_t pr, pg, pb;
+            unpack_rgb(s->format, surface_pixel(s, x, y), &pr, &pg, &pb);
+            r += pr; gr += pg; b += pb; ++n;
+        }
+    if (!n) return PIX_PACK(128, 128, 128);
+    return PIX_PACK(r / n, gr / n, b / n);
+}
+
+/* Builds the ground mip chain (1024 down to 32 texels) and the sky's
+ * seamless wrap.  Distant ground reads a smaller copy, so it shimmers far
+ * less as the aircraft moves. */
+static void prepare_world_textures(Game *g)
+{
+    int level;
+    if (g->topdown_battlefield && convert_to_screen(g, &g->topdown_battlefield) &&
+        g->topdown_battlefield->w == 1024 && g->topdown_battlefield->h == 1024) {
+        SDL_Surface *src = g->topdown_battlefield;
+        int size = 1024;
+        g->ground_mip[0] = (pix_t *)malloc(sizeof(pix_t) * 1024 * 1024);
+        if (g->ground_mip[0]) {
+            int y;
+            for (y = 0; y < 1024; ++y)
+                memcpy(g->ground_mip[0] + y * 1024, PIX_ROW(src, y),
+                       sizeof(pix_t) * 1024);
+            g->ground_mips = 1;
+        }
+        for (level = 1; level < GROUND_MIPS && g->ground_mips == level; ++level) {
+            pix_t *prev = g->ground_mip[level - 1];
+            int half = size / 2, x, y;
+            pix_t *next = (pix_t *)malloc(sizeof(pix_t) * half * half);
+            if (!next) break;
+            for (y = 0; y < half; ++y)
+                for (x = 0; x < half; ++x) {
+                    pix_t a = prev[(y * 2) * size + x * 2];
+                    pix_t b = prev[(y * 2) * size + x * 2 + 1];
+                    pix_t c = prev[(y * 2 + 1) * size + x * 2];
+                    pix_t d = prev[(y * 2 + 1) * size + x * 2 + 1];
+                    next[y * half + x] = pix_mix(pix_mix(a, b, 16),
+                                                 pix_mix(c, d, 16), 16);
+                }
+            g->ground_mip[level] = next;
+            g->ground_mips = level + 1;
+            size = half;
+        }
+        g->ground_haze_tint = average_pixels(src, 0, 0, 1024, 1024);
+    }
+    if (g->sky && convert_to_screen(g, &g->sky) && g->sky->w >= 256) {
+        SDL_Surface *s = g->sky;
+        int y, k;
+        const int seam = 96;
+        for (y = 0; y < s->h; ++y) {
+            pix_t *row = PIX_ROW(s, y);
+            for (k = 0; k < seam; ++k)
+                row[s->w - seam + k] = pix_mix(row[s->w - seam + k],
+                                               row[seam - k],
+                                               k * 32 / seam);
+        }
+        g->sky_top = average_pixels(s, 0, 0, s->w, 4);
+        g->sky_haze = average_pixels(s, 0, s->h - 10, s->w, 10);
+    } else {
+        g->sky_top = PIX_PACK(92, 104, 140);
+        g->sky_haze = PIX_PACK(214, 150, 128);
+    }
+    /* Distant fields take on the colour of the low sky, so the ground
+     * melts into the painted horizon instead of meeting it at a hard line. */
+    g->world_haze = pix_mix(g->sky_haze, g->ground_haze_tint, 9);
+    for (level = 0; level < MIDGROUND_ELEMENT_COUNT; ++level)
+        if (g->midground[level] && !convert_to_screen(g, &g->midground[level]))
+            fprintf(stderr, "Midground element %d not converted\n", level);
+    for (level = 0; level < NEAR_ELEMENT_COUNT; ++level)
+        if (g->near_props[level] && !convert_to_screen(g, &g->near_props[level]))
+            fprintf(stderr, "Near element %d not converted\n", level);
+}
+
+static void free_world_textures(Game *g)
+{
+    int i;
+    for (i = 0; i < GROUND_MIPS; ++i) {
+        free(g->ground_mip[i]);
+        g->ground_mip[i] = NULL;
+    }
+    g->ground_mips = 0;
+}
+
+typedef struct {
+    float n, e, d;
+} WorldRay;
+
+static void world_camera(const Game *g, WorldRay *origin, WorldRay *across,
+                         WorldRay *down)
+{
+    Vec3 c0 = flight_rotate_to_ned(&g->flight, 1.0f,
+                                   -320.0f / WORLD_FOCAL,
+                                   -190.0f / WORLD_FOCAL);
+    Vec3 cx = flight_rotate_to_ned(&g->flight, 0.0f,
+                                   1.0f / WORLD_FOCAL, 0.0f);
+    Vec3 cy = flight_rotate_to_ned(&g->flight, 0.0f, 0.0f,
+                                   1.0f / WORLD_FOCAL);
+    origin->n = c0.x; origin->e = c0.y; origin->d = c0.z;
+    across->n = cx.x; across->e = cx.y; across->d = cx.z;
+    down->n = cy.x; down->e = cy.y; down->d = cy.z;
+}
+
+static void draw_ground_run(Game *g, pix_t *row, int x_start, int x_end,
+                            int step, WorldRay base, WorldRay across)
+{
+    float alt = g->flight_y > 2.0f ? g->flight_y : 2.0f;
+    float east0 = fmodf(g->flight_x / GROUND_METRES_PER_TEXEL, 2048.0f);
+    float north0 = fmodf(g->flight_z / GROUND_METRES_PER_TEXEL, 2048.0f);
+    float min_down = alt / GROUND_MAX_RANGE;
+    const float fog_scale = 32.0f / (GROUND_FOG_FAR - GROUND_FOG_NEAR);
+    pix_t haze = g->world_haze;
+    int x = x_start;
+    float u0 = 0, v0 = 0, f0 = 0;
+    {
+        float dn = base.n + across.n * x, de = base.e + across.e * x;
+        float dd = base.d + across.d * x, t, len;
+        if (dd < min_down) dd = min_down;
+        t = alt / dd;
+        len = sqrtf(dn * dn + de * de + dd * dd);
+        u0 = east0 + t * de / GROUND_METRES_PER_TEXEL;
+        v0 = north0 + t * dn / GROUND_METRES_PER_TEXEL;
+        f0 = (t * len - GROUND_FOG_NEAR) * fog_scale;
+    }
+    while (x < x_end) {
+        int next = x + WORLD_SPAN;
+        float dn, de, dd, t, len, u1, v1, f1, footprint, vertical;
+        int level, size, shift, mask, n, i;
+        int32_t u, v, fog, du, dv, dfog;
+        const pix_t *tex;
+        if (next > x_end) next = x_end;
+        dn = base.n + across.n * next;
+        de = base.e + across.e * next;
+        dd = base.d + across.d * next;
+        if (dd < min_down) dd = min_down;
+        t = alt / dd;
+        len = sqrtf(dn * dn + de * de + dd * dd);
+        u1 = east0 + t * de / GROUND_METRES_PER_TEXEL;
+        v1 = north0 + t * dn / GROUND_METRES_PER_TEXEL;
+        f1 = (t * len - GROUND_FOG_NEAR) * fog_scale;
+        n = next - x;
+        if (f0 >= 32.0f && f1 >= 32.0f) {
+            for (i = x; i < next; ++i) row[i] = haze;
+            x = next; u0 = u1; v0 = v1; f0 = f1;
+            continue;
+        }
+        /* Texels per pixel along the row, and down the screen where the
+         * ground is seen at a grazing angle. */
+        footprint = (fabsf(u1 - u0) + fabsf(v1 - v0)) / (float)n;
+        vertical = alt * len * len /
+                   (WORLD_FOCAL * GROUND_METRES_PER_TEXEL * dd * dd);
+        if (vertical > footprint) footprint = vertical * 0.7f;
+        footprint *= (float)step;
+        level = 0;
+        while (footprint > 1.6f && level + 1 < g->ground_mips) {
+            footprint *= 0.5f;
+            ++level;
+        }
+        size = 1024 >> level;
+        shift = 10 - level;
+        mask = size * 2 - 1;
+        tex = g->ground_mip[level];
+        {
+            float scale = 65536.0f / (float)(1 << level);
+            u = (int32_t)(u0 * scale);
+            v = (int32_t)(v0 * scale);
+            du = (int32_t)((u1 - u0) * scale / (float)n);
+            dv = (int32_t)((v1 - v0) * scale / (float)n);
+        }
+        fog = (int32_t)(flight_clamp(f0, 0.0f, 32.0f) * 65536.0f);
+        dfog = (int32_t)((flight_clamp(f1, 0.0f, 32.0f) -
+                          flight_clamp(f0, 0.0f, 32.0f)) * 65536.0f /
+                         (float)n);
+        if (step == 2) { du *= 2; dv *= 2; dfog *= 2; }
+        for (i = x; i < next; i += step) {
+            int tu = (int)(u >> 16) & mask;
+            int tv = (int)(v >> 16) & mask;
+            pix_t c;
+            tu ^= -((tu >> shift) & 1) & mask;
+            tv ^= -((tv >> shift) & 1) & mask;
+            c = tex[(tv << shift) + tu];
+            if (fog > 0) c = pix_mix(c, haze, (int)(fog >> 16));
+            row[i] = c;
+            if (step == 2 && i + 1 < next) row[i + 1] = c;
+            u += du; v += dv; fog += dfog;
+        }
+        x = next; u0 = u1; v0 = v1; f0 = f1;
+    }
+}
+
+static void sky_coordinates(WorldRay d, float *column, float *row_out,
+                            int sky_w, int sky_h)
+{
+    float horizontal = sqrtf(d.n * d.n + d.e * d.e);
+    float elevation = fast_atan2f(-d.d, horizontal);
+    float azimuth = fast_atan2f(d.e, d.n) + SKY_AZIMUTH_OFFSET;
+    *column = azimuth * ((float)sky_w / (2.0f * (float)M_PI));
+    *row_out = (float)(sky_h - 1) - elevation * SKY_ROWS_PER_RADIAN;
+}
+
+static void draw_sky_run(Game *g, pix_t *row, int x_start, int x_end,
+                         int step, WorldRay base, WorldRay across)
+{
+    SDL_Surface *sky = g->sky;
+    int sky_w, sky_h, x = x_start;
+    float c0, r0;
+    WorldRay d;
+    if (!sky || sky->format->format != g->screen->format->format) {
+        for (; x < x_end; ++x) row[x] = g->sky_top;
+        return;
+    }
+    sky_w = sky->w;
+    sky_h = sky->h;
+    d.n = base.n + across.n * x;
+    d.e = base.e + across.e * x;
+    d.d = base.d + across.d * x;
+    sky_coordinates(d, &c0, &r0, sky_w, sky_h);
+    while (x < x_end) {
+        int next = x + SKY_SPAN, n, i;
+        float c1, r1;
+        int32_t col, rr, dcol, drow;
+        if (next > x_end) next = x_end;
+        d.n = base.n + across.n * next;
+        d.e = base.e + across.e * next;
+        d.d = base.d + across.d * next;
+        sky_coordinates(d, &c1, &r1, sky_w, sky_h);
+        if (c1 - c0 > sky_w * 0.5f) c1 -= (float)sky_w;
+        else if (c0 - c1 > sky_w * 0.5f) c1 += (float)sky_w;
+        n = next - x;
+        col = (int32_t)(c0 * 65536.0f);
+        rr = (int32_t)(r0 * 65536.0f);
+        dcol = (int32_t)((c1 - c0) * 65536.0f / (float)n) * step;
+        drow = (int32_t)((r1 - r0) * 65536.0f / (float)n) * step;
+        for (i = x; i < next; i += step) {
+            int cx = (int)(col >> 16), ry = (int)(rr >> 16);
+            pix_t c;
+            while (cx < 0) cx += sky_w;
+            while (cx >= sky_w) cx -= sky_w;
+            if (ry >= sky_h) ry = sky_h - 1;
+            if (ry >= 0) {
+                c = PIX_ROW(sky, ry)[cx];
+            } else {
+                int fade = -ry / 5;
+                c = PIX_ROW(sky, 0)[cx];
+                if (fade > 0) c = pix_mix(c, g->sky_top, fade > 32 ? 32 : fade);
+            }
+            row[i] = c;
+            if (step == 2 && i + 1 < next) row[i + 1] = c;
+            col += dcol; rr += drow;
+        }
+        x = next; c0 = c1; r0 = r1;
+        if (c0 < 0.0f) c0 += (float)sky_w;
+        else if (c0 >= (float)sky_w) c0 -= (float)sky_w;
+    }
+}
+
+static void draw_world_backdrop(Game *g)
 {
     SDL_Surface *s = g->screen;
-    int horizon_left, horizon_right;
-    float horizon_dx, horizon_dy, horizon_length;
-    int ground_positive = 1;
-    int tx, tz, pass;
-    {
-        const float far = 12000.0f;
-        const float wide = 14000.0f;
-        float sh = sinf(g->flight_heading), ch = cosf(g->flight_heading);
-        Vec3 centre = {g->flight_x + sh * far, 0.0f,
-                       g->flight_z + ch * far};
-        Projected3D left = project_world_point(g, (Vec3){
-            centre.x - ch * wide, centre.y, centre.z + sh * wide});
-        Projected3D right = project_world_point(g, (Vec3){
-            centre.x + ch * wide, centre.y, centre.z - sh * wide});
-        horizon_left = left.visible ? left.y : SCREEN_H / 2;
-        horizon_right = right.visible ? right.y : SCREEN_H / 2;
-        horizon_left = (int)flight_clamp((float)horizon_left,
-                                         -SCREEN_H * 3.0f,
-                                          SCREEN_H * 4.0f);
-        horizon_right = (int)flight_clamp((float)horizon_right,
-                                          -SCREEN_H * 3.0f,
-                                           SCREEN_H * 4.0f);
-    }
-    horizon_dx = (float)(SCREEN_W - 1);
-    horizon_dy = (float)(horizon_right - horizon_left);
-    horizon_length = sqrtf(horizon_dx * horizon_dx +
-                           horizon_dy * horizon_dy);
-    if (horizon_length < 1.0f) horizon_length = 1.0f;
-    {
-        float sh = sinf(g->flight_heading), ch = cosf(g->flight_heading);
-        Projected3D ground_probe = project_world_point(g, (Vec3){
-            g->flight_x + sh * 2400.0f, 0.0f,
-            g->flight_z + ch * 2400.0f});
-        if (ground_probe.visible) {
-            float side = horizon_dx *
-                         ((float)ground_probe.y - horizon_left) -
-                         horizon_dy * (float)ground_probe.x;
-            ground_positive = side >= 0.0f;
+    WorldRay origin, across, down;
+    int step = g->half_res_world ? 2 : 1;
+    int y;
+    world_camera(g, &origin, &across, &down);
+    for (y = 0; y < SCREEN_H; y += step) {
+        pix_t *row = PIX_ROW(s, y);
+        WorldRay base;
+        float split;
+        int xh, ground_left;
+        base.n = origin.n + down.n * y;
+        base.e = origin.e + down.e * y;
+        base.d = origin.d + down.d * y;
+        /* The down component is linear along the row, so each row has at
+         * most one horizon crossing: one sky run and one ground run. */
+        ground_left = base.d > 0.0f;
+        if (fabsf(across.d) > 1e-9f) {
+            split = -base.d / across.d;
+            if (split < 0.0f) split = 0.0f;
+            if (split > (float)SCREEN_W) split = (float)SCREEN_W;
+            xh = (int)split;
+            if (step == 2) xh &= ~1;
+        } else {
+            xh = SCREEN_W;
         }
-    }
-    {
-        uint32_t sky_colour[261];
-        uint32_t ground = rgb(s, 70, 74, 45);
-        int distance, x, y;
-        for (distance = 0; distance <= 260; ++distance) {
-            float t = 1.0f - (float)distance / 260.0f;
-            uint8_t red = (uint8_t)(23.0f + 169.0f * t);
-            uint8_t green = (uint8_t)(48.0f + 113.0f * t);
-            uint8_t blue = (uint8_t)(86.0f + 38.0f * t);
-            sky_colour[distance] = rgb(s, red, green, blue);
+        if (ground_left) {
+            if (xh > 0 && g->ground_mips)
+                draw_ground_run(g, row, 0, xh, step, base, across);
+            if (xh < SCREEN_W)
+                draw_sky_run(g, row, xh, SCREEN_W, step, base, across);
+        } else {
+            if (xh > 0)
+                draw_sky_run(g, row, 0, xh, step, base, across);
+            if (xh < SCREEN_W && g->ground_mips)
+                draw_ground_run(g, row, xh, SCREEN_W, step, base, across);
         }
-        /* Signed perpendicular distance gives a solid sky and ground at any
-         * bank angle.  Parallel raster lines left the regular pinholes seen
-         * in the steep-bank screenshots. */
-        /* The signed distance is linear along a row, so it is stepped in
-         * 16.16 fixed point: one float setup per row, integer work per
-         * pixel, no per-pixel divide. */
-        {
-            int32_t step = (int32_t)(-horizon_dy / horizon_length * 65536.0f);
-            for (y = 0; y < SCREEN_H; ++y) {
-                uint32_t *row = (uint32_t *)((uint8_t *)s->pixels +
-                                             y * s->pitch);
-                float start = horizon_dx * ((float)y - horizon_left) /
-                              horizon_length;
-                int32_t side;
-                if (start > 30000.0f) start = 30000.0f;
-                if (start < -30000.0f) start = -30000.0f;
-                side = (int32_t)(start * 65536.0f);
-                for (x = 0; x < SCREEN_W; ++x, side += step) {
-                    int is_ground = ground_positive ? side >= 0 : side <= 0;
-                    if (is_ground) {
-                        row[x] = ground;
-                    } else {
-                        int32_t haze_distance = (side < 0 ? -side : side) >> 16;
-                        if (haze_distance > 260) haze_distance = 260;
-                        row[x] = sky_colour[haze_distance];
-                    }
-                }
+        if (step == 2 && y + 1 < SCREEN_H)
+            memcpy(PIX_ROW(s, y + 1), row, sizeof(pix_t) * SCREEN_W);
+    }
+}
+
+/* An upright painted object standing in the world: the sprite is mapped
+ * onto a quad from its projected foot to its projected top, so it rolls
+ * with the horizon.  Distant objects take on the same haze as the fields. */
+static void draw_world_sprite(Game *g, SDL_Surface *sprite, Projected3D foot,
+                              Projected3D top, int fog)
+{
+    SDL_Surface *s = g->screen;
+    float ux = (float)(top.x - foot.x), uy = (float)(top.y - foot.y);
+    float height = sqrtf(ux * ux + uy * uy), aspect, rx, ry, det;
+    float ox, oy, min_x, max_x, min_y, max_y;
+    float cxs[4], cys[4];
+    uint32_t key = 0;
+    int has_key, x, y, x0, x1, y0, y1, i, sw, sh;
+    if (!sprite || height < 3.0f || height > 700.0f) return;
+    sw = sprite->w; sh = sprite->h;
+    aspect = (float)sw / (float)sh;
+    rx = -uy * aspect; ry = ux * aspect;
+    ox = (float)foot.x - rx * 0.5f;
+    oy = (float)foot.y - ry * 0.5f;
+    cxs[0] = ox; cys[0] = oy;
+    cxs[1] = ox + rx; cys[1] = oy + ry;
+    cxs[2] = ox + rx + ux; cys[2] = oy + ry + uy;
+    cxs[3] = ox + ux; cys[3] = oy + uy;
+    min_x = max_x = cxs[0]; min_y = max_y = cys[0];
+    for (i = 1; i < 4; ++i) {
+        if (cxs[i] < min_x) min_x = cxs[i];
+        if (cxs[i] > max_x) max_x = cxs[i];
+        if (cys[i] < min_y) min_y = cys[i];
+        if (cys[i] > max_y) max_y = cys[i];
+    }
+    x0 = (int)min_x; x1 = (int)max_x + 1;
+    y0 = (int)min_y; y1 = (int)max_y + 1;
+    if (x1 < 0 || y1 < 0 || x0 >= SCREEN_W || y0 >= SCREEN_H) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > SCREEN_W) x1 = SCREEN_W;
+    if (y1 > SCREEN_H) y1 = SCREEN_H;
+    det = rx * uy - ry * ux;
+    if (fabsf(det) < 1e-3f) return;
+    has_key = SDL_GetColorKey(sprite, &key) == 0;
+    if (fog > 32) fog = 32;
+    {
+        /* a runs 0..1 across the sprite, b 0..1 from foot to top. */
+        float da_dx = uy / det, db_dx = -ry / det;
+        float da_dy = -ux / det, db_dy = rx / det;
+        int32_t sa_dx = (int32_t)(da_dx * sw * 65536.0f);
+        int32_t sb_dx = (int32_t)(-db_dx * sh * 65536.0f);
+        for (y = y0; y < y1; ++y) {
+            pix_t *row = PIX_ROW(s, y);
+            float px = (float)x0 + 0.5f - ox, py = (float)y + 0.5f - oy;
+            float a = (px * uy - py * ux) / det;
+            float b = (rx * py - ry * px) / det;
+            int32_t sa = (int32_t)(a * sw * 65536.0f);
+            int32_t sb = (int32_t)((1.0f - b) * sh * 65536.0f);
+            (void)da_dy; (void)db_dy;
+            for (x = x0; x < x1; ++x, sa += sa_dx, sb += sb_dx) {
+                int tx = (int)(sa >> 16), ty = (int)(sb >> 16);
+                pix_t c;
+                if (sa < 0 || sb < 0 || tx >= sw || ty >= sh) continue;
+                c = PIX_ROW(sprite, ty)[tx];
+                if (has_key && c == (pix_t)key) continue;
+                if (fog > 0) c = pix_mix(c, g->world_haze, fog);
+                row[x] = c;
             }
         }
     }
+}
+
+typedef struct {
+    SDL_Surface *sprite;
+    Projected3D foot, top;
+    float depth;
+    int fog;
+} WorldObject;
+
+/* Farms, churches, poplar rows and the smoke of the line stand on a
+ * hashed grid, so the same countryside is there when you circle back. */
+static void draw_world_objects(Game *g)
+{
+    enum { CELL = 300, REACH = 9, MAX_OBJECTS = 96 };
+    WorldObject list[MAX_OBJECTS];
+    int count = 0, cx, cz, i, j;
+    int base_x = (int)floorf(g->flight_x / CELL);
+    int base_z = (int)floorf(g->flight_z / CELL);
+    const float fog_scale = 32.0f / (GROUND_FOG_FAR - GROUND_FOG_NEAR);
+    for (cz = base_z - REACH; cz <= base_z + REACH; ++cz)
+    for (cx = base_x - REACH; cx <= base_x + REACH; ++cx) {
+        uint32_t h = scene_hash((uint32_t)cx * 7919u ^
+                                (uint32_t)cz * 104729u ^ 0x574f524cu);
+        SDL_Surface *sprite;
+        float height, wx, wz;
+        int kind;
+        Projected3D foot, top;
+        if ((h & 3u) != 0u || count >= MAX_OBJECTS) continue;
+        kind = (int)((h >> 4) % 10u);
+        switch (kind) {
+        case 0: case 1: case 2:
+            sprite = g->near_props[2]; height = 13.0f; break;
+        case 3: case 4:
+            sprite = g->midground[2]; height = 22.0f; break;
+        case 5:
+            sprite = g->midground[0]; height = 10.0f; break;
+        case 6:
+            if ((h >> 12) & 3u) { sprite = g->midground[0]; height = 10.0f; }
+            else { sprite = g->midground[1]; height = 24.0f; }
+            break;
+        case 7: case 8:
+            sprite = g->midground[3]; height = 46.0f; break;
+        default:
+            sprite = g->midground[4]; height = 8.0f; break;
+        }
+        if (!sprite) continue;
+        wx = ((float)cx + 0.15f + (float)((h >> 8) & 255u) / 365.0f) * CELL;
+        wz = ((float)cz + 0.15f + (float)((h >> 16) & 255u) / 365.0f) * CELL;
+        foot = project_world_point(g, (Vec3){wx, 0.0f, wz});
+        if (!foot.visible || foot.depth > REACH * CELL * 1.1f) continue;
+        top = project_world_point(g, (Vec3){wx, height, wz});
+        if (!top.visible) continue;
+        if ((foot.x < -120 && top.x < -120) ||
+            (foot.x > SCREEN_W + 120 && top.x > SCREEN_W + 120) ||
+            (foot.y < -120 && top.y < -120) ||
+            (foot.y > SCREEN_H + 120 && top.y > SCREEN_H + 120)) continue;
+        list[count].sprite = sprite;
+        list[count].foot = foot;
+        list[count].top = top;
+        list[count].depth = foot.depth;
+        {
+            float dx = wx - g->flight_x, dz = wz - g->flight_z;
+            float dist = sqrtf(dx * dx + dz * dz + g->flight_y * g->flight_y);
+            list[count].fog = (int)flight_clamp((dist - GROUND_FOG_NEAR) *
+                                                fog_scale, 0.0f, 32.0f);
+        }
+        ++count;
+    }
+    for (i = 1; i < count; ++i) {
+        WorldObject item = list[i];
+        j = i - 1;
+        while (j >= 0 && list[j].depth < item.depth) {
+            list[j + 1] = list[j];
+            --j;
+        }
+        list[j + 1] = item;
+    }
+    for (i = 0; i < count; ++i)
+        draw_world_sprite(g, list[i].sprite, list[i].foot, list[i].top,
+                          list[i].fog);
+}
+
+static void draw_simulator_terrain(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int pass;
+    draw_world_backdrop(g);
 
     /* Two deterministic ridge rings bridge atmosphere and ground.  Their
      * bearings are fixed in the world, so they roll and pan with the same
@@ -4523,66 +5112,20 @@ static void draw_simulator_terrain(Game *g)
             if (b0.visible && b1.visible && t0.visible && t1.visible &&
                 abs(b0.x) < 1500 && abs(b1.x) < 1500) {
                 uint32_t hill = pass == 0 ?
-                    rgb(s, 91, 99, 83) : rgb(s, 76, 83, 58);
+                    pix_mix(PIX_PACK(64, 70, 66), g->world_haze, 21) :
+                    pix_mix(PIX_PACK(58, 66, 46), g->world_haze, 15);
                 fill_triangle(s, b0.x, b0.y, b1.x, b1.y,
                               t1.x, t1.y, hill);
                 fill_triangle(s, b0.x, b0.y, t1.x, t1.y,
                               t0.x, t0.y, hill);
                 if (pass == 1)
-                    line(s, t0.x, t0.y, t1.x, t1.y, rgb(s, 103, 105, 76));
+                    line(s, t0.x, t0.y, t1.x, t1.y,
+                         pix_mix(PIX_PACK(96, 98, 74), g->world_haze, 14));
             }
         }
     }
 
-    /* A coarse 1.7 km grid carries fields almost to the ridge; the 520 m
-     * pass then restores hedges and texture around the aircraft.  Previously
-     * the detailed ground simply stopped after 2.6 km, exposing a flat wedge
-     * which was visibly disconnected from the horizon. */
-    for (pass = 0; pass < 2; ++pass) {
-        const float tile_size = pass == 0 ? 1700.0f : 520.0f;
-        const int reach = 5;
-        int base_tile_x = (int)floorf(g->flight_x / tile_size);
-        int base_tile_z = (int)floorf(g->flight_z / tile_size);
-        for (tz = base_tile_z - reach; tz <= base_tile_z + reach; ++tz) {
-        for (tx = base_tile_x - reach; tx <= base_tile_x + reach; ++tx) {
-            float x0 = (float)tx * tile_size;
-            float z0 = (float)tz * tile_size;
-            Projected3D p0 = project_world_point(g, (Vec3){x0, 0.0f, z0});
-            Projected3D p1 = project_world_point(g,
-                (Vec3){x0 + tile_size, 0.0f, z0});
-            Projected3D p2 = project_world_point(g,
-                (Vec3){x0 + tile_size, 0.0f, z0 + tile_size});
-            Projected3D p3 = project_world_point(g,
-                (Vec3){x0, 0.0f, z0 + tile_size});
-            uint32_t seed = scene_hash((uint32_t)(tx * 92821) ^
-                                       (uint32_t)(tz * 68917));
-            uint32_t field;
-            if (pass == 0)
-                field = (seed & 1u) ? rgb(s, 79, 82, 57) :
-                                      rgb(s, 70, 78, 54);
-            else if ((tx % 6) == 0 || (tz % 7) == 0)
-                field = rgb(s, 108, 91, 58);
-            else if (seed & 1u)
-                field = rgb(s, 91, 86, 50);
-            else
-                field = rgb(s, 66, 88, 49);
-            if (p0.visible && p1.visible && p2.visible && p3.visible &&
-                abs(p0.x) < 1800 && abs(p1.x) < 1800 &&
-                abs(p2.x) < 1800 && abs(p3.x) < 1800 &&
-                abs(p0.y) < 1200 && abs(p1.y) < 1200 &&
-                abs(p2.y) < 1200 && abs(p3.y) < 1200) {
-                fill_triangle(s, p0.x, p0.y, p1.x, p1.y,
-                              p2.x, p2.y, field);
-                fill_triangle(s, p0.x, p0.y, p2.x, p2.y,
-                              p3.x, p3.y, field);
-                if (pass == 1) {
-                    line(s, p0.x, p0.y, p1.x, p1.y, rgb(s, 48, 61, 36));
-                    line(s, p0.x, p0.y, p3.x, p3.y, rgb(s, 56, 65, 39));
-                }
-            }
-        }
-        }
-    }
+    draw_world_objects(g);
 }
 
 static void draw_simulator_clouds(Game *g)
@@ -4622,17 +5165,17 @@ static void draw_simulator_clouds(Game *g)
          * the view as the aircraft turns. */
         if (cloud_type == 1) {
             ellipse(s, p.x, p.y + radius / 6, radius * 8 / 5,
-                    radius / 4 + 1, rgb(s, 116, 126, 134));
+                    radius / 4 + 1, rgb(s, 118, 100, 128));
             ellipse(s, p.x - radius / 3, p.y - radius / 10,
                     radius * 7 / 5, radius / 4 + 1,
-                    rgb(s, 174, 180, 180));
+                    rgb(s, 232, 176, 150));
         } else {
             ellipse(s, p.x, p.y + radius / 4,
                     cloud_type == 2 ? radius : radius * 6 / 5,
-                    radius / 3 + 1, rgb(s, 111, 122, 132));
+                    radius / 3 + 1, rgb(s, 108, 94, 122));
             ellipse(s, p.x - radius / 8, p.y,
                     cloud_type == 2 ? radius * 3 / 4 : radius,
-                    radius / 3 + 1, rgb(s, 160, 167, 168));
+                    radius / 3 + 1, rgb(s, 214, 160, 146));
         }
         for (puff = 0; puff < puffs; ++puff) {
             uint32_t ps = scene_hash(seed + (uint32_t)puff * 2654435761u);
@@ -4659,331 +5202,12 @@ static void draw_simulator_clouds(Game *g)
                   pr * (3 + (int)((ps >> 22) & 1u)) / 5;
             if (pry < 2) pry = 2;
             ellipse(s, px, py + pry / 3, pr, pry,
-                    rgb(s, 123, 132, 138));
+                    rgb(s, 124, 104, 130));
             ellipse(s, px - pr / 8, py - pry / 5,
                     pr * 4 / 5, pry * 4 / 5,
-                    rgb(s, shade, shade, shade - 5));
+                    rgb(s, shade, (uint8_t)(shade * 4 / 5), (uint8_t)(shade * 7 / 10)));
         }
     }
-    }
-}
-
-static void draw_enemy_aircraft_3d(Game *g, const Enemy *enemy)
-{
-    SDL_Surface *s = g->screen;
-    Projected3D centre = project_world_point(g, (Vec3){enemy->world_x,
-        enemy->world_y, enemy->world_z});
-    Projected3D upper[4], lower[4], tail[4], rear, fin;
-    Projected3D prop_l, prop_r, prop_u, prop_d;
-    Projected3D wheel_l, wheel_r, mark_l, mark_r;
-    Projected3D cockpit, pilot, cowling, gun_l, gun_r;
-    Projected3D nose_l, nose_r, nose_t, nose_b;
-    Projected3D mid_l, mid_r, mid_t, mid_b;
-    Projected3D rear_l, rear_r, rear_t, rear_b;
-    uint32_t outline = rgb(s, 35, 27, 24);
-    uint32_t canvas = rgb(s, 214, 187, 142);
-    uint32_t underside = rgb(s, 172, 148, 111);
-    uint32_t rib = rgb(s, 126, 101, 70);
-    uint32_t body = rgb(s, 143, 39, 31);
-    uint32_t body_light = rgb(s, 194, 66, 45);
-    uint32_t metal = rgb(s, 91, 91, 84);
-    int i;
-    static const float wing[4][3] = {
-        {-17.4f, 2.0f, -3.2f}, {17.4f, 2.0f, -3.2f},
-        {17.4f, 2.0f, 3.6f}, {-17.4f, 2.0f, 3.6f}
-    };
-    static const float low_wing[4][3] = {
-        {-15.7f, -2.0f, -2.9f}, {15.7f, -2.0f, -2.9f},
-        {15.7f, -2.0f, 3.1f}, {-15.7f, -2.0f, 3.1f}
-    };
-    static const float tail_wing[4][3] = {
-        {-7.0f, 0.0f, -15.2f}, {7.0f, 0.0f, -15.2f},
-        {6.0f, 0.0f, -12.5f}, {-6.0f, 0.0f, -12.5f}
-    };
-    if (!centre.visible || centre.x < -180 || centre.x > SCREEN_W + 180 ||
-        centre.y < -180 || centre.y > SCREEN_H + 180) return;
-    if (centre.depth > 1650.0f) {
-        Projected3D far_l = project_world_point(g,
-            enemy_model_point(enemy, -17.4f, 2.0f, 0.0f));
-        Projected3D far_r = project_world_point(g,
-            enemy_model_point(enemy, 17.4f, 2.0f, 0.0f));
-        Projected3D far_n = project_world_point(g,
-            enemy_model_point(enemy, 0.0f, 0.0f, 18.5f));
-        Projected3D far_t = project_world_point(g,
-            enemy_model_point(enemy, 0.0f, 0.0f, -16.2f));
-        Projected3D far_tl = project_world_point(g,
-            enemy_model_point(enemy, -7.0f, 0.0f, -14.0f));
-        Projected3D far_tr = project_world_point(g,
-            enemy_model_point(enemy, 7.0f, 0.0f, -14.0f));
-        /* Even the far LOD uses the projected wing, fuselage and tail axes.
-         * A black dot gave no clue which way an attacker was flying. */
-        if (far_l.visible && far_r.visible) {
-            line(s, far_l.x, far_l.y, far_r.x, far_r.y, outline);
-            if (centre.depth < 3000.0f)
-                line(s, far_l.x, far_l.y - 1,
-                     far_r.x, far_r.y - 1, canvas);
-        }
-        if (far_n.visible && far_t.visible)
-            line(s, far_n.x, far_n.y, far_t.x, far_t.y, body);
-        if (far_tl.visible && far_tr.visible)
-            line(s, far_tl.x, far_tl.y, far_tr.x, far_tr.y, outline);
-        if (far_l.x == far_r.x && far_l.y == far_r.y)
-            circle(s, centre.x, centre.y, 1, outline);
-        return;
-    }
-    for (i = 0; i < 4; ++i) {
-        upper[i] = project_world_point(g, enemy_model_point(enemy,
-            wing[i][0], wing[i][1], wing[i][2]));
-        lower[i] = project_world_point(g, enemy_model_point(enemy,
-            low_wing[i][0], low_wing[i][1], low_wing[i][2]));
-        tail[i] = project_world_point(g, enemy_model_point(enemy,
-            tail_wing[i][0], tail_wing[i][1], tail_wing[i][2]));
-    }
-    rear = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, -16.2f));
-    fin = project_world_point(g, enemy_model_point(enemy, 0.0f, 6.0f, -14.8f));
-    for (i = 0; i < 4; ++i)
-        if (!upper[i].visible || !lower[i].visible || !tail[i].visible) return;
-    fill_triangle(s, upper[0].x, upper[0].y, upper[1].x, upper[1].y,
-                  upper[2].x, upper[2].y, canvas);
-    fill_triangle(s, upper[0].x, upper[0].y, upper[2].x, upper[2].y,
-                  upper[3].x, upper[3].y, canvas);
-    fill_triangle(s, lower[0].x, lower[0].y, lower[1].x, lower[1].y,
-                  lower[2].x, lower[2].y, underside);
-    fill_triangle(s, lower[0].x, lower[0].y, lower[2].x, lower[2].y,
-                  lower[3].x, lower[3].y, underside);
-    fill_triangle(s, tail[0].x, tail[0].y, tail[1].x, tail[1].y,
-                  tail[2].x, tail[2].y, canvas);
-    fill_triangle(s, tail[0].x, tail[0].y, tail[2].x, tail[2].y,
-                  tail[3].x, tail[3].y, canvas);
-    for (i = 0; i < 4; ++i) {
-        int n = (i + 1) & 3;
-        line(s, upper[i].x, upper[i].y, upper[n].x, upper[n].y, outline);
-        line(s, lower[i].x, lower[i].y, lower[n].x, lower[n].y, outline);
-    }
-    /* The ribs and contrasting leading edges keep the two wings readable
-     * when the aeroplane banks.  These disappear naturally with distance,
-     * instead of turning into a noisy sprite-like patch. */
-    if (centre.depth < 1250.0f) {
-        int rib_index;
-        for (rib_index = -3; rib_index <= 3; ++rib_index) {
-            float rx = (float)rib_index * 4.25f;
-            Projected3D rib_a = project_world_point(g,
-                enemy_model_point(enemy, rx, 2.04f, -3.0f));
-            Projected3D rib_b = project_world_point(g,
-                enemy_model_point(enemy, rx, 2.04f, 3.4f));
-            if (rib_a.visible && rib_b.visible)
-                line(s, rib_a.x, rib_a.y, rib_b.x, rib_b.y, rib);
-        }
-        line(s, upper[3].x, upper[3].y, upper[2].x, upper[2].y,
-             rgb(s, 239, 211, 163));
-        line(s, lower[3].x, lower[3].y, lower[2].x, lower[2].y, rib);
-    }
-    /* A projected tapered fuselage replaces the old seven screen-space
-     * parallel lines.  Those lines stayed upright while the wings banked and
-     * made the aircraft look like disconnected symbols rather than a solid
-     * aeroplane. */
-    nose_l = project_world_point(g, enemy_model_point(enemy, -3.0f, 0.0f, 13.4f));
-    nose_r = project_world_point(g, enemy_model_point(enemy,  3.0f, 0.0f, 13.4f));
-    nose_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 2.7f, 13.4f));
-    nose_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-2.4f, 13.4f));
-    mid_l = project_world_point(g, enemy_model_point(enemy, -2.3f, 0.0f, -3.8f));
-    mid_r = project_world_point(g, enemy_model_point(enemy,  2.3f, 0.0f, -3.8f));
-    mid_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 2.2f, -3.8f));
-    mid_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-1.9f, -3.8f));
-    rear_l = project_world_point(g, enemy_model_point(enemy, -0.8f, 0.0f,-14.7f));
-    rear_r = project_world_point(g, enemy_model_point(enemy,  0.8f, 0.0f,-14.7f));
-    rear_t = project_world_point(g, enemy_model_point(enemy,  0.0f, 0.9f,-14.7f));
-    rear_b = project_world_point(g, enemy_model_point(enemy,  0.0f,-0.7f,-14.7f));
-    if (nose_l.visible && nose_r.visible && nose_t.visible && nose_b.visible &&
-        mid_l.visible && mid_r.visible && mid_t.visible && mid_b.visible &&
-        rear_l.visible && rear_r.visible && rear_t.visible && rear_b.visible) {
-        fill_triangle(s, nose_l.x, nose_l.y, nose_t.x, nose_t.y,
-                      mid_t.x, mid_t.y, body);
-        fill_triangle(s, nose_l.x, nose_l.y, mid_t.x, mid_t.y,
-                      mid_l.x, mid_l.y, body);
-        fill_triangle(s, nose_t.x, nose_t.y, nose_r.x, nose_r.y,
-                      mid_r.x, mid_r.y, body_light);
-        fill_triangle(s, nose_t.x, nose_t.y, mid_r.x, mid_r.y,
-                      mid_t.x, mid_t.y, body_light);
-        fill_triangle(s, mid_l.x, mid_l.y, mid_t.x, mid_t.y,
-                      rear_t.x, rear_t.y, body);
-        fill_triangle(s, mid_l.x, mid_l.y, rear_t.x, rear_t.y,
-                      rear_l.x, rear_l.y, body);
-        fill_triangle(s, mid_t.x, mid_t.y, mid_r.x, mid_r.y,
-                      rear_r.x, rear_r.y, body_light);
-        fill_triangle(s, mid_t.x, mid_t.y, rear_r.x, rear_r.y,
-                      rear_t.x, rear_t.y, body_light);
-        fill_triangle(s, nose_l.x, nose_l.y, mid_l.x, mid_l.y,
-                      mid_b.x, mid_b.y, rgb(s, 91, 39, 31));
-        fill_triangle(s, nose_l.x, nose_l.y, mid_b.x, mid_b.y,
-                      nose_b.x, nose_b.y, rgb(s, 91, 39, 31));
-        line(s, nose_l.x, nose_l.y, rear_l.x, rear_l.y, outline);
-        line(s, nose_r.x, nose_r.y, rear_r.x, rear_r.y, outline);
-        line(s, nose_t.x, nose_t.y, rear_t.x, rear_t.y,
-             rgb(s, 222, 91, 57));
-        line(s, nose_b.x, nose_b.y, rear_b.x, rear_b.y, outline);
-    }
-    if (rear.visible && fin.visible) {
-        Projected3D fin_front = project_world_point(g,
-            enemy_model_point(enemy, 0.0f, 0.2f, -10.2f));
-        Projected3D fin_rear = project_world_point(g,
-            enemy_model_point(enemy, 0.0f, 0.4f, -16.0f));
-        Projected3D fin_top_front = project_world_point(g,
-            enemy_model_point(enemy, 0.0f, 5.8f, -11.5f));
-        if (fin_front.visible && fin_rear.visible && fin_top_front.visible) {
-            fill_triangle(s, fin_front.x, fin_front.y,
-                          fin_rear.x, fin_rear.y, fin.x, fin.y, body);
-            fill_triangle(s, fin_front.x, fin_front.y,
-                          fin.x, fin.y, fin_top_front.x, fin_top_front.y,
-                          body_light);
-            line(s, fin_front.x, fin_front.y,
-                 fin_top_front.x, fin_top_front.y, outline);
-            line(s, fin_top_front.x, fin_top_front.y, fin.x, fin.y, outline);
-            line(s, fin.x, fin.y, fin_rear.x, fin_rear.y, outline);
-        }
-    }
-    line(s, upper[0].x, upper[0].y, lower[0].x, lower[0].y, outline);
-    line(s, upper[1].x, upper[1].y, lower[1].x, lower[1].y, outline);
-    {
-        Projected3D strut_ul = project_world_point(g,
-            enemy_model_point(enemy, -7.1f, 2.0f, 0.0f));
-        Projected3D strut_ll = project_world_point(g,
-            enemy_model_point(enemy, -7.1f, -2.0f, 0.0f));
-        Projected3D strut_ur = project_world_point(g,
-            enemy_model_point(enemy, 7.1f, 2.0f, 0.0f));
-        Projected3D strut_lr = project_world_point(g,
-            enemy_model_point(enemy, 7.1f, -2.0f, 0.0f));
-        if (strut_ul.visible && strut_ll.visible)
-            line(s, strut_ul.x, strut_ul.y, strut_ll.x, strut_ll.y, outline);
-        if (strut_ur.visible && strut_lr.visible)
-            line(s, strut_ur.x, strut_ur.y, strut_lr.x, strut_lr.y, outline);
-        if (strut_ul.visible && strut_lr.visible)
-            line(s, strut_ul.x, strut_ul.y, strut_lr.x, strut_lr.y,
-                 rgb(s, 91, 80, 66));
-        if (strut_ur.visible && strut_ll.visible)
-            line(s, strut_ur.x, strut_ur.y, strut_ll.x, strut_ll.y,
-                 rgb(s, 91, 80, 66));
-        if (centre.depth < 1100.0f) {
-            Projected3D cabane_ul = project_world_point(g,
-                enemy_model_point(enemy, -2.8f, 2.0f, 1.2f));
-            Projected3D cabane_ll = project_world_point(g,
-                enemy_model_point(enemy, -1.8f, -0.8f, 1.2f));
-            Projected3D cabane_ur = project_world_point(g,
-                enemy_model_point(enemy, 2.8f, 2.0f, 1.2f));
-            Projected3D cabane_lr = project_world_point(g,
-                enemy_model_point(enemy, 1.8f, -0.8f, 1.2f));
-            Projected3D wire_l = project_world_point(g,
-                enemy_model_point(enemy, -14.0f, 2.0f, 0.0f));
-            Projected3D wire_r = project_world_point(g,
-                enemy_model_point(enemy, 14.0f, 2.0f, 0.0f));
-            if (cabane_ul.visible && cabane_ll.visible)
-                line(s, cabane_ul.x, cabane_ul.y,
-                     cabane_ll.x, cabane_ll.y, outline);
-            if (cabane_ur.visible && cabane_lr.visible)
-                line(s, cabane_ur.x, cabane_ur.y,
-                     cabane_lr.x, cabane_lr.y, outline);
-            if (wire_l.visible && cabane_lr.visible)
-                line(s, wire_l.x, wire_l.y,
-                     cabane_lr.x, cabane_lr.y, rgb(s, 80, 72, 62));
-            if (wire_r.visible && cabane_ll.visible)
-                line(s, wire_r.x, wire_r.y,
-                     cabane_ll.x, cabane_ll.y, rgb(s, 80, 72, 62));
-        }
-    }
-    /* Engine, open cockpit and pilot are strong recognition cues at combat
-     * range, much more useful than a flat coloured fuselage. */
-    cowling = project_world_point(g, enemy_model_point(enemy, 0.0f, 0.0f, 13.6f));
-    cockpit = project_world_point(g, enemy_model_point(enemy, 0.0f, 1.0f, -3.7f));
-    pilot = project_world_point(g, enemy_model_point(enemy, 0.0f, 3.2f, -4.2f));
-    if (cowling.visible) {
-        int engine_radius = centre.depth < 520.0f ? 4 : 3;
-        circle(s, cowling.x, cowling.y, engine_radius, outline);
-        circle(s, cowling.x, cowling.y, engine_radius - 1, metal);
-    }
-    if (cockpit.visible) circle(s, cockpit.x, cockpit.y,
-                                centre.depth < 650.0f ? 4 : 2, outline);
-    if (pilot.visible) {
-        circle(s, pilot.x, pilot.y, centre.depth < 650.0f ? 3 : 2,
-               rgb(s, 91, 67, 45));
-        if (centre.depth < 700.0f)
-            line(s, pilot.x - 2, pilot.y - 1, pilot.x + 2, pilot.y - 1,
-                 rgb(s, 32, 29, 25));
-    }
-    gun_l = project_world_point(g, enemy_model_point(enemy, -1.5f, 2.0f, 10.0f));
-    gun_r = project_world_point(g, enemy_model_point(enemy, 1.5f, 2.0f, 10.0f));
-    if (centre.depth < 850.0f && cowling.visible) {
-        if (gun_l.visible) line(s, cockpit.x - 1, cockpit.y, gun_l.x, gun_l.y, outline);
-        if (gun_r.visible) line(s, cockpit.x + 1, cockpit.y, gun_r.x, gun_r.y, outline);
-    }
-    prop_l = project_world_point(g, enemy_model_point(enemy, -6.7f, 0.0f, 19.1f));
-    prop_r = project_world_point(g, enemy_model_point(enemy, 6.7f, 0.0f, 19.1f));
-    prop_u = project_world_point(g, enemy_model_point(enemy, 0.0f, 6.7f, 19.1f));
-    prop_d = project_world_point(g, enemy_model_point(enemy, 0.0f, -6.7f, 19.1f));
-    if (prop_l.visible && prop_r.visible)
-        line(s, prop_l.x, prop_l.y, prop_r.x, prop_r.y, rgb(s, 119, 79, 44));
-    if (prop_u.visible && prop_d.visible)
-        line(s, prop_u.x, prop_u.y, prop_d.x, prop_d.y, rgb(s, 119, 79, 44));
-    wheel_l = project_world_point(g, enemy_model_point(enemy, -4.1f, -4.2f, 3.0f));
-    wheel_r = project_world_point(g, enemy_model_point(enemy, 4.1f, -4.2f, 3.0f));
-    if (wheel_l.visible && cowling.visible) {
-        line(s, cowling.x, cowling.y, wheel_l.x, wheel_l.y, outline);
-        circle(s, wheel_l.x, wheel_l.y, centre.depth < 700 ? 4 : 2, outline);
-    }
-    if (wheel_r.visible && cowling.visible) {
-        line(s, cowling.x, cowling.y, wheel_r.x, wheel_r.y, outline);
-        circle(s, wheel_r.x, wheel_r.y, centre.depth < 700 ? 4 : 2, outline);
-    }
-    if (wheel_l.visible && wheel_r.visible)
-        line(s, wheel_l.x, wheel_l.y, wheel_r.x, wheel_r.y,
-             rgb(s, 61, 52, 45));
-    mark_l = project_world_point(g, enemy_model_point(enemy, -11.0f, 2.08f, 0.0f));
-    mark_r = project_world_point(g, enemy_model_point(enemy, 11.0f, 2.08f, 0.0f));
-    if (centre.depth < 1050.0f) {
-        Projected3D mark_l_v0 = project_world_point(g,
-            enemy_model_point(enemy, -11.0f, 2.10f, -2.1f));
-        Projected3D mark_l_v1 = project_world_point(g,
-            enemy_model_point(enemy, -11.0f, 2.10f, 2.1f));
-        Projected3D mark_l_h0 = project_world_point(g,
-            enemy_model_point(enemy, -13.1f, 2.10f, 0.0f));
-        Projected3D mark_l_h1 = project_world_point(g,
-            enemy_model_point(enemy, -8.9f, 2.10f, 0.0f));
-        Projected3D mark_r_v0 = project_world_point(g,
-            enemy_model_point(enemy, 11.0f, 2.10f, -2.1f));
-        Projected3D mark_r_v1 = project_world_point(g,
-            enemy_model_point(enemy, 11.0f, 2.10f, 2.1f));
-        Projected3D mark_r_h0 = project_world_point(g,
-            enemy_model_point(enemy, 8.9f, 2.10f, 0.0f));
-        Projected3D mark_r_h1 = project_world_point(g,
-            enemy_model_point(enemy, 13.1f, 2.10f, 0.0f));
-        if (mark_l.visible && mark_l_v0.visible && mark_l_v1.visible &&
-            mark_l_h0.visible && mark_l_h1.visible) {
-            int thick;
-            for (thick = -1; thick <= 1; ++thick) {
-                line(s, mark_l_v0.x + thick, mark_l_v0.y,
-                     mark_l_v1.x + thick, mark_l_v1.y, outline);
-                line(s, mark_l_h0.x, mark_l_h0.y + thick,
-                     mark_l_h1.x, mark_l_h1.y + thick, outline);
-            }
-        }
-        if (mark_r.visible && mark_r_v0.visible && mark_r_v1.visible &&
-            mark_r_h0.visible && mark_r_h1.visible) {
-            int thick;
-            for (thick = -1; thick <= 1; ++thick) {
-                line(s, mark_r_v0.x + thick, mark_r_v0.y,
-                     mark_r_v1.x + thick, mark_r_v1.y, outline);
-                line(s, mark_r_h0.x, mark_r_h0.y + thick,
-                     mark_r_h1.x, mark_r_h1.y + thick, outline);
-            }
-        }
-    } else {
-        if (mark_l.visible) circle(s, mark_l.x, mark_l.y, 1, outline);
-        if (mark_r.visible) circle(s, mark_r.x, mark_r.y, 1, outline);
-    }
-    if (enemy->hp < enemy->max_hp && rear.visible) {
-        int smoke = (enemy->max_hp - enemy->hp) * 2 + 2;
-        for (i = 0; i < smoke; ++i)
-            circle(s, rear.x - i * 3, rear.y + (i & 1), 2 + i / 3,
-                   rgb(s, 69 + i * 5, 66 + i * 5, 61 + i * 5));
     }
 }
 
@@ -5116,14 +5340,705 @@ static void draw_dogfight_particles(Game *g, int foreground)
     }
 }
 
+/* ---- Shaded aircraft ----------------------------------------------------
+ *
+ * Each aeroplane is a small faceted model lit by the low evening sun.  The
+ * faces are sorted far to near, wings and tail show their doped upper or
+ * pale under surfaces depending on which side faces the camera, and the
+ * national markings sit on the panels as their own faces.  Model axes are
+ * metres: x right, y up, z forward. */
+#define MESH_MAX_VERTS 96
+#define MESH_MAX_FACES 72
+#define FACE_TWO_SIDED 1
+#define FACE_OUTLINE 2
+
+enum {
+    MAT_WING_TOP, MAT_WING_UNDER, MAT_BODY, MAT_BODY_DARK, MAT_TAIL,
+    MAT_METAL, MAT_MARK_LIGHT, MAT_MARK_DARK, MAT_MARK_RED, MAT_MARK_BLUE,
+    MAT_COUNT
+};
+
+typedef struct {
+    int count;
+    unsigned char index[8];
+    unsigned char material, under, flags;
+    signed char parent;
+    float bias;
+} MeshFace;
+
+typedef struct {
+    int verts, faces, parent_for_new;
+    float v[MESH_MAX_VERTS][3];
+    MeshFace f[MESH_MAX_FACES];
+} AircraftMesh;
+
+typedef struct {
+    uint8_t rgb[MAT_COUNT][3];
+} AircraftLivery;
+
+static const AircraftLivery enemy_liveries[4] = {
+    {{{176, 150, 108}, {196, 188, 164}, {150, 42, 32}, {96, 30, 24},
+      {150, 42, 32}, {70, 68, 62}, {236, 232, 220}, {20, 18, 18},
+      {176, 40, 30}, {40, 60, 120}}},
+    {{{104, 108, 70}, {190, 186, 160}, {164, 132, 62}, {110, 88, 42},
+      {226, 222, 206}, {70, 68, 62}, {236, 232, 220}, {20, 18, 18},
+      {176, 40, 30}, {40, 60, 120}}},
+    {{{122, 100, 120}, {184, 176, 168}, {66, 78, 100}, {42, 50, 66},
+      {184, 64, 44}, {70, 68, 62}, {236, 232, 220}, {20, 18, 18},
+      {176, 40, 30}, {40, 60, 120}}},
+    {{{170, 34, 28}, {150, 46, 40}, {176, 36, 30}, {110, 24, 20},
+      {176, 36, 30}, {60, 58, 54}, {236, 232, 220}, {20, 18, 18},
+      {176, 40, 30}, {40, 60, 120}}}
+};
+
+static const AircraftLivery allied_livery = {
+    {{120, 108, 66}, {206, 196, 166}, {116, 104, 64}, {80, 72, 44},
+     {116, 104, 64}, {80, 80, 76}, {236, 232, 220}, {20, 18, 18},
+     {184, 40, 34}, {36, 58, 128}}
+};
+
+static int mesh_vertex(AircraftMesh *m, float x, float y, float z)
+{
+    m->v[m->verts][0] = x;
+    m->v[m->verts][1] = y;
+    m->v[m->verts][2] = z;
+    return m->verts++;
+}
+
+static void mesh_face(AircraftMesh *m, int count, const int *index,
+                      int material, int under, int flags, float bias)
+{
+    MeshFace *f = &m->f[m->faces++];
+    int i;
+    f->count = count;
+    for (i = 0; i < count; ++i) f->index[i] = (unsigned char)index[i];
+    f->material = (unsigned char)material;
+    f->under = (unsigned char)under;
+    f->flags = (unsigned char)flags;
+    f->parent = (signed char)m->parent_for_new;
+    f->bias = bias;
+}
+
+/* A flat rectangle in a horizontal (y) or vertical side (x) plane. */
+static void mesh_panel_y(AircraftMesh *m, float x0, float x1, float y,
+                         float z0, float z1, int material, int under,
+                         int flags, float bias, int face_up)
+{
+    int q[4];
+    q[0] = mesh_vertex(m, x0, y, z0);
+    q[1] = mesh_vertex(m, x1, y, z0);
+    q[2] = mesh_vertex(m, x1, y, z1);
+    q[3] = mesh_vertex(m, x0, y, z1);
+    if (face_up) {
+        int t = q[1]; q[1] = q[3]; q[3] = t;
+    }
+    mesh_face(m, 4, q, material, under, flags, bias);
+}
+
+static void mesh_disc(AircraftMesh *m, int axis, float cx, float cy, float cz,
+                      float radius, int material, float bias, int positive)
+{
+    int q[8], i;
+    for (i = 0; i < 8; ++i) {
+        float a = (float)i * (float)M_PI / 4.0f;
+        float a1 = cosf(a) * radius, a2 = sinf(a) * radius;
+        if (positive) a2 = -a2;
+        if (axis == 1) q[i] = mesh_vertex(m, cx + a1, cy, cz + a2);
+        else q[i] = mesh_vertex(m, cx, cy + a2, cz + a1);
+    }
+    mesh_face(m, 8, q, material, material, 0, bias);
+}
+
+static void mesh_cross_y(AircraftMesh *m, float cx, float y, float cz,
+                         float size, int up)
+{
+    float s = size, b = size * 0.32f;
+    mesh_panel_y(m, cx - s * 1.18f, cx + s * 1.18f, y, cz - s * 1.18f,
+                 cz + s * 1.18f, MAT_MARK_LIGHT, MAT_MARK_LIGHT, 0, -0.02f, up);
+    mesh_panel_y(m, cx - s, cx + s, y, cz - b, cz + b,
+                 MAT_MARK_DARK, MAT_MARK_DARK, 0, -0.04f, up);
+    mesh_panel_y(m, cx - b, cx + b, y, cz - s, cz + s,
+                 MAT_MARK_DARK, MAT_MARK_DARK, 0, -0.05f, up);
+}
+
+static void build_aircraft_mesh(AircraftMesh *m, int allied)
+{
+    int q[4];
+    int nose[4], mid[4], tail[4];
+    int k;
+    memset(m, 0, sizeof(*m));
+    m->parent_for_new = -1;
+    /* Upper and lower wings: one panel each, both sides painted. */
+    mesh_panel_y(m, -8.7f, 8.7f, 1.35f, -1.25f, 1.8f, MAT_WING_TOP,
+                 MAT_WING_UNDER, FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 1);
+    mesh_panel_y(m, -7.8f, 7.8f, -0.95f, -1.05f, 1.75f, MAT_WING_TOP,
+                 MAT_WING_UNDER, FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 1);
+    /* Tailplane and fin. */
+    q[0] = mesh_vertex(m, -2.9f, 0.15f, -6.75f);
+    q[3] = mesh_vertex(m, 2.9f, 0.15f, -6.75f);
+    q[2] = mesh_vertex(m, 2.2f, 0.15f, -5.2f);
+    q[1] = mesh_vertex(m, -2.2f, 0.15f, -5.2f);
+    mesh_face(m, 4, q, MAT_TAIL, MAT_WING_UNDER,
+              FACE_TWO_SIDED | FACE_OUTLINE, 0.0f);
+    q[0] = mesh_vertex(m, 0.0f, 0.25f, -5.0f);
+    q[1] = mesh_vertex(m, 0.0f, 0.25f, -7.0f);
+    q[2] = mesh_vertex(m, 0.0f, 2.15f, -6.8f);
+    q[3] = mesh_vertex(m, 0.0f, 1.75f, -5.7f);
+    mesh_face(m, 4, q, MAT_TAIL, MAT_TAIL, FACE_TWO_SIDED | FACE_OUTLINE, 0.0f);
+    /* Fuselage: three box sections, closed so the back faces cull. */
+    nose[0] = mesh_vertex(m, -0.82f, 0.72f, 4.4f);
+    nose[1] = mesh_vertex(m, 0.82f, 0.72f, 4.4f);
+    nose[2] = mesh_vertex(m, 0.74f, -0.82f, 4.4f);
+    nose[3] = mesh_vertex(m, -0.74f, -0.82f, 4.4f);
+    mid[0] = mesh_vertex(m, -0.78f, 0.7f, -0.6f);
+    mid[1] = mesh_vertex(m, 0.78f, 0.7f, -0.6f);
+    mid[2] = mesh_vertex(m, 0.62f, -0.78f, -0.6f);
+    mid[3] = mesh_vertex(m, -0.62f, -0.78f, -0.6f);
+    tail[0] = mesh_vertex(m, -0.14f, 0.34f, -6.9f);
+    tail[1] = mesh_vertex(m, 0.14f, 0.34f, -6.9f);
+    tail[2] = mesh_vertex(m, 0.1f, -0.06f, -6.9f);
+    tail[3] = mesh_vertex(m, -0.1f, -0.06f, -6.9f);
+    for (k = 0; k < 4; ++k) {
+        int n = (k + 1) & 3;
+        int material = k == 2 ? MAT_BODY_DARK : MAT_BODY;
+        q[0] = nose[k]; q[1] = nose[n]; q[2] = mid[n]; q[3] = mid[k];
+        mesh_face(m, 4, q, k == 0 ? MAT_METAL : material, 0, 0, 0.0f);
+        q[0] = mid[k]; q[1] = mid[n]; q[2] = tail[n]; q[3] = tail[k];
+        mesh_face(m, 4, q, material, 0, 0, 0.0f);
+    }
+    q[0] = nose[3]; q[1] = nose[2]; q[2] = nose[1]; q[3] = nose[0];
+    mesh_face(m, 4, q, MAT_METAL, 0, 0, 0.0f);
+    q[0] = tail[0]; q[1] = tail[1]; q[2] = tail[2]; q[3] = tail[3];
+    mesh_face(m, 4, q, MAT_BODY, 0, 0, 0.0f);
+    /* Markings on the wing tips, drawn straight after the wing they sit
+     * on (faces 0 and 1) so depth sorting can never hide them. */
+    if (allied) {
+        m->parent_for_new = 0;
+        mesh_disc(m, 1, -6.4f, 1.37f, 0.3f, 1.05f, MAT_MARK_BLUE, -0.02f, 1);
+        mesh_disc(m, 1, -6.4f, 1.38f, 0.3f, 0.68f, MAT_MARK_LIGHT, -0.04f, 1);
+        mesh_disc(m, 1, -6.4f, 1.39f, 0.3f, 0.34f, MAT_MARK_RED, -0.06f, 1);
+        mesh_disc(m, 1, 6.4f, 1.37f, 0.3f, 1.05f, MAT_MARK_BLUE, -0.02f, 1);
+        mesh_disc(m, 1, 6.4f, 1.38f, 0.3f, 0.68f, MAT_MARK_LIGHT, -0.04f, 1);
+        mesh_disc(m, 1, 6.4f, 1.39f, 0.3f, 0.34f, MAT_MARK_RED, -0.06f, 1);
+        m->parent_for_new = 1;
+        mesh_disc(m, 1, -5.6f, -0.97f, 0.35f, 0.95f, MAT_MARK_BLUE, -0.02f, 0);
+        mesh_disc(m, 1, -5.6f, -0.98f, 0.35f, 0.6f, MAT_MARK_LIGHT, -0.04f, 0);
+        mesh_disc(m, 1, -5.6f, -0.99f, 0.35f, 0.3f, MAT_MARK_RED, -0.06f, 0);
+        mesh_disc(m, 1, 5.6f, -0.97f, 0.35f, 0.95f, MAT_MARK_BLUE, -0.02f, 0);
+        mesh_disc(m, 1, 5.6f, -0.98f, 0.35f, 0.6f, MAT_MARK_LIGHT, -0.04f, 0);
+        mesh_disc(m, 1, 5.6f, -0.99f, 0.35f, 0.3f, MAT_MARK_RED, -0.06f, 0);
+    } else {
+        m->parent_for_new = 0;
+        mesh_cross_y(m, -6.6f, 1.37f, 0.28f, 0.8f, 1);
+        mesh_cross_y(m, 6.6f, 1.37f, 0.28f, 0.8f, 1);
+        m->parent_for_new = 1;
+        mesh_cross_y(m, -5.8f, -0.97f, 0.35f, 0.72f, 0);
+        mesh_cross_y(m, 5.8f, -0.97f, 0.35f, 0.72f, 0);
+    }
+    m->parent_for_new = -1;
+}
+
+static const AircraftMesh *aircraft_mesh(int allied)
+{
+    static AircraftMesh meshes[2];
+    static int built[2];
+    allied = allied ? 1 : 0;
+    if (!built[allied]) {
+        build_aircraft_mesh(&meshes[allied], allied);
+        built[allied] = 1;
+    }
+    return &meshes[allied];
+}
+
+typedef struct {
+    Vec3 pos, right, up, forward;
+} AircraftPose;
+
+/* Pose from a flight quaternion: body x forward, y right, z down in NED,
+ * converted to the renderer's x east, y up, z north. */
+static AircraftPose pose_from_flight(const FlightState *f, Vec3 pos)
+{
+    AircraftPose p;
+    Vec3 fwd = flight_rotate_to_ned(f, 1.0f, 0.0f, 0.0f);
+    Vec3 rt = flight_rotate_to_ned(f, 0.0f, 1.0f, 0.0f);
+    Vec3 dn = flight_rotate_to_ned(f, 0.0f, 0.0f, 1.0f);
+    p.pos = pos;
+    p.forward = (Vec3){fwd.y, -fwd.z, fwd.x};
+    p.right = (Vec3){rt.y, -rt.z, rt.x};
+    p.up = (Vec3){-dn.y, dn.z, -dn.x};
+    return p;
+}
+
+static Vec3 pose_point(const AircraftPose *p, float x, float y, float z)
+{
+    Vec3 out;
+    out.x = p->pos.x + p->right.x * x + p->up.x * y + p->forward.x * z;
+    out.y = p->pos.y + p->right.y * x + p->up.y * y + p->forward.y * z;
+    out.z = p->pos.z + p->right.z * x + p->up.z * y + p->forward.z * z;
+    return out;
+}
+
+static Vec3 sun_direction(void)
+{
+    static Vec3 sun;
+    static int ready;
+    if (!ready) {
+        float ce = cosf(SUN_ELEVATION);
+        sun.x = sinf(SUN_AZIMUTH) * ce;
+        sun.y = sinf(SUN_ELEVATION) + 0.35f;
+        sun.z = cosf(SUN_AZIMUTH) * ce;
+        {
+            float l = sqrtf(sun.x * sun.x + sun.y * sun.y + sun.z * sun.z);
+            sun.x /= l; sun.y /= l; sun.z /= l;
+        }
+        ready = 1;
+    }
+    return sun;
+}
+
+typedef struct {
+    float depth;
+    int face;
+    int under;
+    pix_t colour;
+} SortedFace;
+
+static void draw_aircraft_far(Game *g, const AircraftPose *p,
+                              Projected3D centre, pix_t body)
+{
+    SDL_Surface *s = g->screen;
+    Projected3D wl = project_world_point(g, pose_point(p, -8.7f, 1.0f, 0.0f));
+    Projected3D wr = project_world_point(g, pose_point(p, 8.7f, 1.0f, 0.0f));
+    Projected3D nn = project_world_point(g, pose_point(p, 0.0f, 0.0f, 4.4f));
+    Projected3D tt = project_world_point(g, pose_point(p, 0.0f, 0.3f, -6.9f));
+    pix_t dark = pix_mix(PIX_PACK(30, 26, 24), g->world_haze,
+                         centre.depth > 2500.0f ? 14 : 4);
+    if (wl.visible && wr.visible) {
+        line(s, wl.x, wl.y, wr.x, wr.y, dark);
+        if (centre.depth < 1100.0f)
+            line(s, wl.x, wl.y + 1, wr.x, wr.y + 1, dark);
+    }
+    if (nn.visible && tt.visible) line(s, nn.x, nn.y, tt.x, tt.y, body);
+    if (wl.x == wr.x && wl.y == wr.y) pixel(s, centre.x, centre.y, dark);
+}
+
+/* Draws one aircraft.  Returns 0 when it is off screen. */
+static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
+                              const AircraftLivery *livery, int allied,
+                              int smoking)
+{
+    SDL_Surface *s = g->screen;
+    const AircraftMesh *m = aircraft_mesh(allied);
+    Vec3 world[MESH_MAX_VERTS];
+    Projected3D screen[MESH_MAX_VERTS];
+    SortedFace order[MESH_MAX_FACES];
+    pix_t face_colour[MESH_MAX_FACES];
+    unsigned char face_shown[MESH_MAX_FACES];
+    pix_t base[MAT_COUNT];
+    Vec3 sun = sun_direction();
+    Projected3D centre = project_world_point(g, pose->pos);
+    int i, j, count = 0;
+    int haze;
+    if (!centre.visible || centre.x < -260 || centre.x > SCREEN_W + 260 ||
+        centre.y < -260 || centre.y > SCREEN_H + 260) return 0;
+    haze = (int)flight_clamp((centre.depth - 900.0f) * 32.0f / 9000.0f,
+                             0.0f, 26.0f);
+    for (i = 0; i < MAT_COUNT; ++i)
+        base[i] = PIX_PACK(livery->rgb[i][0], livery->rgb[i][1],
+                           livery->rgb[i][2]);
+    if (centre.depth > 640.0f) {
+        draw_aircraft_far(g, pose, centre,
+                          pix_mix(base[MAT_BODY], g->world_haze, haze));
+        return 1;
+    }
+    for (i = 0; i < m->verts; ++i) {
+        world[i] = pose_point(pose, m->v[i][0], m->v[i][1], m->v[i][2]);
+        screen[i] = project_world_point(g, world[i]);
+    }
+    memset(face_shown, 0, sizeof(face_shown));
+    for (i = 0; i < m->faces; ++i) {
+        const MeshFace *f = &m->f[i];
+        Vec3 a = world[f->index[0]], b = world[f->index[1]],
+             c = world[f->index[2]];
+        float ex = b.x - a.x, ey = b.y - a.y, ez = b.z - a.z;
+        float fx = c.x - a.x, fy = c.y - a.y, fz = c.z - a.z;
+        float nx = ey * fz - ez * fy, ny = ez * fx - ex * fz,
+              nz = ex * fy - ey * fx;
+        float vx = g->flight_x - a.x, vy = g->flight_y - a.y,
+              vz = g->flight_z - a.z;
+        float facing = nx * vx + ny * vy + nz * vz;
+        float len, light, depth = 0.0f;
+        int under = 0, material, k, visible = 1;
+        for (k = 0; k < f->count; ++k) {
+            if (!screen[f->index[k]].visible) { visible = 0; break; }
+            depth += screen[f->index[k]].depth;
+        }
+        if (!visible) continue;
+        if (facing < 0.0f) {
+            if (!(f->flags & FACE_TWO_SIDED)) continue;
+            nx = -nx; ny = -ny; nz = -nz;
+            under = 1;
+        }
+        len = sqrtf(nx * nx + ny * ny + nz * nz);
+        if (len < 1e-6f) continue;
+        light = (nx * sun.x + ny * sun.y + nz * sun.z) / len;
+        if (light < 0.0f) light = 0.0f;
+        material = under ? f->under : f->material;
+        order[count].colour = pix_mix(PIX_PACK(0, 0, 0), base[material],
+                                      12 + (int)(light * 20.0f));
+        order[count].colour = pix_mix(order[count].colour,
+                                      PIX_PACK(255, 178, 126), 3);
+        if (haze) order[count].colour = pix_mix(order[count].colour,
+                                                g->world_haze, haze);
+        face_colour[i] = order[count].colour;
+        face_shown[i] = 1;
+        if (f->parent >= 0) continue;
+        order[count].depth = depth / (float)f->count + f->bias;
+        order[count].face = i;
+        order[count].under = under;
+        ++count;
+    }
+    for (i = 1; i < count; ++i) {
+        SortedFace item = order[i];
+        j = i - 1;
+        while (j >= 0 && order[j].depth < item.depth) {
+            order[j + 1] = order[j];
+            --j;
+        }
+        order[j + 1] = item;
+    }
+    for (i = 0; i < count; ++i) {
+        const MeshFace *f = &m->f[order[i].face];
+        Projected3D p0 = screen[f->index[0]];
+        int k;
+        for (k = 1; k + 1 < f->count; ++k) {
+            Projected3D p1 = screen[f->index[k]];
+            Projected3D p2 = screen[f->index[k + 1]];
+            fill_triangle(s, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y,
+                          order[i].colour);
+        }
+        if ((f->flags & FACE_OUTLINE) && centre.depth < 420.0f) {
+            pix_t edge = pix_mix(PIX_PACK(0, 0, 0), order[i].colour, 15);
+            for (k = 0; k < f->count; ++k) {
+                Projected3D a = screen[f->index[k]];
+                Projected3D b = screen[f->index[(k + 1) % f->count]];
+                line(s, a.x, a.y, b.x, b.y, edge);
+            }
+        }
+        for (j = 0; j < m->faces; ++j) {
+            const MeshFace *mark = &m->f[j];
+            if (mark->parent != order[i].face || !face_shown[j]) continue;
+            p0 = screen[mark->index[0]];
+            for (k = 1; k + 1 < mark->count; ++k) {
+                Projected3D p1 = screen[mark->index[k]];
+                Projected3D p2 = screen[mark->index[k + 1]];
+                fill_triangle(s, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y,
+                              face_colour[j]);
+            }
+        }
+    }
+    /* Struts, wires, undercarriage, pilot and the spinning propeller. */
+    if (centre.depth < 520.0f) {
+        static const float struts[][6] = {
+            {-5.6f, 1.35f, 0.9f, -5.1f, -0.95f, 0.9f},
+            {5.6f, 1.35f, 0.9f, 5.1f, -0.95f, 0.9f},
+            {-5.6f, 1.35f, -0.4f, -5.1f, -0.95f, -0.4f},
+            {5.6f, 1.35f, -0.4f, 5.1f, -0.95f, -0.4f},
+            {-0.7f, 1.35f, 1.2f, -0.6f, 0.7f, 1.6f},
+            {0.7f, 1.35f, 1.2f, 0.6f, 0.7f, 1.6f},
+            {-0.6f, -0.8f, 2.6f, -0.9f, -2.1f, 2.4f},
+            {0.6f, -0.8f, 2.6f, 0.9f, -2.1f, 2.4f}
+        };
+        pix_t strut = pix_mix(PIX_PACK(42, 34, 28), g->world_haze, haze);
+        Projected3D head = project_world_point(g,
+            pose_point(pose, 0.0f, 1.0f, -0.4f));
+        Projected3D hub = project_world_point(g,
+            pose_point(pose, 0.0f, 0.0f, 4.7f));
+        Projected3D tip = project_world_point(g,
+            pose_point(pose, 0.0f, 1.3f, 4.7f));
+        for (i = 0; i < 8; ++i) {
+            Projected3D a = project_world_point(g, pose_point(pose,
+                struts[i][0], struts[i][1], struts[i][2]));
+            Projected3D b = project_world_point(g, pose_point(pose,
+                struts[i][3], struts[i][4], struts[i][5]));
+            if (a.visible && b.visible) line(s, a.x, a.y, b.x, b.y, strut);
+        }
+        if (head.visible && centre.depth < 380.0f)
+            circle(s, head.x, head.y, centre.depth < 160.0f ? 2 : 1,
+                   PIX_PACK(48, 36, 30));
+        if (hub.visible && tip.visible) {
+            int dx = tip.x - hub.x, dy = tip.y - hub.y;
+            int r = (int)sqrtf((float)(dx * dx + dy * dy));
+            if (r >= 3)
+                blend_circle(s, hub.x, hub.y, r, 210, 200, 180, 70);
+        }
+    }
+    if (smoking) {
+        Projected3D tail = project_world_point(g,
+            pose_point(pose, 0.0f, 0.0f, -2.0f));
+        if (tail.visible) {
+            int r = (int)(900.0f / tail.depth);
+            if (r < 2) r = 2;
+            if (r > 18) r = 18;
+            blend_circle(s, tail.x, tail.y, r, 40, 36, 34, 150);
+        }
+    }
+    return 1;
+}
+
+/* ---- Living cockpit -----------------------------------------------------
+ *
+ * The painted cockpit is composed once with the underside of the upper
+ * wing, its struts and wires.  The painted dial needles are cleaned off at
+ * load and live needles are drawn every frame.  The whole composite shakes
+ * with the engine and kicks when the guns fire. */
+typedef struct {
+    int x, y, radius;
+    int dark_face;
+} CockpitDial;
+
+static const CockpitDial cockpit_dials[4] = {
+    {242, 371, 21, 1},  /* airspeed */
+    {321, 364, 24, 0},  /* altimeter */
+    {379, 366, 16, 0},  /* engine revolutions */
+    {427, 370, 12, 1}   /* fuel */
+};
+
+static void fill_quad(SDL_Surface *s, int x0, int y0, int x1, int y1,
+                      int x2, int y2, int x3, int y3, uint32_t c)
+{
+    fill_triangle(s, x0, y0, x1, y1, x2, y2, c);
+    fill_triangle(s, x0, y0, x2, y2, x3, y3, c);
+}
+
+static void draw_strut(SDL_Surface *s, int x0, int y0, int x1, int y1,
+                       int top_width, int bottom_width)
+{
+    fill_quad(s, x0 - top_width / 2, y0, x0 + top_width / 2, y0,
+              x1 + bottom_width / 2, y1, x1 - bottom_width / 2, y1,
+              PIX_PACK(84, 56, 36));
+    line(s, x0 - top_width / 2 + 1, y0, x1 - bottom_width / 2 + 1, y1,
+         PIX_PACK(152, 104, 62));
+    line(s, x0 + top_width / 2, y0, x1 + bottom_width / 2, y1,
+         PIX_PACK(46, 30, 20));
+}
+
+static void erase_painted_needle(SDL_Surface *s, const CockpitDial *d)
+{
+    int r = d->radius, x, y;
+    uint32_t sr = 0, sg = 0, sb = 0, n = 0;
+    int inner = r * 72 / 100;
+    uint8_t fr, fg, fb;
+    pix_t face;
+    for (y = -r; y <= r; ++y)
+        for (x = -r; x <= r; ++x) {
+            int dist2 = x * x + y * y;
+            uint8_t pr, pg, pb;
+            if (dist2 < (r * 30 / 100) * (r * 30 / 100) ||
+                dist2 > (r * 60 / 100) * (r * 60 / 100)) continue;
+            unpack_rgb(s->format, surface_pixel(s, d->x + x, d->y + y),
+                       &pr, &pg, &pb);
+            sr += pr; sg += pg; sb += pb; ++n;
+        }
+    if (!n) return;
+    fr = (uint8_t)(sr / n); fg = (uint8_t)(sg / n); fb = (uint8_t)(sb / n);
+    face = PIX_PACK(fr, fg, fb);
+    for (y = -inner; y <= inner; ++y)
+        for (x = -inner; x <= inner; ++x) {
+            uint8_t pr, pg, pb;
+            int diff;
+            if (x * x + y * y > inner * inner) continue;
+            unpack_rgb(s->format, surface_pixel(s, d->x + x, d->y + y),
+                       &pr, &pg, &pb);
+            diff = abs((int)pr - fr) + abs((int)pg - fg) + abs((int)pb - fb);
+            if (diff > 54)
+                PIX_ROW(s, d->y + y)[d->x + x] = face;
+        }
+}
+
+static void build_cockpit_composite(Game *g)
+{
+    SDL_Surface *c;
+    pix_t key = PIX_PACK(255, 0, 255);
+    int y, i;
+    if (!g->pilot_cockpit) return;
+    c = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
+                                       CANVAS_SCREEN_BITS,
+                                       CANVAS_SCREEN_FORMAT);
+    if (!c) return;
+    SDL_FillRect(c, NULL, key);
+    /* Underside of the upper wing: doped linen in its own shadow, warming
+     * toward the leading edge where the low sun catches it. */
+    for (y = 0; y < 46; ++y) {
+        int t = y * 32 / 45;
+        pix_t shade = pix_mix(PIX_PACK(96, 80, 70), PIX_PACK(178, 150, 118), t);
+        pix_t *row = PIX_ROW(c, y);
+        int x;
+        for (x = 0; x < SCREEN_W; ++x) row[x] = shade;
+    }
+    for (y = 41; y < 47; ++y) {
+        pix_t *row = PIX_ROW(c, y);
+        int x;
+        pix_t rim = y < 44 ? PIX_PACK(214, 178, 132) : PIX_PACK(120, 92, 70);
+        for (x = 0; x < SCREEN_W; ++x) row[x] = rim;
+    }
+    /* Ribs run fore and aft, so they converge on the vanishing point. */
+    for (i = -12; i <= 12; ++i) {
+        float span = (float)i * 0.35f;
+        int top_x = 320 + (int)(span * 305.0f);
+        int bottom_x = 320 + (int)(span * 236.0f);
+        line(c, top_x, 0, bottom_x, 41, PIX_PACK(186, 160, 126));
+        line(c, top_x + 1, 0, bottom_x + 1, 41, PIX_PACK(84, 70, 60));
+    }
+    /* A small cut-out over the pilot's head shows the sky through it. */
+    for (y = 0; y < 30; ++y) {
+        int half = (int)(64.0f * sqrtf(1.0f - (float)(y * y) / 900.0f));
+        pix_t *row = PIX_ROW(c, y);
+        int x;
+        for (x = 320 - half; x < 320 + half; ++x) row[x] = key;
+        if (320 - half - 1 >= 0) row[320 - half - 1] = PIX_PACK(70, 54, 44);
+        if (320 + half < SCREEN_W) row[320 + half] = PIX_PACK(70, 54, 44);
+    }
+    /* Flying wires, interplane and cabane struts. */
+    line(c, 92, 46, 246, 262, PIX_PACK(58, 54, 50));
+    line(c, 548, 46, 394, 262, PIX_PACK(58, 54, 50));
+    line(c, 30, 46, 238, 270, PIX_PACK(66, 60, 54));
+    line(c, 610, 46, 402, 270, PIX_PACK(66, 60, 54));
+    draw_strut(c, 24, 46, 54, 318, 12, 9);
+    draw_strut(c, 616, 46, 586, 318, 12, 9);
+    draw_strut(c, 206, 46, 251, 236, 9, 7);
+    draw_strut(c, 434, 46, 389, 236, 9, 7);
+    SDL_BlitSurface(g->pilot_cockpit, NULL, c, NULL);
+    for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
+    SDL_SetColorKey(c, SDL_TRUE, key);
+    g->cockpit_composite = c;
+}
+
+static void draw_needle(SDL_Surface *s, const CockpitDial *d, int ox, int oy,
+                        float fraction, float sweep)
+{
+    /* fraction 0..1 round a dial whose zero sits at the bottom-left and
+     * sweeps clockwise through 'sweep' radians. */
+    float start = sweep > 6.2f ? -(float)M_PI * 0.5f :
+                  (float)M_PI * 0.5f + ((float)M_PI * 2.0f - sweep) * 0.5f;
+    float angle = start + fraction * sweep;
+    int length = d->radius * 78 / 100;
+    int cx = d->x + ox, cy = d->y + oy;
+    int tx = cx + (int)(cosf(angle) * (float)length);
+    int ty = cy + (int)(sinf(angle) * (float)length);
+    int bx = cx - (int)(cosf(angle) * (float)length * 0.22f);
+    int by = cy - (int)(sinf(angle) * (float)length * 0.22f);
+    pix_t colour = d->dark_face ? PIX_PACK(232, 214, 168) : PIX_PACK(28, 22, 20);
+    line(s, bx, by, tx, ty, colour);
+    line(s, bx + 1, by, tx + 1, ty, colour);
+    circle(s, cx, cy, 2, PIX_PACK(166, 126, 60));
+}
+
+static void draw_living_cockpit(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t now = SDL_GetTicks();
+    int ox = 0, oy = 0;
+    float vibration = 0.35f + g->flight_throttle * 0.9f;
+    float altitude_fraction;
+    if (g->flight_crashed) vibration = 0.0f;
+    oy = (int)(sinf((float)now * 0.061f) * vibration + 0.5f);
+    if (g->gun_recoil > 0.0f) {
+        oy += (int)(g->gun_recoil * 2.4f);
+        ox += ((now / 23u) & 1u) ? 1 : -1;
+    }
+    if (g->shake > 0.0f) {
+        ox += (int)(sinf((float)now * 0.093f) * g->shake * 5.0f);
+        oy += (int)(cosf((float)now * 0.077f) * g->shake * 4.0f);
+    }
+    if (g->cockpit_composite) {
+        SDL_Rect at;
+        at.x = ox; at.y = oy; at.w = SCREEN_W; at.h = SCREEN_H;
+        SDL_BlitSurface(g->cockpit_composite, NULL, s, &at);
+    } else if (g->pilot_cockpit) {
+        SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
+        return;
+    }
+    draw_needle(s, &cockpit_dials[0], ox, oy,
+                flight_clamp(g->airspeed / 160.0f, 0.0f, 1.0f), 5.2f);
+    altitude_fraction = fmodf(g->flight_y * 3.28084f / 10000.0f, 1.0f);
+    if (altitude_fraction < 0.0f) altitude_fraction += 1.0f;
+    draw_needle(s, &cockpit_dials[1], ox, oy, altitude_fraction,
+                (float)M_PI * 2.0f);
+    draw_needle(s, &cockpit_dials[2], ox, oy,
+                flight_clamp(g->flight_crashed ? 0.0f :
+                             0.15f + g->flight_throttle * 0.8f +
+                             sinf((float)now * 0.013f) * 0.01f, 0.0f, 1.0f),
+                4.6f);
+    draw_needle(s, &cockpit_dials[3], ox, oy,
+                flight_clamp(g->fuel / 100.0f, 0.0f, 1.0f), 3.6f);
+}
+
+/* One small brass plate replaces the six signs of the old view. */
+static void draw_cockpit_plate(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    char buf[64];
+    uint32_t now = SDL_GetTicks();
+    int health = g->health > 0 ? g->health : 0;
+    blend_rect(s, 8, 54, 176, 38, 24, 18, 14, 170);
+    rect(s, 8, 54, 176, 1, PIX_PACK(176, 134, 62));
+    rect(s, 8, 91, 176, 1, PIX_PACK(120, 90, 44));
+    if (perspective_enemy_total(g) > 0)
+        snprintf(buf, sizeof(buf), "AMMO %03d  DOWNED %d/%d",
+                 g->ammunition, g->kills, perspective_enemy_total(g));
+    else
+        snprintf(buf, sizeof(buf), "UNARMED PATROL");
+    typewriter_text(g, 14, 59, buf, 7, 11, PIX_PACK(239, 215, 155));
+    rect(s, 14, 76, 164, 8, PIX_PACK(40, 30, 24));
+    rect(s, 15, 77, 162 * health / 100, 6,
+         health > 50 ? PIX_PACK(176, 150, 92) :
+         health > 25 ? PIX_PACK(200, 130, 50) : PIX_PACK(200, 60, 40));
+    if (g->flight_stalled && ((now / 220u) & 1u))
+        draw_field_sign(g, 260, 108, 120, "STALL");
+    if (g->notice_until && now < g->notice_until)
+        draw_field_sign(g, 200, 140, 240, g->notice);
+}
+
+static void show_notice(Game *g, const char *text)
+{
+    snprintf(g->notice, sizeof(g->notice), "%s", text);
+    g->notice_until = SDL_GetTicks() + 1800u;
+}
+
+static const AircraftLivery *enemy_livery(const Game *g, int index)
+{
+    if (index == 0 && g->chapter >= 3) return &enemy_liveries[3];
+    return &enemy_liveries[(index + g->mission) % 3];
+}
+
+/* Until they join the fight, the flight holds a loose formation on us. */
+static int wingman_formation_pose(const Game *g, int index,
+                                  AircraftPose *pose)
+{
+    static const float offset[3][3] = {
+        {-34.0f, 2.0f, 70.0f}, {40.0f, -3.0f, 95.0f}, {-72.0f, 6.0f, 130.0f}
+    };
+    AircraftPose me;
+    if (index < 0 || index > 2 || g->wingman_health[index] <= 0 ||
+        !chapters[g->chapter].armed) return 0;
+    me = pose_from_flight(&g->flight,
+                          (Vec3){g->flight_x, g->flight_y, g->flight_z});
+    *pose = me;
+    pose->pos = pose_point(&me, offset[index][0], offset[index][1],
+                           offset[index][2]);
+    /* A slow weave keeps them from looking bolted to our aircraft. */
+    pose->pos.y += sinf((float)SDL_GetTicks() * 0.0011f + index * 2.1f) * 3.0f;
+    return 1;
+}
+
 static void draw_dogfight_simulator(Game *g)
 {
     SDL_Surface *s = g->screen;
-    int order[MAX_ENEMIES];
-    float depth[MAX_ENEMIES];
+    int order[MAX_ENEMIES + 3];
+    float depth[MAX_ENEMIES + 3];
     int count = 0;
     int i, j;
-    char buf[64];
     uint32_t now = SDL_GetTicks();
     draw_simulator_terrain(g);
     draw_simulator_clouds(g);
@@ -5131,6 +6046,13 @@ static void draw_dogfight_simulator(Game *g)
         Projected3D p = project_world_point(g, (Vec3){g->enemies[i].world_x,
             g->enemies[i].world_y, g->enemies[i].world_z});
         if (p.visible) { order[count] = i; depth[count++] = p.depth; }
+    }
+    for (i = 0; i < 3; ++i) {
+        AircraftPose pose;
+        Projected3D p;
+        if (!wingman_formation_pose(g, i, &pose)) continue;
+        p = project_world_point(g, pose.pos);
+        if (p.visible) { order[count] = MAX_ENEMIES + i; depth[count++] = p.depth; }
     }
     for (i = 0; i < count; ++i) for (j = i + 1; j < count; ++j) {
         if (depth[i] < depth[j]) {
@@ -5140,10 +6062,21 @@ static void draw_dogfight_simulator(Game *g)
         }
     }
     for (i = 0; i < count; ++i) {
-        Enemy *enemy = &g->enemies[order[i]];
-        Projected3D p = project_world_point(g, (Vec3){enemy->world_x,
-            enemy->world_y, enemy->world_z});
-        draw_enemy_aircraft_3d(g, enemy);
+        Enemy *enemy;
+        Vec3 pos;
+        AircraftPose pose;
+        Projected3D p;
+        if (order[i] >= MAX_ENEMIES) {
+            if (wingman_formation_pose(g, order[i] - MAX_ENEMIES, &pose))
+                draw_aircraft_mesh(g, &pose, &allied_livery, 1, 0);
+            continue;
+        }
+        enemy = &g->enemies[order[i]];
+        pos = (Vec3){enemy->world_x, enemy->world_y, enemy->world_z};
+        pose = pose_from_flight(&enemy->flight, pos);
+        p = project_world_point(g, pos);
+        draw_aircraft_mesh(g, &pose, enemy_livery(g, order[i]), 0,
+                           enemy->crashing || enemy->hp < enemy->max_hp);
         if (now >= enemy->last_shot && now - enemy->last_shot < 42u &&
             p.visible && p.x >= 0 && p.x < SCREEN_W &&
             p.y >= 0 && p.y < SCREEN_H) {
@@ -5153,8 +6086,7 @@ static void draw_dogfight_simulator(Game *g)
     }
     draw_explosions(g);
     draw_dogfight_particles(g, 0);
-    if (g->pilot_cockpit)
-        SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
+    draw_living_cockpit(g);
     draw_dogfight_bullet_holes(g);
     draw_dogfight_particles(g, 1);
     if (now >= g->last_shot && now - g->last_shot < 45u) {
@@ -5165,24 +6097,7 @@ static void draw_dogfight_simulator(Game *g)
         circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
         circle(s, 350, 228, 2, rgb(s, 255, 238, 157));
     }
-    if (perspective_enemy_total(g) > 0)
-        snprintf(buf, sizeof(buf), "DOWNED %d/%d",
-                 g->kills, perspective_enemy_total(g));
-    else
-        snprintf(buf, sizeof(buf), "UNARMED PATROL");
-    draw_field_sign(g, 8, 342, 130, buf);
-    snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
-    draw_field_sign(g, 8, 371, 130, buf);
-    snprintf(buf, sizeof(buf), "IAS %03d", (int)g->airspeed);
-    draw_field_sign(g, 266, 342, 108, buf);
-    snprintf(buf, sizeof(buf), "ALT %04d", (int)g->flight_y);
-    draw_field_sign(g, 266, 371, 108, buf);
-    snprintf(buf, sizeof(buf), "FUEL %02d", (int)g->fuel);
-    draw_field_sign(g, 526, 342, 106, buf);
-    snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
-    draw_field_sign(g, 502, 371, 130, buf);
-    if (g->flight_stalled && ((now / 220u) & 1u))
-        draw_field_sign(g, 240, 304, 160, "STALL - NOSE DOWN");
+    draw_cockpit_plate(g);
     draw_player_crash_overlay(g);
 }
 
@@ -5831,11 +6746,12 @@ static int game_init(Game *g)
         return 0;
     }
     g->window_surface = SDL_GetWindowSurface(g->window);
-    g->screen = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32,
-                                               SDL_PIXELFORMAT_ARGB8888);
+    g->screen = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
+                                               CANVAS_SCREEN_BITS,
+                                               CANVAS_SCREEN_FORMAT);
     if (!g->window_surface || !g->screen ||
-        g->screen->format->BytesPerPixel != 4) {
-        fprintf(stderr, "Canvas Skies could not create its 32-bit framebuffer\n");
+        g->screen->format->BytesPerPixel != (int)sizeof(pix_t)) {
+        fprintf(stderr, "Canvas Skies could not create its framebuffer\n");
         return 0;
     }
     g->title = SDL_LoadBMP(CANVAS_TITLE_BMP);
@@ -6029,6 +6945,9 @@ static int game_init(Game *g)
                 }
             }
     }
+    prepare_world_textures(g);
+    build_cockpit_composite(g);
+    open_joystick(g);
     init_audio(g);
     set_scene(g, SCENE_TITLE);
     return 1;
@@ -6043,6 +6962,18 @@ static void handle_event(Game *g, SDL_Event *ev)
          ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
         g->window_surface = SDL_GetWindowSurface(g->window);
         g->redraw_static = 1;
+    }
+    if (ev->type == SDL_JOYBUTTONDOWN && g->scene != SCENE_SORTIE) {
+        /* A pad button works as Enter through the menus and story. */
+        SDL_Event key;
+        memset(&key, 0, sizeof(key));
+        key.type = SDL_KEYDOWN;
+        key.key.keysym.scancode = SDL_SCANCODE_RETURN;
+        key.key.keysym.sym = SDLK_RETURN;
+        g->key_latched[SDL_SCANCODE_RETURN] = 0;
+        handle_event(g, &key);
+        g->key_latched[SDL_SCANCODE_RETURN] = 0;
+        return;
     }
     if (ev->type == SDL_KEYUP) {
         scancode = ev->key.keysym.scancode;
@@ -6066,6 +6997,21 @@ static void handle_event(Game *g, SDL_Event *ev)
     switch (ev->key.keysym.sym) {
     case SDLK_F9:
         toggle_fullscreen(g);
+        break;
+    case SDLK_F7:
+        g->half_res_world = !g->half_res_world;
+        show_notice(g, g->half_res_world ? "DETAIL: HALF" : "DETAIL: FULL");
+        break;
+    case SDLK_F8:
+        g->realistic_flight = !g->realistic_flight;
+        if (g->scene == SCENE_SORTIE) {
+            /* Hand over cleanly: both models share the attitude, but the
+             * full model also needs its airflow components. */
+            g->flight.u = g->flight.speed > 20.0f ? g->flight.speed : 40.0f;
+            g->flight.v = g->flight.w = 0.0f;
+        }
+        show_notice(g, g->realistic_flight ? "REALISTIC FLYING" :
+                                             "ARCADE FLYING");
         break;
     case SDLK_ESCAPE:
         if (g->scene == SCENE_MENU && g->confirm_overwrite) {
@@ -6286,7 +7232,12 @@ int main(int argc, char **argv)
         dt = (float)(now - previous) / 1000.0f;
         previous = now;
         if (dt > 0.05f) dt = 0.05f;
-        keys = SDL_GetKeyboardState(NULL);
+        {
+            static uint8_t merged[SDL_NUM_SCANCODES];
+            memcpy(merged, SDL_GetKeyboardState(NULL), sizeof(merged));
+            merge_joystick_keys(&g, merged);
+            keys = merged;
+        }
         if (g.scene == SCENE_SORTIE) update_sortie(&g, dt, keys);
         /* The officers' menu is static: it is redrawn only when the selection
          * or prompt changes (redraw_static), not every frame. */
@@ -6352,6 +7303,9 @@ int main(int argc, char **argv)
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
+    if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
+    free_world_textures(&g);
+    if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
     SDL_DestroyWindow(g.window);
     SDL_Quit();
