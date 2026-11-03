@@ -5538,6 +5538,18 @@ int main(int argc, char **argv)
         g.success = 1;
         g.score = current_mission_goal(&g) * 250;
         set_scene(&g, SCENE_DEBRIEF);
+    } else if (argc > 1 && strcmp(argv[1], "CHAPTER_SUCCESS") == 0) {
+        /* Direct chapter-boundary test.  Enter must advance mission 12 to
+         * mission 1 of the following chapter and persist that exact point. */
+        g.chapter = 0;
+        g.mission = MISSIONS_PER_CHAPTER - 1;
+        g.wingman_health[0] = 100;
+        g.wingman_health[1] = 100;
+        g.wingman_health[2] = 100;
+        reset_sortie(&g);
+        g.success = 1;
+        g.score = current_mission_goal(&g) * 250;
+        set_scene(&g, SCENE_DEBRIEF);
     }
     previous = SDL_GetTicks();
     while (g.running) {

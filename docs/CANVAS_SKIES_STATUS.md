@@ -80,6 +80,7 @@ CanvasSkies DOGFIGHT
 CanvasSkies GUNNER
 CanvasSkies DEBRIEF
 CanvasSkies DEBRIEF_SUCCESS
+CanvasSkies CHAPTER_SUCCESS
 CanvasSkies FINAL_SUCCESS
 ```
 
@@ -89,7 +90,9 @@ and campaign menu. `DEBRIEF_SUCCESS` is the direct listening test for the
 mission-complete board and de-clicked officers' mess cue; `DEBRIEF` exercises
 the failure board and mourning cue. `FINAL_SUCCESS` opens the successful 96th
 mission debrief so Enter can qualify the completed-war-record and Armistice
-path without playing the whole campaign.
+path without playing the whole campaign. `CHAPTER_SUCCESS` similarly opens the
+successful Chapter 1 / Mission 12 debrief to qualify the ordinary chapter
+rollover and its saved continuation point.
 
 Current controls:
 
@@ -260,9 +263,10 @@ These are not optional polish if the game is to become an RC.
   recovered the expected Chapter 3 / Mission 5 menu from `.bak`. Starting a
   fresh campaign from that recovered state then produced a valid Chapter 1 /
   Mission 1 primary, preserved the known-good Chapter 3 / Mission 5 backup and
-  left no `.new` file behind. The final-completion path is also qualified. It
-  still needs tests covering ordinary chapter rollover and an externally
-  interrupted replacement.
+  left no `.new` file behind. The final-completion path is also qualified. The
+  direct Chapter 1 / Mission 12 success test visibly opened the Chapter 2 /
+  Mission 1 journal and persisted save coordinates `1 0`, proving ordinary
+  rollover. An externally interrupted replacement remains unqualified.
 
 ### Audio and licensing
 
@@ -321,8 +325,9 @@ These are not optional polish if the game is to become an RC.
 ## Safe resume point
 
 At this handoff, the build succeeds with `ports/amigaos3/Makefile.canvas`, and
-the visible lab has the latest build open at the officers' menu with `WAR
-RECORD COMPLETE - VIEW ARMISTICE` visible. The next developer should first pull
-the branch, read these two documents, run the direct `DOGFIGHT` test and
-inspect `git status` before touching the three untracked gunner experiments.
+the visible lab has the latest build open on the Chapter 2 / Mission 1 journal
+after the qualified chapter-rollover test. The primary save contains version 2
+coordinates `1 0` with the campaign-active flag. The next developer should
+first pull the branch, read these two documents, run the direct `DOGFIGHT` test
+and inspect `git status` before touching the three untracked gunner experiments.
 
