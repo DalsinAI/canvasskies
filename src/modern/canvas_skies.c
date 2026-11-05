@@ -1583,11 +1583,10 @@ static const short journal_rules[2][JOURNAL_RULES] = {
      186, 196, 207, 218, 228, 239, 250, 261, 273, 285}
 };
 
-/* The top of a line of writing whose foot rests on rule n of the page;
- * n = -2 is the heading, in the unruled margin under the page's top edge. */
+/* The top of a line of writing whose foot rests on rule n of the page. */
 static int journal_line_y(int page, int rule)
 {
-    if (rule < 0) return journal_rules[page][0] - 24;
+    if (rule < 0) rule = 0;
     if (rule >= JOURNAL_RULES) rule = JOURNAL_RULES - 1;
     return journal_rules[page][rule] - 11;
 }
@@ -5256,44 +5255,44 @@ static void draw_story(Game *g)
     }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, -2), "FLIGHT LOG", red);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 0), "FLIGHT LOG", red);
     snprintf(buf, sizeof(buf), "%s NEDDY SEAGOON", rank_short[g->rank & 3]);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 0), buf, ink);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 2), corps_name(g), ink);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 4), mission_date(g), red);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 2), buf, ink);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 4), corps_name(g), ink);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 6), mission_date(g), red);
     snprintf(buf, sizeof(buf), "CHAPTER %d / MISSION %d",
              g->chapter + 1, g->mission + 1);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 6), buf, ink);
-    journal_paragraph(g, 112, journal_line_y(JOURNAL_LEFT, 8), chapter->title,
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 8), buf, ink);
+    journal_paragraph(g, 112, journal_line_y(JOURNAL_LEFT, 10), chapter->title,
                       22, red);
     snprintf(buf, sizeof(buf), "VICTORIES %d", g->victories);
-    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 12), buf, ink);
-    draw_victory_tally(g, 116, journal_line_y(JOURNAL_LEFT, 14) + 5,
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 14), buf, ink);
+    draw_victory_tally(g, 116, journal_line_y(JOURNAL_LEFT, 16) + 5,
                        g->victories, ink);
-    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, -2), mission->title, red);
-    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 0),
+    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 0), mission->title, red);
+    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 2),
                  mission_mode_name(mission->mode), ink);
-    done = wrapped_text_limit(g, 348, journal_line_y(JOURNAL_RIGHT, 2),
+    done = wrapped_text_limit(g, 348, journal_line_y(JOURNAL_RIGHT, 4),
                               mission->log, 25, JOURNAL_LINE_STEP,
                               revealed_letters(g, JOURNAL_LETTERS_PER_SECOND),
                               0, ink);
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 12), "FLYING WITH:", red);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), "FLYING WITH:", red);
         if (wingman_sick(g, 2))
             snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
         else
             snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                      allied_pilot_names[2]);
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), buf, ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
         if (g->wingman_health[1] > 0)
-            journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
+            journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 18),
                          allied_pilot_names[1], ink);
     } else if (mission->mode == MISSION_GUNNER_3D) {
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 12), "REAR COCKPIT:", red);
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14),
-                     "TOM AT THE CONTROLS", ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
         journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
+                     "TOM AT THE CONTROLS", ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 18),
                      mission_armed(g) ? "LEWIS GUN READY" : "NO GUN ABOARD", ink);
     }
     typewriter_text(g, 348, 374, "ENTER - READ ORDERS", 7, 11,

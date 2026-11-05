@@ -127,8 +127,10 @@ Before many sorties the player reads a front page of *The Western Courier*, an
 invented paper, and after each debrief a short "late edition" clipping. Every
 cutting is collected in the Book of Press Cuttings on the officers' menu.
 
-- Every headline and line of copy is written for this game. The events are real
-  and dated; the wording is not taken from any newspaper of the period.
+- Most front pages carry real period copy: the headline, the opening lines and
+  the two small items are quoted word for word from unsigned cable news printed
+  in New Zealand papers of 1914-1918 (listed below). The few items no period
+  report fitted keep wording written for this game.
 - The paper is deliberately cheerful and vague, as the censored press was. The
   diary on the next page tells the pilot's version. The first day of the Somme
   is the clearest example: "THE DAY GOES WELL FOR ENGLAND."
@@ -166,3 +168,67 @@ surface noise is kept.
 | `holyrood-gramophone.wav` | Holyrood | Kenneth J. Alford, 1912 | Band of the Welsh Guards | April 1917, March 1918 | `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f` |
 | `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` |
 | `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` |
+
+## Period newspaper copy
+
+The quoted front-page copy comes from Papers Past, the National Library of New
+Zealand's digitised newspapers (https://paperspast.natlib.govt.nz/). Every item is
+unsigned cable or staff news, no byline, columnist, cartoon or verse, published
+1914-1918; anonymous works of that age are out of copyright in New Zealand and
+were published before 1931. The text was read from each article's own page and
+quoted verbatim in capitals, with only obvious OCR letter errors corrected. Where a
+line is cut, it ends with "...". The masthead, *The Western Courier*, is invented,
+and the paper keeps the game's date for each sortie; cabled news often reached New
+Zealand a few days later than that date.
+
+| Sortie (chapter, mission) | Headline | Paper | Date | Page |
+|---|---|---|---|---|
+| 1, 1 | [WAR DECLARED](https://paperspast.natlib.govt.nz/newspapers/HBTRIB19140805.2.53) | Hawke's Bay Tribune, Hastings, NZ | 1914-08-05 | 6 |
+| 1, 2 | [BRITISH LAND IN FRANCE.](https://paperspast.natlib.govt.nz/newspapers/WDT19140819.2.21.2) | Wairarapa Daily Times, Masterton, NZ | 1914-08-19 | 5 |
+| 1, 4 | [BRITISH RETIRE.](https://paperspast.natlib.govt.nz/newspapers/WDT19140829.2.19.1) | Wairarapa Daily Times, Masterton, NZ | 1914-08-29 | 5 |
+| 1, 7 | [NEARING PARIS.](https://paperspast.natlib.govt.nz/newspapers/LT19140905.2.42) | Lyttelton Times, Christchurch, NZ | 1914-09-05 | 8 |
+| 1, 10 | [GERMAN RETREAT](https://paperspast.natlib.govt.nz/newspapers/WAIGUS19140914.2.23) | Waikato Argus, Hamilton, NZ | 1914-09-14 | 2 |
+| 1, 11 | [SUNK BY SUBMARINE.](https://paperspast.natlib.govt.nz/newspapers/NA19140924.2.11.1) | Northern Advocate, Whangarei, NZ | 1914-09-24 | 5 |
+| 2, 1 | [CHRISTMAS TRUCE.](https://paperspast.natlib.govt.nz/newspapers/CHP19150104.2.41.6) | Press, Christchurch, NZ | 1915-01-04 | 6 |
+| 2, 2 | [SERIOUS AIR RAID.](https://paperspast.natlib.govt.nz/newspapers/NA19150121.2.26.2) | Northern Advocate, Whangarei, NZ | 1915-01-21 | 5 |
+| 2, 4 | [THE ASPHYXIATING GAS.](https://paperspast.natlib.govt.nz/newspapers/WDT19150427.2.23.20) | Wairarapa Daily Times, Masterton, NZ | 1915-04-27 | 5 |
+| 2, 5 | [BRITISH AIRMAN DEAD.](https://paperspast.natlib.govt.nz/newspapers/NZH19150503.2.90) | New Zealand Herald, Auckland, NZ | 1915-05-03 | 9 |
+| 2, 6 | [LINER LUSITANIA SUNK](https://paperspast.natlib.govt.nz/newspapers/HBTRIB19150508.2.26) | Hawke's Bay Tribune, Hastings, NZ | 1915-05-08 | 4 |
+| 2, 7 | [WARNEFORD'S DARING](https://paperspast.natlib.govt.nz/newspapers/EP19150610.2.64) | Evening Post, Wellington, NZ | 1915-06-10 | 7 |
+| 2, 8 | [BRITISH PROGRESS MADE](https://paperspast.natlib.govt.nz/newspapers/GIST19150929.2.28) | Gisborne Times, Gisborne, NZ | 1915-09-29 | 5 |
+| 2, 11 | [A NURSE SHOT.](https://paperspast.natlib.govt.nz/newspapers/NA19151018.2.26.27) | Northern Advocate, Whangarei, NZ | 1915-10-18 | 3 |
+| 2, 12 | [ANZAC AND SUVLA](https://paperspast.natlib.govt.nz/newspapers/ODT19151222.2.29) | Otago Daily Times, Dunedin, NZ | 1915-12-22 | 5 |
+| 3, 1 | [FIGHT FOR VERDUN.](https://paperspast.natlib.govt.nz/newspapers/WAIPM19160229.2.16) | Waipawa Mail, Waipawa, NZ | 1916-02-29 | 3 |
+| 3, 2 | [ALL DUBLIN REBELS SURRENDER.](https://paperspast.natlib.govt.nz/newspapers/WC19160503.2.40.8) | Wanganui Chronicle, Wanganui, NZ | 1916-05-03 | 5 |
+| 3, 3 | [BIG NAVAL BATTLE.](https://paperspast.natlib.govt.nz/newspapers/NA19160603.2.28) | Northern Advocate, Whangarei, NZ | 1916-06-03 | 3 |
+| 3, 4 | [LORD KITCHENER DROWNED.](https://paperspast.natlib.govt.nz/newspapers/PBH19160607.2.27.1) | Poverty Bay Herald, Gisborne, NZ | 1916-06-07 | 3 |
+| 3, 5 | [GREAT OFFENSIVE IN THE WEST.](https://paperspast.natlib.govt.nz/newspapers/PGAMA19160704.2.37.1) | Pelorus Guardian and Miners' Advocate, Havelock, NZ | 1916-07-04 | 5 |
+| 3, 8 | [FILMS OF SOMME BATTLES.](https://paperspast.natlib.govt.nz/newspapers/WDT19160810.2.26.12) | Wairarapa Daily Times, Masterton, NZ | 1916-08-10 | 5 |
+| 3, 10 | [MYSTERIOUS ARMOURED CARS.](https://paperspast.natlib.govt.nz/newspapers/THS19160918.2.31.12) | Thames Star, Thames, NZ | 1916-09-18 | 5 |
+| 3, 11 | [TWO AIRSHIPS BROUGHT DOWN](https://paperspast.natlib.govt.nz/newspapers/NEM19160925.2.33.8) | Nelson Evening Mail, Nelson, NZ | 1916-09-25 | 5 |
+| 4, 1 | [AMERICA DECLARES WAR.](https://paperspast.natlib.govt.nz/newspapers/ESD19170407.2.56.1) | Evening Star, Dunedin, NZ | 1917-04-07 | 8 |
+| 4, 5 | [FIGHT FOR VIMY RIDGE](https://paperspast.natlib.govt.nz/newspapers/WT19170411.2.29.2) | Waikato Times, Hamilton, NZ | 1917-04-11 | 5 |
+| 4, 6 | [GREAT DAY OF AERIAL FIGHTING](https://paperspast.natlib.govt.nz/newspapers/EP19170426.2.44.5) | Evening Post, Wellington, NZ | 1917-04-26 | 7 |
+| 4, 10 | [BRITISH AIRMAN MISSING.](https://paperspast.natlib.govt.nz/newspapers/NZH19170522.2.46) | New Zealand Herald, Auckland, NZ | 1917-05-22 | 6 |
+| 4, 11 | [GREAT BRITISH ATTACK.](https://paperspast.natlib.govt.nz/newspapers/TH19170609.2.13) | Taranaki Herald, New Plymouth, NZ | 1917-06-09 | 3 |
+| 4, 12 | [ROYAL HOUSE OF WINDSOR.](https://paperspast.natlib.govt.nz/newspapers/MEX19170718.2.23.42) | Marlborough Express, Blenheim, NZ | 1917-07-18 | 5 |
+| 5, 1 | [THE VILLAGE CAPTURED.](https://paperspast.natlib.govt.nz/newspapers/WC19171108.2.32.1) | Wanganui Chronicle, Wanganui, NZ | 1917-11-08 | 5 |
+| 5, 4 | [TANKS BREAK THROUGH THE WIRE.](https://paperspast.natlib.govt.nz/newspapers/EP19171122.2.79.1) | Evening Post, Wellington, NZ | 1917-11-22 | 8 |
+| 5, 7 | [HEAVY GERMAN ASSAULTS](https://paperspast.natlib.govt.nz/newspapers/EP19171203.2.42.1) | Evening Post, Wellington, NZ | 1917-12-03 | 7 |
+| 5, 12 | [JERUSALEM CAPTURED](https://paperspast.natlib.govt.nz/newspapers/WAIPO19171211.2.19) | Waipa Post, Te Awamutu, NZ | 1917-12-11 | 3 |
+| 6, 2 | [GERMAN OFFENSIVE BEGUN.](https://paperspast.natlib.govt.nz/newspapers/TC19180323.2.24.3) | Colonist, Nelson, NZ | 1918-03-23 | 5 |
+| 6, 5 | [BACKS TO THE WALL.](https://paperspast.natlib.govt.nz/newspapers/NA19180413.2.12.6) | Northern Advocate, Whangarei, NZ | 1918-04-13 | 3 |
+| 6, 6 | [FAMOUS GERMAN AVIATOR KILLED.](https://paperspast.natlib.govt.nz/newspapers/MEX19180423.2.21.14) | Marlborough Express, Blenheim, NZ | 1918-04-23 | 5 |
+| 6, 11 | [MCCUDDEN KILLED.](https://paperspast.natlib.govt.nz/newspapers/SUNCH19180713.2.47) | Sun (Christchurch), Christchurch, NZ | 1918-07-13 | 9 |
+| 7, 1 | [EAST OF AMIENS.](https://paperspast.natlib.govt.nz/newspapers/TS19180809.2.35.1) | Star (Christchurch), Christchurch, NZ | 1918-08-09 | 5 |
+| 7, 6 | [FAMOUS AIRMAN MISSING.](https://paperspast.natlib.govt.nz/newspapers/HNS19180805.2.34.3) | Hawera & Normanby Star, Hawera, NZ | 1918-08-05 | 8 |
+| 7, 10 | [HINDENBURG LINE SMASHED](https://paperspast.natlib.govt.nz/newspapers/WT19181001.2.34.12) | Waikato Times, Hamilton, NZ | 1918-10-01 | 5 |
+| 7, 11 | [CAMBRAI CAPTURED.](https://paperspast.natlib.govt.nz/newspapers/TH19181010.2.13.11) | Taranaki Herald, New Plymouth, NZ | 1918-10-10 | 3 |
+| 8, 2 | [AUSTRIA OUT.](https://paperspast.natlib.govt.nz/newspapers/KCC19181105.2.20.1) | King Country Chronicle, Te Kuiti, NZ | 1918-11-05 | 5 |
+| 8, 4 | [PEACE DELEGATES.](https://paperspast.natlib.govt.nz/newspapers/PAHH19181109.2.14.1) | Pahiatua Herald, Pahiatua, NZ | 1918-11-09 | 5 |
+| 8, 7 | [SURRENDER.](https://paperspast.natlib.govt.nz/newspapers/ESD19181112.2.19) | Evening Star, Dunedin, NZ | 1918-11-12 | 2 |
+| 8, 12 | [ENGLAND WILD WITH JOY.](https://paperspast.natlib.govt.nz/newspapers/THS19181113.2.19.11) | Thames Star, Thames, NZ | 1918-11-13 | 3 |
+
+The 1918 women's vote, the founding of the Royal Air Force, the end of the Somme
+and the 1918 influenza keep wording written for this game: no period cable found
+for them fitted the day closely enough.
