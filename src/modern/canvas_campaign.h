@@ -36,127 +36,129 @@ static const char *allied_pilot_names[3] = {
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
     {
-        {MISSION_SIDE, "A FIELD IN FRANCE", "I LANDED IN A COW FIELD. TOM CALLED IT OUR AERODROME."},
-        {MISSION_TOP_DOWN, "THE FIRST MESSAGE", "THE GENERAL'S NOTE RODE IN MY COAT WHILE RIFLES CRACKED BELOW."},
-        {MISSION_GUNNER_3D, "A STRANGER ABOVE", "A GERMAN FLIER WAVED. NEITHER OF US HAD A GUN."},
-        {MISSION_TOP_DOWN, "COLUMNS ON THE ROAD", "TOM COUNTED GREY COLUMNS; I HELD THE MACHINE STEADY."},
-        {MISSION_SIDE, "THE MARNE BRIDGE", "WE FOUND THE BRIDGE INTACT AND CARRIED THE NEWS WEST."},
-        {MISSION_DOGFIGHT_3D, "HORSES IN THE SKY", "WE CIRCLED AN ENEMY MACHINE LIKE CAVALRYMEN WITHOUT SABRES."},
-        {MISSION_TOP_DOWN, "THE EMPTY FLANK", "THE GAP ON TOM'S MAP CHANGED THE ARMY'S MARCH."},
-        {MISSION_SIDE, "RAIN OVER MEAUX", "THE ENGINE COUGHED ALL THE WAY HOME. ALFIE NEVER COMPLAINED."},
-        {MISSION_GUNNER_3D, "A FACE IN THE WIND", "FOR ONE MOMENT I SAW THE OTHER PILOT'S EYES."},
-        {MISSION_TOP_DOWN, "TURN OF THE ARMIES", "THE ROADS BENT NORTH. THE RETREAT HAD BECOME A PURSUIT."},
-        {MISSION_DOGFIGHT_3D, "EYES ABOVE THE MARNE", "TOM SAID THE AEROPLANE HAD EARNED ITS PLACE IN THE WAR."},
-        {MISSION_TOP_DOWN, "THE SILENT FRONT", "NOBODY FIRED ALL DAY. BELOW US MEN KICKED A BALL WHERE THE WIRE HAD BEEN.", SPECIAL_TRUCE}
+        {MISSION_SIDE, "A FIELD IN FRANCE", "I landed in a cow field. Tom called it our aerodrome."},
+        {MISSION_TOP_DOWN, "THE FIRST MESSAGE", "The general's note rode in my coat while rifles cracked below."},
+        {MISSION_GUNNER_3D, "A STRANGER ABOVE", "A German flier waved. Neither of us had a gun."},
+        {MISSION_TOP_DOWN, "COLUMNS ON THE ROAD", "Tom counted grey columns; I held the machine steady."},
+        {MISSION_SIDE, "THE MARNE BRIDGE", "We found the bridge intact and carried the news west."},
+        {MISSION_DOGFIGHT_3D, "HORSES IN THE SKY", "We circled an enemy machine like cavalrymen without sabres."},
+        {MISSION_TOP_DOWN, "THE EMPTY FLANK", "The gap on Tom's map changed the army's march."},
+        {MISSION_SIDE, "RAIN OVER MEAUX", "The engine coughed all the way home. Alfie never complained."},
+        {MISSION_GUNNER_3D, "A FACE IN THE WIND", "For one moment I saw the other pilot's eyes."},
+        {MISSION_TOP_DOWN, "TURN OF THE ARMIES", "The roads bent north. The retreat had become a pursuit."},
+        {MISSION_DOGFIGHT_3D, "EYES ABOVE THE MARNE", "Tom said the aeroplane had earned its place in the war."},
+        {MISSION_TOP_DOWN, "THE SILENT FRONT", "Nobody fired all day. Below us men kicked a ball where the wire had been.", SPECIAL_TRUCE}
     },
     {
-        {MISSION_SIDE, "WINTER PHOTOGRAPHS", "THE CAMERA FROZE, SO TOM DREW THE TRENCHES BY HAND."},
-        {MISSION_TOP_DOWN, "THE WIRELESS SET", "A GREAT BOX OF VALVES MADE OUR FRAGILE MACHINE EVEN HEAVIER."},
-        {MISSION_GUNNER_3D, "PISTOLS AT ALTITUDE", "WE TRADED PISTOL SHOTS WITH AN AVIATOR ABOVE YPRES."},
-        {MISSION_TOP_DOWN, "GAS CLOUD", "A GREEN LINE MOVED ACROSS THE EARTH. TOM STOPPED TALKING."},
-        {MISSION_SIDE, "ALFIE'S ENGINE", "ALFIE GAVE US SIX MORE HORSEPOWER AND ASKED FOR ALL SIX BACK."},
-        {MISSION_DOGFIGHT_3D, "THE INTERRUPTER", "THE FOKKER FIRED THROUGH ITS PROPELLER. THE SKY HAD CHANGED."},
-        {MISSION_TOP_DOWN, "LOST BATTERY", "WE FOUND THE HIDDEN GUNS BY THEIR TRACKS IN THE MUD."},
-        {MISSION_SIDE, "NO MAN'S LAND", "WE DROPPED WATER TO MEN WHO COULD NOT REACH EITHER TRENCH."},
-        {MISSION_GUNNER_3D, "TOM'S LEWIS GUN", "TOM STOOD IN THE SLIPSTREAM AND DROVE THE FOKKER AWAY."},
-        {MISSION_TOP_DOWN, "THE SALIENT", "EVERY LINE ON THE MAP WAS A PLACE SOMEBODY HAD DIED."},
-        {MISSION_SIDE, "THE BURNING HANGAR", "WE SAVED TWO MACHINES. THE THIRD TOOK OUR LETTERS WITH IT."},
-        {MISSION_DOGFIGHT_3D, "THE WAR LEARNS TO FLY", "ANOTHER VICTORY, AND STILL I COULD NOT CELEBRATE IT."}
+        {MISSION_SIDE, "WINTER PHOTOGRAPHS", "The camera froze, so Tom drew the trenches by hand."},
+        {MISSION_TOP_DOWN, "THE WIRELESS SET", "A great box of valves made our fragile machine even heavier."},
+        {MISSION_GUNNER_3D, "PISTOLS AT ALTITUDE", "We traded pistol shots with an aviator above Ypres."},
+        {MISSION_TOP_DOWN, "GAS CLOUD", "A green line moved across the earth. Tom stopped talking."},
+        {MISSION_SIDE, "ALFIE'S ENGINE", "Alfie gave us six more horsepower and asked for all six back."},
+        {MISSION_DOGFIGHT_3D, "THE INTERRUPTER", "The Fokker fired through its propeller. The sky had changed."},
+        {MISSION_TOP_DOWN, "LOST BATTERY", "We found the hidden guns by their tracks in the mud."},
+        {MISSION_SIDE, "NO MAN'S LAND", "We dropped water to men who could not reach either trench."},
+        {MISSION_GUNNER_3D, "TOM'S LEWIS GUN", "Tom stood in the slipstream and drove the Fokker away."},
+        {MISSION_TOP_DOWN, "THE SALIENT", "Every line on the map was a place somebody had died."},
+        {MISSION_SIDE, "THE BURNING HANGAR", "We saved two machines. The third took our letters with it."},
+        {MISSION_DOGFIGHT_3D, "THE WAR LEARNS TO FLY", "Another victory, and still I could not celebrate it."}
     },
     {
-        {MISSION_SIDE, "BEFORE THE BARRAGE", "THE SOMME LOOKED PEACEFUL UNTIL EVERY GUN SPOKE AT ONCE."},
-        {MISSION_TOP_DOWN, "CUT THE BALLOON LINE", "WE FLEW LOW ENOUGH TO SEE MEN POINTING UP FROM THE TRENCH."},
-        {MISSION_GUNNER_3D, "ABOVE ALBERT", "THREE ENEMY SCOUTS CAME OUT OF THE SUN."},
-        {MISSION_TOP_DOWN, "ZERO HOUR", "TOM MARKED THE FALLING SHELLS WHILE THE EARTH DISAPPEARED."},
-        {MISSION_SIDE, "THE FIRST TRENCH", "OUR BOMBS FOUND THE GUN PIT; THE INFANTRY FOUND THE WIRE."},
-        {MISSION_DOGFIGHT_3D, "ECCLES' WING", "ECCLES BROUGHT ME HOME WITH HALF HIS LEFT WING GONE."},
-        {MISSION_TOP_DOWN, "A RED ROCKET", "THE SIGNAL ROCKET ROSE FROM MEN CUT OFF BEYOND THE LINE."},
-        {MISSION_SIDE, "SUPPLIES AT POZIERES", "WE DROPPED AMMUNITION INTO A VILLAGE MADE OF BRICK DUST."},
-        {MISSION_GUNNER_3D, "THE EMPTY SEAT", "TOM'S REPLACEMENT SAT QUIETLY WHERE TOM HAD BEEN WOUNDED."},
-        {MISSION_TOP_DOWN, "THE NEW TRENCH", "BY MORNING BOTH ARMIES HAD DUG NEW LINES INTO THE MAP."},
-        {MISSION_DOGFIGHT_3D, "HOME DEFENCE", "THEY SENT US HOME TO HUNT THE AIRSHIPS. ESSEX WATCHED THE SKY BURN.", SPECIAL_AIRSHIP},
-        {MISSION_DOGFIGHT_3D, "OVER THE SOMME", "WE WON A MILE BELOW AND LOST HALF THE SQUADRON ABOVE."}
+        {MISSION_SIDE, "BEFORE THE BARRAGE", "The Somme looked peaceful until every gun spoke at once."},
+        {MISSION_TOP_DOWN, "CUT THE BALLOON LINE", "We flew low enough to see men pointing up from the trench."},
+        {MISSION_GUNNER_3D, "ABOVE ALBERT", "Three enemy scouts came out of the sun."},
+        {MISSION_TOP_DOWN, "ZERO HOUR", "Tom marked the falling shells while the earth disappeared."},
+        {MISSION_SIDE, "THE FIRST TRENCH", "Our bombs found the gun pit; the infantry found the wire."},
+        {MISSION_DOGFIGHT_3D, "ECCLES' WING", "Eccles brought me home with half his left wing gone."},
+        {MISSION_TOP_DOWN, "A RED ROCKET", "The signal rocket rose from men cut off beyond the line."},
+        {MISSION_SIDE, "SUPPLIES AT POZIERES", "We dropped ammunition into a village made of brick dust."},
+        {MISSION_GUNNER_3D, "THE EMPTY SEAT", "Tom's replacement sat quietly where Tom had been wounded."},
+        {MISSION_TOP_DOWN, "THE NEW TRENCH", "By morning both armies had dug new lines into the map."},
+        {MISSION_DOGFIGHT_3D, "HOME DEFENCE", "They sent us home to hunt the airships. Essex watched the sky burn.", SPECIAL_AIRSHIP},
+        {MISSION_DOGFIGHT_3D, "OVER THE SOMME", "We won a mile below and lost half the squadron above."}
     },
     {
-        {MISSION_SIDE, "ARRAS AT DAWN", "THE NEW CAMERA SAW EVERYTHING; THE ENEMY SAW US TOO."},
-        {MISSION_TOP_DOWN, "THE FORWARD STRIP", "ALFIE WORKED IN A TENT WHILE SHELLS WALKED TOWARD THE FIELD."},
-        {MISSION_GUNNER_3D, "THE CIRCUS", "THEIR PAINTED SCOUTS ARRIVED ABOVE US IN PERFECT FORMATION."},
-        {MISSION_TOP_DOWN, "MISSING PATROL", "I FOUND THEIR WRECKS BEFORE I FOUND THE OBJECTIVE."},
-        {MISSION_SIDE, "VIMY RIDGE", "WE SILENCED A GUN THAT HAD HELD THE RIDGE SINCE WINTER."},
-        {MISSION_DOGFIGHT_3D, "SIX AGAINST TWO", "BLUEBOTTLE LAUGHED OVER THE SIGNAL LAMP. I DID NOT."},
-        {MISSION_TOP_DOWN, "THE PHOTOGRAPH", "ONE CLEAR PLATE WAS WORTH THREE LOST MACHINES."},
-        {MISSION_SIDE, "TOM RETURNS", "TOM CLIMBED BACK INTO THE REAR COCKPIT WITH A STIFF LEFT ARM."},
-        {MISSION_GUNNER_3D, "CAPTAIN MERCER", "THE PROMOTION CAME WITH A DESK I REFUSED TO USE."},
-        {MISSION_TOP_DOWN, "EMPTY CHAIRS", "I WROTE FOUR LETTERS HOME BEFORE BREAKFAST."},
-        {MISSION_DOGFIGHT_3D, "THE GOTHAS", "BIG GREY BOMBERS CROSSED THE THAMES IN DAYLIGHT. LONDON WILL NOT FORGET.", SPECIAL_GOTHA},
-        {MISSION_DOGFIGHT_3D, "BLOODY APRIL", "SPRING ENDED. FEW OF THE FACES FROM MARCH REMAINED."}
+        {MISSION_SIDE, "ARRAS AT DAWN", "The new camera saw everything; the enemy saw us too."},
+        {MISSION_TOP_DOWN, "THE FORWARD STRIP", "Alfie worked in a tent while shells walked toward the field."},
+        {MISSION_GUNNER_3D, "THE CIRCUS", "Their painted scouts arrived above us in perfect formation."},
+        {MISSION_TOP_DOWN, "MISSING PATROL", "I found their wrecks before I found the objective."},
+        {MISSION_SIDE, "VIMY RIDGE", "We silenced a gun that had held the ridge since winter."},
+        {MISSION_DOGFIGHT_3D, "SIX AGAINST TWO", "Bluebottle laughed over the signal lamp. I did not."},
+        {MISSION_TOP_DOWN, "THE PHOTOGRAPH", "One clear plate was worth three lost machines."},
+        {MISSION_SIDE, "TOM RETURNS", "Tom climbed back into the rear cockpit with a stiff left arm."},
+        {MISSION_GUNNER_3D, "CAPTAIN MERCER", "The promotion came with a desk I refused to use."},
+        {MISSION_TOP_DOWN, "EMPTY CHAIRS", "I wrote four letters home before breakfast."},
+        {MISSION_DOGFIGHT_3D, "THE GOTHAS", "Big grey bombers crossed the Thames in daylight. London will not forget.", SPECIAL_GOTHA},
+        {MISSION_DOGFIGHT_3D, "BLOODY APRIL", "Spring ended. Few of the faces from March remained."}
     },
     {
-        {MISSION_SIDE, "TANKS IN THE MIST", "IRON SHAPES MOVED BELOW US TOWARD CAMBRAI."},
-        {MISSION_TOP_DOWN, "THE GUN LINE", "WE ATTACKED THE FIELD GUNS, NOT THE MACHINES CRAWLING PAST THEM."},
-        {MISSION_GUNNER_3D, "HIGH COVER", "OUR JOB WAS TO KEEP THE SKY OFF THE TANKS' BACKS."},
-        {MISSION_TOP_DOWN, "THE CANAL MAP", "TOM FOUND THE CROSSING BENEATH CAMOUFLAGE NETS."},
-        {MISSION_SIDE, "ROAD TO MASNIERES", "A BROKEN BRIDGE TURNED THE WHOLE COLUMN SOUTH."},
-        {MISSION_DOGFIGHT_3D, "THE NEW ALBATROS", "THE NEW ENEMY SCOUT CLIMBED AS IF THE WAR WERE EASY."},
-        {MISSION_TOP_DOWN, "COUNTERATTACK", "GREY RESERVES FILLED EVERY ROAD WE HAD PHOTOGRAPHED EMPTY."},
-        {MISSION_SIDE, "THE STRANDED CREW", "WE HELD THE GUNS OFF A TANK CREW RUNNING FOR HOME."},
-        {MISSION_GUNNER_3D, "THYNE'S LAST TURN", "GRIDPIPE THYNE WAVED ONCE, TURNED EAST, AND VANISHED IN CLOUD."},
-        {MISSION_TOP_DOWN, "GROUND LOST AGAIN", "THE PENCILS ON THE MAP MOVED BACK TO THEIR OLD LINES."},
-        {MISSION_SIDE, "BRING ALFIE HOME", "ALFIE RODE OUT ON A LORRY AND WE FOUND HIM AFTER DARK."},
-        {MISSION_DOGFIGHT_3D, "THE IRON ROAD", "CAMBRAI TAUGHT US THAT NO INVENTION ENDS A WAR."}
+        {MISSION_SIDE, "TANKS IN THE MIST", "Iron shapes moved below us toward Cambrai."},
+        {MISSION_TOP_DOWN, "THE GUN LINE", "We attacked the field guns, not the machines crawling past them."},
+        {MISSION_GUNNER_3D, "HIGH COVER", "Our job was to keep the sky off the tanks' backs."},
+        {MISSION_TOP_DOWN, "THE CANAL MAP", "Tom found the crossing beneath camouflage nets."},
+        {MISSION_SIDE, "ROAD TO MASNIERES", "A broken bridge turned the whole column south."},
+        {MISSION_DOGFIGHT_3D, "THE NEW ALBATROS", "The new enemy scout climbed as if the war were easy."},
+        {MISSION_TOP_DOWN, "COUNTERATTACK", "Grey reserves filled every road we had photographed empty."},
+        {MISSION_SIDE, "THE STRANDED CREW", "We held the guns off a tank crew running for home."},
+        {MISSION_GUNNER_3D, "THYNE'S LAST TURN", "Gridpipe Thyne waved once, turned east, and vanished in cloud."},
+        {MISSION_TOP_DOWN, "GROUND LOST AGAIN", "The pencils on the map moved back to their old lines."},
+        {MISSION_SIDE, "BRING ALFIE HOME", "Alfie rode out on a lorry and we found him after dark."},
+        {MISSION_DOGFIGHT_3D, "THE IRON ROAD", "Cambrai taught us that no invention ends a war."}
     },
     {
-        {MISSION_SIDE, "FOG ON THE SOMME", "THE ENEMY OFFENSIVE APPEARED UNDER US ALL AT ONCE."},
-        {MISSION_TOP_DOWN, "BURN THE STORES", "WE DESTROYED OUR OWN FUEL BEFORE THE RETREAT."},
-        {MISSION_GUNNER_3D, "WESTWARD", "EVERY MACHINE IN THE SKY SEEMED TO BE FLYING WEST."},
-        {MISSION_TOP_DOWN, "THE BROKEN LINE", "THERE WAS NO FRONT, ONLY COLUMNS AND GAPS."},
-        {MISSION_SIDE, "THE FIELD HOSPITAL", "WE DREW THE ATTACKERS AWAY FROM CLARA'S HOSPITAL TRAIN."},
-        {MISSION_DOGFIGHT_3D, "TOM'S FLARE", "TOM'S FLARE BROUGHT THREE LOST PILOTS OUT OF THE CLOUD."},
-        {MISSION_TOP_DOWN, "AMIENS ROAD", "REFUGEES AND GUN TEAMS SHARED THE SAME NARROW ROAD."},
-        {MISSION_SIDE, "THE LAST CRATE", "ALFIE BUILT ONE FLYING MACHINE FROM THREE BROKEN ONES."},
-        {MISSION_GUNNER_3D, "HOLD THE SKY", "WE FOUGHT ABOVE A FIELD THAT NO LONGER HAD A NAME."},
-        {MISSION_TOP_DOWN, "THE LINE HOLDS", "AT LAST THE RED PENCIL STOPPED MOVING WEST."},
-        {MISSION_SIDE, "COUNTERSTROKE", "FOR THE FIRST TIME THAT SPRING, OUR BOMBS FELL EAST OF US."},
-        {MISSION_DOGFIGHT_3D, "THE SPRING STORM", "WE SURVIVED THE STORM, BUT NONE OF US CALLED IT VICTORY."}
+        {MISSION_SIDE, "FOG ON THE SOMME", "The enemy offensive appeared under us all at once."},
+        {MISSION_TOP_DOWN, "BURN THE STORES", "We destroyed our own fuel before the retreat."},
+        {MISSION_GUNNER_3D, "WESTWARD", "Every machine in the sky seemed to be flying west."},
+        {MISSION_TOP_DOWN, "THE BROKEN LINE", "There was no front, only columns and gaps."},
+        {MISSION_SIDE, "THE FIELD HOSPITAL", "We drew the attackers away from Clara's hospital train."},
+        {MISSION_DOGFIGHT_3D, "TOM'S FLARE", "Tom's flare brought three lost pilots out of the cloud."},
+        {MISSION_TOP_DOWN, "AMIENS ROAD", "Refugees and gun teams shared the same narrow road."},
+        {MISSION_SIDE, "THE LAST CRATE", "Alfie built one flying machine from three broken ones."},
+        {MISSION_GUNNER_3D, "HOLD THE SKY", "We fought above a field that no longer had a name."},
+        {MISSION_TOP_DOWN, "THE LINE HOLDS", "At last the red pencil stopped moving west."},
+        {MISSION_SIDE, "COUNTERSTROKE", "For the first time that spring, our bombs fell east of us."},
+        {MISSION_DOGFIGHT_3D, "THE SPRING STORM", "We survived the storm, but none of us called it victory."}
     },
     {
-        {MISSION_SIDE, "AMIENS AT FOUR", "THE ATTACK BEGAN WITHOUT THE OLD WARNING BARRAGE."},
-        {MISSION_TOP_DOWN, "BREAK THE BATTERY", "WE OPENED THE ROAD BEFORE THE TANKS REACHED IT."},
-        {MISSION_GUNNER_3D, "SKY OF MANY FLAGS", "BRITISH, FRENCH, AND AMERICAN WINGS FILLED THE DAWN."},
-        {MISSION_TOP_DOWN, "THE MOVING FRONT", "HEADQUARTERS NEEDED NEW MAPS TWICE IN ONE DAY."},
-        {MISSION_SIDE, "THE RAILHEAD", "OUR BOMBS CAUGHT THE GUN TRAIN BEFORE IT COULD UNLOAD."},
-        {MISSION_DOGFIGHT_3D, "THE VETERAN", "THE YOUNG PILOTS NOW WATCHED MY HANDS BEFORE TAKEOFF."},
-        {MISSION_TOP_DOWN, "CANAL DU NORD", "TOM FOUND A DRY APPROACH THROUGH THE FLOODED GROUND."},
-        {MISSION_SIDE, "OPEN COUNTRY", "AFTER YEARS OF TRENCHES, THE FIELDS SEEMED IMPOSSIBLY WIDE."},
-        {MISSION_GUNNER_3D, "THE LAST ACE", "WE FOUGHT A RED SCOUT WHO WOULD NOT LEAVE HIS MEN."},
-        {MISSION_TOP_DOWN, "RETREAT EAST", "ABANDONED GUNS MARKED THE ENEMY'S ROAD HOME."},
-        {MISSION_SIDE, "THE BELLS OF CAMBRAI", "CHURCH BELLS RANG BELOW US AS THE TOWN WAS FREED."},
-        {MISSION_DOGFIGHT_3D, "THE HUNDRED DAYS", "THE END FELT CLOSE ENOUGH TO FEAR."}
+        {MISSION_SIDE, "AMIENS AT FOUR", "The attack began without the old warning barrage."},
+        {MISSION_TOP_DOWN, "BREAK THE BATTERY", "We opened the road before the tanks reached it."},
+        {MISSION_GUNNER_3D, "SKY OF MANY FLAGS", "British, French, and American wings filled the dawn."},
+        {MISSION_TOP_DOWN, "THE MOVING FRONT", "Headquarters needed new maps twice in one day."},
+        {MISSION_SIDE, "THE RAILHEAD", "Our bombs caught the gun train before it could unload."},
+        {MISSION_DOGFIGHT_3D, "THE VETERAN", "The young pilots now watched my hands before takeoff."},
+        {MISSION_TOP_DOWN, "CANAL DU NORD", "Tom found a dry approach through the flooded ground."},
+        {MISSION_SIDE, "OPEN COUNTRY", "After years of trenches, the fields seemed impossibly wide."},
+        {MISSION_GUNNER_3D, "THE LAST ACE", "We fought a red scout who would not leave his men."},
+        {MISSION_TOP_DOWN, "RETREAT EAST", "Abandoned guns marked the enemy's road home."},
+        {MISSION_SIDE, "THE BELLS OF CAMBRAI", "Church bells rang below us as the town was freed."},
+        {MISSION_DOGFIGHT_3D, "THE HUNDRED DAYS", "The end felt close enough to fear."}
     },
     {
-        {MISSION_SIDE, "NOVEMBER MAP", "THE FRONT MOVED EAST THROUGH TOWNS WHOSE BELLS STILL WORKED."},
-        {MISSION_TOP_DOWN, "A LETTER FROM CLARA", "CLARA WROTE THAT AN ARMISTICE WAS BEING DISCUSSED."},
-        {MISSION_GUNNER_3D, "NO EASY TRUCE", "A PATROL ATTACKED AS IF PEACE WERE AN INSULT."},
-        {MISSION_TOP_DOWN, "THE WHITE TRAIN", "TOM SPOTTED THE NEGOTIATORS' TRAIN IN THE FOREST."},
-        {MISSION_SIDE, "LAST BATTERY", "WE SILENCED A GUN THAT FIRED ON A WITHDRAWING COLUMN."},
-        {MISSION_DOGFIGHT_3D, "THE OLD ENEMY", "THE PILOT WAVED, AS ONE HAD IN 1914, AND TURNED AWAY."},
-        {MISSION_TOP_DOWN, "ORDERS FOR ELEVEN", "THE MESSAGE SAID THE FIRING WOULD END AT ELEVEN."},
-        {MISSION_SIDE, "TEN THIRTY", "WE CARRIED THE ORDER TO A BATTERY THAT HAD NOT HEARD."},
-        {MISSION_GUNNER_3D, "TEN FORTY-FIVE", "WE FLEW THE LINE WITHOUT FIRING. EVERY MINUTE MATTERED."},
-        {MISSION_TOP_DOWN, "TEN FIFTY-FIVE", "MEN CLIMBED FROM THE TRENCHES AND SIMPLY STOOD THERE."},
-        {MISSION_SIDE, "THE FINAL MESSAGE", "TOM DROPPED THE ORDER BESIDE A GUN STILL FIRING."},
-        {MISSION_DOGFIGHT_3D, "THE ELEVENTH HOUR", "AT ELEVEN THE EARTH WENT QUIET. I TURNED FOR HOME."}
+        {MISSION_SIDE, "NOVEMBER MAP", "The front moved east through towns whose bells still worked."},
+        {MISSION_TOP_DOWN, "A LETTER FROM CLARA", "Clara wrote that an armistice was being discussed."},
+        {MISSION_GUNNER_3D, "NO EASY TRUCE", "A patrol attacked as if peace were an insult."},
+        {MISSION_TOP_DOWN, "THE WHITE TRAIN", "Tom spotted the negotiators' train in the forest."},
+        {MISSION_SIDE, "LAST BATTERY", "We silenced a gun that fired on a withdrawing column."},
+        {MISSION_DOGFIGHT_3D, "THE OLD ENEMY", "The pilot waved, as one had in 1914, and turned away."},
+        {MISSION_TOP_DOWN, "ORDERS FOR ELEVEN", "The message said the firing would end at eleven."},
+        {MISSION_SIDE, "TEN THIRTY", "We carried the order to a battery that had not heard."},
+        {MISSION_GUNNER_3D, "TEN FORTY-FIVE", "We flew the line without firing. Every minute mattered."},
+        {MISSION_TOP_DOWN, "TEN FIFTY-FIVE", "Men climbed from the trenches and simply stood there."},
+        {MISSION_SIDE, "THE FINAL MESSAGE", "Tom dropped the order beside a gun still firing."},
+        {MISSION_DOGFIGHT_3D, "THE ELEVENTH HOUR", "At eleven the earth went quiet. I turned for home."}
     }
 };
 #pragma GCC diagnostic pop
 
+/* The duty as the squadron's orders book would name it, not the view the
+ * game draws it in. */
 static const char *mission_mode_name(MissionMode mode)
 {
     switch (mode) {
-    case MISSION_TOP_DOWN: return "TOP-DOWN OPERATION";
-    case MISSION_DOGFIGHT_3D: return "3D DOGFIGHT";
-    case MISSION_GUNNER_3D: return "TWO-SEAT GUNNER DEFENCE";
-    default: return "SIDE-ON OPERATION";
+    case MISSION_TOP_DOWN: return "RECONNAISSANCE";
+    case MISSION_DOGFIGHT_3D: return "OFFENSIVE PATROL";
+    case MISSION_GUNNER_3D: return "OBSERVER'S GUN";
+    default: return "CONTACT PATROL";
     }
 }
 

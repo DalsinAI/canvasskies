@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -37,19 +37,16 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_DOGFIGHT_ENEMY_BMP=\"PROGDIR:assets/canvas-skies/dogfight-enemy-headon.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_UNARMED_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit-unarmed.bmp\" \
+	-DCANVAS_PILOT_COCKPIT_SINGLE_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit-single.bmp\" \
+	-DCANVAS_COCKPIT_REVOLVER_BMP=\"PROGDIR:assets/canvas-skies/cockpit-revolver.bmp\" \
+	-DCANVAS_REAR_CARBINE_BMP=\"PROGDIR:assets/canvas-skies/rear-carbine.bmp\" \
 	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_GUNNER_RING_BMP=\"PROGDIR:assets/canvas-skies/gunner-ring-empty-v2.bmp\" \
 	-DCANVAS_GUNNER_AIRFRAME_BMP=\"PROGDIR:assets/canvas-skies/gunner-airframe-tail.bmp\" \
 	-DCANVAS_GUNNER_MOVING_BMP=\"PROGDIR:assets/canvas-skies/gunner-single-atlas.bmp\" \
 	-DCANVAS_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/explosion-atlas.bmp\" \
 	-DCANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/topdown-explosion-atlas.bmp\" \
-	-DCANVAS_DISPLAY_36X42_BMP=\"PROGDIR:assets/canvas-skies/font-display-36x42.bmp\" \
-	-DCANVAS_DISPLAY_22X28_BMP=\"PROGDIR:assets/canvas-skies/font-display-22x28.bmp\" \
-	-DCANVAS_DISPLAY_16X23_BMP=\"PROGDIR:assets/canvas-skies/font-display-16x23.bmp\" \
-	-DCANVAS_DISPLAY_12X18_BMP=\"PROGDIR:assets/canvas-skies/font-display-12x18.bmp\" \
-	-DCANVAS_TYPEWRITER_10X15_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter-10x15.bmp\" \
-	-DCANVAS_TYPEWRITER_7X11_BMP=\"PROGDIR:assets/canvas-skies/font-typewriter-7x11.bmp\" \
-	-DCANVAS_JOURNAL_8X12_BMP=\"PROGDIR:assets/canvas-skies/font-journal-8x12.bmp\" \
+	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
 	-DCANVAS_ENEMY_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy.bmp\" \
 	-DCANVAS_MARCH_WAV=\"PROGDIR:assets/canvas-skies/washington-post-gramophone.wav\" \
@@ -90,5 +87,7 @@ package: $(OUT)
 	cp $(RUNTIME_ASSETS) $(PACKAGE)/assets/canvas-skies/
 	cp LICENSE README.md assets/canvas-skies/MUSIC_LICENSE.md \
 	   assets/canvas-skies/ART_PROVENANCE.md \
-	   assets/canvas-skies/Liberation-font-copyright.txt \
-	   assets/canvas-skies/Noto-font-copyright.txt $(PACKAGE)/
+	   $(PACKAGE)/
+	mkdir -p $(PACKAGE)/Fonts-Licences
+	for f in assets/fonts/*/; do \
+	    cp $$f/*.txt "$(PACKAGE)/Fonts-Licences/$$(basename $$f).txt"; done
