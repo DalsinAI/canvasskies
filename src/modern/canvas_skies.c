@@ -6456,12 +6456,18 @@ static void draw_world_backdrop(Game *g)
         /* The down component is linear along the row, so each row has at
          * most one horizon crossing: one sky run and one ground run. */
         ground_left = base.d > 0.0f;
+        /* A crossing off either end of the row means the whole row is
+         * what its left end is.  (Clamping a crossing left of the screen
+         * to x = 0 used to paint the far ground's haze across the sky,
+         * or the sky across the ground, whenever the aircraft banked.) */
         if (fabsf(across.d) > 1e-9f) {
             split = -base.d / across.d;
-            if (split < 0.0f) split = 0.0f;
-            if (split > (float)SCREEN_W) split = (float)SCREEN_W;
-            xh = (int)split;
-            if (step == 2) xh &= ~1;
+            if (split <= 0.0f || split >= (float)SCREEN_W) {
+                xh = SCREEN_W;
+            } else {
+                xh = (int)split;
+                if (step == 2) xh &= ~1;
+            }
         } else {
             xh = SCREEN_W;
         }
@@ -6724,19 +6730,17 @@ static void draw_simulator_clouds(Game *g)
          * bubbles: low cumulus, wind-smeared stratus and tall storm cells.
          * They stay in world space, so variety does not make them swim across
          * the view as the aircraft turns. */
+        /* No hard dark base: a flat purple underside under a row of
+         * puffs read as a flying saucer against the painted sky.  The
+         * shadowed side is only a little deeper than the lit one. */
         if (cloud_type == 1) {
-            ellipse(s, p.x, p.y + radius / 6, radius * 8 / 5,
-                    radius / 4 + 1, rgb(s, 118, 100, 128));
             ellipse(s, p.x - radius / 3, p.y - radius / 10,
                     radius * 7 / 5, radius / 4 + 1,
-                    rgb(s, 232, 176, 150));
+                    rgb(s, 222, 168, 150));
         } else {
-            ellipse(s, p.x, p.y + radius / 4,
-                    cloud_type == 2 ? radius : radius * 6 / 5,
-                    radius / 3 + 1, rgb(s, 108, 94, 122));
             ellipse(s, p.x - radius / 8, p.y,
                     cloud_type == 2 ? radius * 3 / 4 : radius,
-                    radius / 3 + 1, rgb(s, 214, 160, 146));
+                    radius / 3 + 1, rgb(s, 206, 154, 146));
         }
         for (puff = 0; puff < puffs; ++puff) {
             uint32_t ps = scene_hash(seed + (uint32_t)puff * 2654435761u);
@@ -6762,8 +6766,8 @@ static void draw_simulator_clouds(Game *g)
                   cloud_type == 2 ? pr * 4 / 5 :
                   pr * (3 + (int)((ps >> 22) & 1u)) / 5;
             if (pry < 2) pry = 2;
-            ellipse(s, px, py + pry / 3, pr, pry,
-                    rgb(s, 124, 104, 130));
+            ellipse(s, px, py + pry / 4, pr, pry * 4 / 5,
+                    rgb(s, 176, 132, 140));
             ellipse(s, px - pr / 8, py - pry / 5,
                     pr * 4 / 5, pry * 4 / 5,
                     rgb(s, shade, (uint8_t)(shade * 4 / 5), (uint8_t)(shade * 7 / 10)));
@@ -6908,7 +6912,7 @@ static void draw_dogfight_particles(Game *g, int foreground)
  * pale under surfaces depending on which side faces the camera, and the
  * national markings sit on the panels as their own faces.  Model axes are
  * metres: x right, y up, z forward. */
-#define MESH_MAX_VERTS 128
+#define MESH_MAX_VERTS 192
 #define MESH_MAX_FACES 72
 #define FACE_TWO_SIDED 1
 #define FACE_OUTLINE 2
@@ -7025,6 +7029,24 @@ static void mesh_cross_y(AircraftMesh *m, float cx, float y, float cz,
                  MAT_MARK_DARK, MAT_MARK_DARK, 0, -0.05f, up);
 }
 
+/* A strut from (x0,y0,z0) to (x1,y1,z1): two thin crossed blades, so it
+ * shows edge-on from no angle. */
+static void mesh_strut(AircraftMesh *m, float x0, float y0, float z0,
+                       float x1, float y1, float z1, float width)
+{
+    int q[4], k;
+    for (k = 0; k < 2; ++k) {
+        float dx = k == 0 ? width * 0.5f : 0.0f;
+        float dz = k == 0 ? 0.0f : width * 0.5f;
+        q[0] = mesh_vertex(m, x0 - dx, y0, z0 - dz);
+        q[1] = mesh_vertex(m, x0 + dx, y0, z0 + dz);
+        q[2] = mesh_vertex(m, x1 + dx, y1, z1 + dz);
+        q[3] = mesh_vertex(m, x1 - dx, y1, z1 - dz);
+        mesh_face(m, 4, q, MAT_BODY_DARK, MAT_BODY_DARK, FACE_TWO_SIDED,
+                  -0.1f);
+    }
+}
+
 static void build_aircraft_mesh(AircraftMesh *m, int allied)
 {
     int q[4];
@@ -7100,6 +7122,13 @@ static void build_aircraft_mesh(AircraftMesh *m, int allied)
         mesh_cross_y(m, 5.8f, -0.97f, 0.35f, 0.72f, 0);
     }
     m->parent_for_new = -1;
+    /* Interplane struts outboard, cabane struts over the fuselage. */
+    mesh_strut(m, -5.6f, 1.35f, 0.9f, -5.1f, -0.95f, 0.9f, 0.16f);
+    mesh_strut(m, 5.6f, 1.35f, 0.9f, 5.1f, -0.95f, 0.9f, 0.16f);
+    mesh_strut(m, -5.6f, 1.35f, -0.4f, -5.1f, -0.95f, -0.4f, 0.16f);
+    mesh_strut(m, 5.6f, 1.35f, -0.4f, 5.1f, -0.95f, -0.4f, 0.16f);
+    mesh_strut(m, -0.7f, 1.35f, 1.2f, -0.6f, 0.7f, 1.6f, 0.12f);
+    mesh_strut(m, 0.7f, 1.35f, 1.2f, 0.6f, 0.7f, 1.6f, 0.12f);
 }
 
 /* A raiding airship: an eight-sided hull, four fins and a gondola. */
