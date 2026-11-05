@@ -46,3 +46,7 @@ surviving aircraft's drawings.
 `side-civilians.bmp` (the side-on farmhouse, church and refugee cart, whole
 and wrecked) is painted the same way by
 `ports/amigaos3/make_side_civilians.py`.
+
+`newspaper-table.bmp` (the mess table, the newsvendor's bundle and its
+string, and the blank top copy with its halftone, screened from our own
+`title.bmp`) is painted by `ports/amigaos3/make_newspaper_table.py`.
