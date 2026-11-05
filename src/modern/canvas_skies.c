@@ -20,6 +20,7 @@
 #include "canvas_fonts.h"
 #include "canvas_topdown_sprites.h"
 #include "canvas_machine_sprites.h"
+#include "canvas_side_civilians.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -135,6 +136,9 @@
 #endif
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
+#endif
+#ifndef CANVAS_SIDE_CIVILIANS_BMP
+#define CANVAS_SIDE_CIVILIANS_BMP "assets/canvas-skies/side-civilians.bmp"
 #endif
 #ifndef CANVAS_TOPDOWN_TARGETS_BMP
 #define CANVAS_TOPDOWN_TARGETS_BMP "assets/canvas-skies/topdown-targets.bmp"
@@ -488,6 +492,8 @@ typedef struct {
     uint32_t last_shot;
     uint32_t next_round;
     int burst_left;
+    int civilian;       /* side-on: 0, or the SC_ sprite of a civilian place */
+    int wrecked;
 } Target;
 
 /* ---- Top-down missions built from segments --------------------------------
@@ -638,6 +644,7 @@ typedef struct {
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
     SDL_Surface *topdown_targets;   /* the painted mission targets */
+    SDL_Surface *side_civilians;    /* farms, a church, carts, side-on */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
@@ -2870,6 +2877,25 @@ static int perspective_spawn_count(const Game *g)
     return count;
 }
 
+/* Every other side-on sortie from 1915 crosses a village whose people are
+ * still at home; the briefing names it. */
+static const char *const side_village_names[CHAPTER_COUNT] = {
+    NULL, "LA BASSEE", "MARTINPUICH", "MONCHY", "FLESQUIERES", "ALBERT",
+    "VILLERS-BRETONNEUX", NULL
+};
+
+static int side_village_today(const Game *g)
+{
+    int m, k = 0;
+    if (!side_village_names[g->chapter] ||
+        campaign_missions[g->chapter][g->mission].mode != MISSION_SIDE ||
+        campaign_missions[g->chapter][g->mission].special != SPECIAL_NONE)
+        return 0;
+    for (m = 0; m < g->mission; ++m)
+        if (campaign_missions[g->chapter][m].mode == MISSION_SIDE) ++k;
+    return k & 1;
+}
+
 static void reset_sortie(Game *g)
 {
     int i;
@@ -3040,6 +3066,21 @@ static void reset_sortie(Game *g)
         g->targets[i].last_shot = 0;
         g->targets[i].next_round = 0;
         g->targets[i].burst_left = 0;
+        g->targets[i].civilian = 0;
+        g->targets[i].wrecked = 0;
+    }
+    if (mode == MISSION_SIDE && side_village_today(g)) {
+        /* A village still lived in, among the gun pits: a farm, the
+         * church and a cart on the road, placed between the targets. */
+        static const int places[3] = {SC_FARM, SC_CHURCH, SC_CART};
+        int k, n = chapter->target_count;
+        for (k = 0; k < 3 && n + k < MAX_TARGETS; ++k) {
+            Target *t = &g->targets[n + k];
+            t->active = 1;
+            t->type = 0;
+            t->civilian = places[k];
+            t->world_x = 800.0f + (float)k * 960.0f;   /* between the guns */
+        }
     }
     g->special = campaign_missions[g->chapter][g->mission].special;
     g->sortie_offences = 0;
@@ -5776,7 +5817,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
                 new_explosion(g, b->x, b->y, 1);
                 if (distance < 82.0f && now - g->last_damage > 260u) {
                     int damage = distance < 42.0f ? 16 : 9;
-                    g->health -= damage;
+                    if (!g->qa_hold || g->health > 30) g->health -= damage;
                     g->last_damage = now;
                     new_explosion(g, g->player_x - 4.0f, g->player_y, 0);
                 }
@@ -5790,7 +5831,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         if (b->active && b->enemy && b->type != 2 &&
             fabsf(b->x - g->player_x) < 25.0f &&
             fabsf(b->y - g->player_y) < 14.0f && now - g->last_damage > 260u) {
-            g->health -= b->type == 2 ? 8 : 3;
+            if (!g->qa_hold || g->health > 30) g->health -= b->type == 2 ? 8 : 3;
             g->last_damage = now;
             b->active = 0;
             new_explosion(g, g->player_x - 2.0f, g->player_y, 0);
@@ -5860,6 +5901,29 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         float sx = g->targets[i].world_x - g->scroll;
         int ty = terrain_y(g->targets[i].world_x) - 12;
         Target *target = &g->targets[i];
+        if (target->civilian) {
+            /* People's homes: struck by a bomb or a burst, they burn, and
+             * the offence is entered against the pilot. */
+            const short *r = side_civilian_rect[target->civilian];
+            float half = (float)r[2] * 0.5f;
+            if (target->wrecked) continue;
+            for (j = 0; j < MAX_BULLETS; ++j) if (g->bullets[j].active) {
+                Bullet *b = &g->bullets[j];
+                if (b->enemy || b->missed) continue;
+                if ((b->type == 0 && fabsf(b->x - sx) < half &&
+                     b->y > (float)(ty + 12 - r[3]) && b->y < (float)ty + 12.0f) ||
+                    (b->type == 1 && fabsf(b->x - sx) < half + 8.0f &&
+                     b->y > (float)(ty + 12 - r[3]))) {
+                    b->active = 0;
+                    target->wrecked = 1;
+                    new_ground_explosion(g, sx, (float)ty, 3);
+                    g->audio.blast = 7000;
+                    td_offence(g, CIV_CIVILIAN);
+                    break;
+                }
+            }
+            continue;
+        }
         if (sx > 20.0f && sx < SCREEN_W - 10.0f) {
             if (target->type) {
                 if (now - target->last_shot > 2850u + (uint32_t)(i * 83 % 520)) {
@@ -6868,6 +6932,13 @@ static void draw_briefing(Game *g)
         order0 = mix->orders[0] ? mix->orders[0] : chapter->orders[0];
         order1 = mix->orders[1] ? mix->orders[1] : chapter->orders[1];
         order2 = mix->orders[2] ? mix->orders[2] : chapter->orders[2];
+    } else if (side_village_today(g)) {
+        static char warning[64];
+        snprintf(warning, sizeof(warning), "%s IS STILL OCCUPIED: TAKE CARE.",
+                 side_village_names[g->chapter]);
+        order0 = chapter->orders[0];
+        order1 = chapter->orders[1];
+        order2 = warning;
     } else {
         order0 = chapter->orders[0];
         order1 = chapter->orders[1];
@@ -10064,9 +10135,22 @@ static void draw_sortie(Game *g)
                        FOREGROUND_PARALLAX, 235, 390, 0x4e454152u);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         int sx = (int)(g->targets[i].world_x - g->scroll);
-        if (sx > -20 && sx < SCREEN_W + 20) {
+        if (sx > -60 && sx < SCREEN_W + 60) {
             int ty = terrain_y(g->targets[i].world_x) - 12;
-            draw_ground_gun(g, sx, ty, &g->targets[i]);
+            if (g->targets[i].civilian) {
+                int sprite = g->targets[i].civilian + g->targets[i].wrecked;
+                const short *r = side_civilian_rect[sprite];
+                SDL_Rect src = {r[0], r[1], r[2], r[3]};
+                SDL_Rect dst = {sx - r[2] / 2, ty + 14 - r[3], r[2], r[3]};
+                if (g->side_civilians)
+                    SDL_BlitSurface(g->side_civilians, &src, s, &dst);
+                if (g->targets[i].wrecked)
+                    blend_circle(s, sx + (int)(SDL_GetTicks() / 60u % 12u),
+                                 ty - r[3] / 2 - (int)(SDL_GetTicks() / 60u % 12u),
+                                 10, 40, 38, 36, 110);
+            } else {
+                draw_ground_gun(g, sx, ty, &g->targets[i]);
+            }
         }
     }
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
@@ -10712,6 +10796,7 @@ static int game_init(Game *g)
     g->explosion_atlas = SDL_LoadBMP(CANVAS_EXPLOSION_ATLAS_BMP);
     g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
     g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
+    g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -10721,10 +10806,11 @@ static int game_init(Game *g)
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
-            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets
+            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
+            &g->side_civilians
         };
         int i;
-        for (i = 0; i < 16; ++i) if (*convert[i]) {
+        for (i = 0; i < 17; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -10743,9 +10829,9 @@ static int game_init(Game *g)
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas,
                                 g->cockpit_revolver, g->rear_carbine,
-                                g->topdown_targets};
+                                g->topdown_targets, g->side_civilians};
         int i;
-        for (i = 0; i < 14; ++i) if (keyed[i])
+        for (i = 0; i < 15; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -11294,12 +11380,15 @@ int main(int argc, char **argv)
         if (argc > 2 && argv[2][0] >= '0' && argv[2][0] <= '7') {
             int m;
             g.chapter = argv[2][0] - '0';
-            for (m = 0; m < MISSIONS_PER_CHAPTER; ++m)
+            /* SIDE n VILLAGE: the first of them with a village to spare. */
+            for (m = 0; m < MISSIONS_PER_CHAPTER; ++m) {
+                g.mission = m;
                 if (campaign_missions[g.chapter][m].mode == MISSION_SIDE &&
-                    campaign_missions[g.chapter][m].special == SPECIAL_NONE) {
-                    g.mission = m;
+                    campaign_missions[g.chapter][m].special == SPECIAL_NONE &&
+                    (argc < 4 || side_village_today(&g)))
                     break;
-                }
+            }
+            g.qa_hold = argc > 3;
         }
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
@@ -11581,6 +11670,7 @@ int main(int argc, char **argv)
     if (g.cockpit_revolver) SDL_FreeSurface(g.cockpit_revolver);
     if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
     if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
+    if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);

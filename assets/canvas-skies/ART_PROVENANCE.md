@@ -42,3 +42,7 @@ the enemy's 1915 monoplane and 1918 biplane (`aircraft-player-twoseat.bmp`,
 `topdown-player-late.bmp`) are original designs painted the same way by
 `ports/amigaos3/make_machine_sprites.py`. They are not copies of any
 surviving aircraft's drawings.
+
+`side-civilians.bmp` (the side-on farmhouse, church and refugee cart, whole
+and wrecked) is painted the same way by
+`ports/amigaos3/make_side_civilians.py`.
