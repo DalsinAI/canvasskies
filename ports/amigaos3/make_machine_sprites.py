@@ -66,7 +66,7 @@ def side_frame(kind, frame):
     o = (55, 27.5)
 
     def R(pts):
-        return rot([(55 + (x - 48) * 0.92, 27.5 + (y - 21) * 1.3)
+        return rot([(55 + (x - 48) * 0.92, 27.5 + (y - 19) * 1.2)
                     for x, y in pts], -pitch, o)
 
     if kind == "twoseat":
@@ -79,7 +79,7 @@ def side_frame(kind, frame):
         for x in (50, 64):                         # two cockpits
             c.part(R([(x - 4, 14), (x + 4, 14), (x + 3, 16), (x - 3, 16)]), DARK,
                    round_=0.5)
-        c.part(R([(30, 6.5), (88, 5.5), (88, 9.5), (30, 10.5)]), wing,
+        c.part(R([(30, 1.5), (88, 0.5), (88, 4.5), (30, 5.5)]), wing,
                gloss=0.25, round_=0.8)             # upper wing, seen edge on
         c.part(R([(30, 28.5), (84, 28.5), (84, 32), (30, 32)]), wing,
                gloss=0.25, round_=0.8)             # lower wing
@@ -87,11 +87,11 @@ def side_frame(kind, frame):
         # front-and-rear pairs, the far pair a shade behind them; short
         # cabane struts carry the centre section over the front cockpit.
         for x in (40, 50, 66, 76):
-            c.line(R([(x + 1.5, 9.5)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.9)
+            c.line(R([(x + 1.5, 4.5)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.9)
         for x in (38, 48, 64, 74):
-            c.line(R([(x, 9.5)])[0], R([(x - 2, 28.5)])[0], WOOD, 2.6)
+            c.line(R([(x, 4.5)])[0], R([(x - 2, 28.5)])[0], WOOD, 2.6)
         for x in (70, 78):
-            c.line(R([(x, 9.5)])[0], R([(x - 2, 15)])[0], WOOD, 2.0)
+            c.line(R([(x, 4.5)])[0], R([(x - 2, 15)])[0], WOOD, 2.0)
         c.part(R([(8, 9), (16, 9), (20, 17), (8, 18)]), wing, round_=0.8)  # fin
         for k, col in enumerate((BLUE, WHITE, RED)):          # rudder stripes
             c.part(R([(2 + k * 2.4, 10), (4.4 + k * 2.4, 10), (4.4 + k * 2.4, 22),
@@ -107,19 +107,19 @@ def side_frame(kind, frame):
                round_=0.6)                         # the flat radiator nose
         c.part(R([(56, 12.5), (62, 12.5), (61, 15), (57, 15)]), DARK,
                round_=0.4)
-        c.part(R([(60, 9.5), (72, 9.5), (72, 11), (60, 11)]), DARK,
+        c.part(R([(60, -1), (72, -1), (72, 0.5), (60, 0.5)]), DARK,
                round_=0.2)                         # the wing gun
-        c.part(R([(36, 5.5), (84, 5), (84, 9), (36, 9.5)]), wing, gloss=0.25,
+        c.part(R([(36, 0.5), (84, 0), (84, 4), (36, 4.5)]), wing, gloss=0.25,
                round_=0.8)
         c.part(R([(40, 28.5), (82, 28.5), (82, 32), (40, 32)]), wing,
                gloss=0.25, round_=0.8)
         # One bay, a front and rear strut each side, and the cabanes.
         for x in (54, 76):
-            c.line(R([(x + 1.5, 9)])[0], R([(x - 1, 28.5)])[0], (60, 44, 30), 1.9)
+            c.line(R([(x + 1.5, 4)])[0], R([(x - 1, 28.5)])[0], (60, 44, 30), 1.9)
         for x in (52, 74):
-            c.line(R([(x, 9)])[0], R([(x - 2.5, 28.5)])[0], WOOD, 2.7)
+            c.line(R([(x, 4)])[0], R([(x - 2.5, 28.5)])[0], WOOD, 2.7)
         for x in (72, 80):
-            c.line(R([(x, 9)])[0], R([(x - 2, 13.5)])[0], WOOD, 2.0)
+            c.line(R([(x, 4)])[0], R([(x - 2, 13.5)])[0], WOOD, 2.0)
         c.part(R([(6, 8), (16, 8), (22, 17), (6, 19)]), body, round_=1.0)
         for k, col in enumerate((BLUE, WHITE, RED)):
             c.part(R([(2 + k * 2.4, 9), (4.4 + k * 2.4, 9), (4.4 + k * 2.4, 22),
@@ -156,15 +156,15 @@ def side_frame(kind, frame):
         c.part(R([(78, 13), (90, 14), (90, 28), (78, 28)]), METAL, gloss=0.45,
                round_=0.6)
         c.part(R([(56, 12), (62, 12), (61, 15), (57, 15)]), DARK, round_=0.4)
-        c.part(R([(34, 6), (82, 6), (82, 9), (34, 9)]), body, gloss=0.2,
+        c.part(R([(34, 1), (82, 1), (82, 4), (34, 4)]), body, gloss=0.2,
                round_=0.8)                         # thick square upper wing
         c.part(R([(42, 28.5), (78, 28.5), (78, 31.5), (42, 31.5)]),
                LOZENGE[1], gloss=0.2, round_=0.8)
         for x in (74, 80):                         # cabanes
-            c.line(R([(x, 9)])[0], R([(x - 2, 13.5)])[0], DARK, 2.0)
+            c.line(R([(x, 4)])[0], R([(x - 2, 13.5)])[0], DARK, 2.0)
         for x in (52, 72):                         # N-struts
-            c.line(R([(x, 9)])[0], R([(x - 3, 28.5)])[0], DARK, 2.6)
-        c.line(R([(52, 9)])[0], R([(69, 28.5)])[0], DARK, 2.0)
+            c.line(R([(x, 4)])[0], R([(x - 3, 28.5)])[0], DARK, 2.6)
+        c.line(R([(52, 4)])[0], R([(69, 28.5)])[0], DARK, 2.0)
         c.part(R([(6, 9), (16, 9), (22, 18), (6, 20)]), WHITE, round_=1.2)
         cross(c, *R([(12, 14.5)])[0], 4.2)
         cross(c, *R([(40, 21.5)])[0], 4.6)
@@ -202,8 +202,8 @@ def side_frame(kind, frame):
     if kind != "mono":
         # Flying wires from the lower wing root up to the outer strut top,
         # landing wires from the centre section down to the strut foot.
-        c.line(R([(60, 29.5)])[0], R([(44, 8.5)])[0], (54, 50, 46), 0.6)
-        c.line(R([(70, 9.0)])[0], R([(46, 29.0)])[0], (54, 50, 46), 0.6)
+        c.line(R([(60, 29.5)])[0], R([(44, 3.5)])[0], (54, 50, 46), 0.6)
+        c.line(R([(70, 4)])[0], R([(46, 29.0)])[0], (54, 50, 46), 0.6)
     # Weathering: oil streaks back from the cowling, scuffs on the fabric.
     for k in range(4):
         y = 18 + k * 2.0
@@ -211,7 +211,7 @@ def side_frame(kind, frame):
                tuple(max(0, v - 50) for v in body), 0.35)
     if kind != "mono":
         for x in range(36, 84, 5):                 # rib tapes on the wings
-            c.line(R([(x, 6.4)])[0], R([(x, 8.6)])[0], (220, 210, 180), 0.35)
+            c.line(R([(x, 1.4)])[0], R([(x, 3.6)])[0], (220, 210, 180), 0.35)
             c.line(R([(x, 28.8)])[0], R([(x, 31.2)])[0], (220, 210, 180), 0.35)
     # Undercarriage and wheels.
     a, b = wheel_x
@@ -242,7 +242,7 @@ def muzzles(kind, enemy):
         frame = 4 - f if enemy else f
         pitch = (2 - frame) * STEP
         x, y = MUZZLE[kind]
-        x, y = 55 + (x - 48) * 0.92, 27.5 + (y - 21) * 1.3
+        x, y = 55 + (x - 48) * 0.92, 27.5 + (y - 19) * 1.2
         x, y = rot([(x, y)], -pitch, (55, 27.5))[0]
         x, y = x * 96 / 110, y * 48 / 55
         if enemy:
