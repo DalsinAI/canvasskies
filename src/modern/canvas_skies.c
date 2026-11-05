@@ -106,6 +106,9 @@
 #ifndef CANVAS_PILOT_COCKPIT_BMP
 #define CANVAS_PILOT_COCKPIT_BMP "assets/canvas-skies/pilot-cockpit.bmp"
 #endif
+#ifndef CANVAS_PILOT_COCKPIT_UNARMED_BMP
+#define CANVAS_PILOT_COCKPIT_UNARMED_BMP "assets/canvas-skies/pilot-cockpit-unarmed.bmp"
+#endif
 #ifndef CANVAS_GUNNER_COCKPIT_BMP
 #define CANVAS_GUNNER_COCKPIT_BMP "assets/canvas-skies/gunner-cockpit.bmp"
 #endif
@@ -505,6 +508,7 @@ typedef struct {
     SDL_Surface *dogfight_background;
     SDL_Surface *dogfight_enemy;
     SDL_Surface *pilot_cockpit;
+    SDL_Surface *pilot_cockpit_unarmed; /* 1914: no guns, no ring sight */
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
@@ -521,6 +525,7 @@ typedef struct {
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
     SDL_Surface *cockpit_composite;
+    SDL_Surface *cockpit_composite_unarmed;
     pix_t *ground_mip[GROUND_MIPS];
     int ground_mips;
     pix_t ground_haze_tint;
@@ -644,6 +649,15 @@ static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
 static int is_perspective_mode(MissionMode mode)
 {
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
+}
+
+/* Whether this sortie carries a gun.  1914 is unarmed, and on the
+ * Christmas truce nobody fires: the only thing aboard is the pudding.
+ * Every firing path, the cockpit art and the gun signs ask this. */
+static int mission_armed(const Game *g)
+{
+    return chapters[g->chapter].armed &&
+           campaign_missions[g->chapter][g->mission].special != SPECIAL_TRUCE;
 }
 
 /* Wingmen follow the written story rather than a damage simulation.
@@ -2209,7 +2223,7 @@ static int perspective_spawn_count(const Game *g)
     int goal = current_mission_goal(g);
     int count;
     if (!is_perspective_mode(mode)) return 0;
-    if (!chapters[g->chapter].armed) return 1;
+    if (!mission_armed(g)) return 1;
     if (campaign_missions[g->chapter][g->mission].special == SPECIAL_AIRSHIP)
         return 1;
     if (campaign_missions[g->chapter][g->mission].special == SPECIAL_GOTHA)
@@ -2285,6 +2299,10 @@ static void reset_sortie(Game *g)
     g->ammunition += g->ammunition / 2;
     g->bombs_remaining = 12 - g->chapter / 2;
     if (g->bombs_remaining < 8) g->bombs_remaining = 8;
+    if (!mission_armed(g)) {
+        g->ammunition = 0;
+        g->bombs_remaining = 0;
+    }
     g->last_shot = 0;
     g->last_bomb = 0;
     g->last_damage = 0;
@@ -3118,7 +3136,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
     g->fuel -= dt * 1.08f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
-    if (chapters[g->chapter].armed && g->ammunition > 0 &&
+    if (mission_armed(g) && g->ammunition > 0 &&
         keys[SDL_SCANCODE_SPACE] &&
         now - g->last_shot >= 115u) {
         if (new_bullet(g, g->player_x, g->player_y - 28.0f,
@@ -3128,7 +3146,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             g->audio.shot = 1500;
         }
     }
-    if ((chapters[g->chapter].armed || g->special == SPECIAL_TRUCE) &&
+    if ((mission_armed(g) || g->special == SPECIAL_TRUCE) &&
         g->bombs_remaining > 0 && keys[SDL_SCANCODE_B] &&
         now - g->last_bomb >= 650u) {
         if (new_bullet(g, g->player_x, g->player_y - 4.0f,
@@ -3215,7 +3233,7 @@ static void update_perspective_sortie(Game *g, float dt,
     uint32_t now = SDL_GetTicks();
     int aim_x;
     int aim_y;
-    int firing = keys[SDL_SCANCODE_SPACE] && chapters[g->chapter].armed &&
+    int firing = keys[SDL_SCANCODE_SPACE] && mission_armed(g) &&
                  g->ammunition > 0 &&
                  now - g->last_shot >= (gunner ? 110u : 130u);
     if (gunner) {
@@ -3407,7 +3425,7 @@ static void update_perspective_sortie(Game *g, float dt,
             }
         }
         if (enemy->crashing) continue;
-        if (chapters[g->chapter].armed &&
+        if (mission_armed(g) &&
             depth < 1250.0f && depth > 140.0f &&
             now >= enemy->last_shot &&
             now - enemy->last_shot >
@@ -3800,7 +3818,7 @@ static void reset_wingmen(Game *g)
     int i;
     memset(g->wingmen, 0, sizeof(g->wingmen));
     memset(g->wingman_hit_today, 0, sizeof(g->wingman_hit_today));
-    if (!chapters[g->chapter].armed ||
+    if (!mission_armed(g) ||
         campaign_missions[g->chapter][g->mission].mode != MISSION_DOGFIGHT_3D)
         return;
     for (i = 0; i < 3; ++i) {
@@ -4029,7 +4047,7 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
                     0.28f * (1.0f - distance / 520.0f));
         return;
     }
-    if (!chapters[g->chapter].armed || enemy->ai_state != AI_ATTACK ||
+    if (!mission_armed(g) || enemy->ai_state != AI_ATTACK ||
         now - g->scene_started < 5200u || now < enemy->last_shot) return;
     if (enemy->target >= 0) {
         Enemy *w = &g->wingmen[enemy->target];
@@ -4200,7 +4218,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         show_notice(g, "GUNS CLEAR");
     }
     if (!g->flight_doomed && keys[SDL_SCANCODE_SPACE] &&
-        chapters[g->chapter].armed && !g->guns_jammed &&
+        mission_armed(g) && !g->guns_jammed &&
         g->ammunition > 0 && now - g->last_shot >= 160u) {
         g->last_shot = now;
         --g->ammunition;
@@ -4363,7 +4381,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     if (!g->qa_hold && active > 0 && g->fuel <= 0.0f) {
         finish_alternate_sortie(g);
-    } else if (!g->qa_hold && !chapters[g->chapter].armed && active > 0 &&
+    } else if (!g->qa_hold && !mission_armed(g) && active > 0 &&
                !g->flight_doomed && !g->flight_crashed &&
                g->scroll > chapters[g->chapter].distance) {
         /* 1914: nobody is armed.  Shadowing the other machine for the
@@ -4425,7 +4443,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     g->audio.engine_load = fabsf(g->player_vy) / 120.0f;
     g->audio.other_engine = 0.0f;
     g->audio.other_pitch = 0.0f;
-    if (chapters[g->chapter].armed || mode == MISSION_SIDE) {
+    if (mission_armed(g)) {
         if (keys[SDL_SCANCODE_SPACE]) fire(g);
         if (keys[SDL_SCANCODE_B]) drop_bomb(g);
     }
@@ -5235,7 +5253,7 @@ static void draw_briefing(Game *g)
                     mission->mode == MISSION_GUNNER_3D ?
                     "PILOT        HOLDS THE COURSE" :
                     "X / Z       THROTTLE", 7, 11, ink);
-    if (chapter->armed) {
+    if (mission_armed(g)) {
         typewriter_text(g, 73, 237,
                         mission->mode == MISSION_GUNNER_3D ?
                         "SPACE       LEWIS GUN" :
@@ -5808,7 +5826,10 @@ static void draw_top_down_sortie(Game *g)
         snprintf(buf, sizeof(buf), "TARGETS %d/%d", g->objectives,
                  current_mission_goal(g));
         draw_field_sign(g, 8, 39, 112, buf);
-        snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+        if (mission_armed(g))
+            snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+        else
+            snprintf(buf, sizeof(buf), "UNARMED");
         draw_field_sign(g, 264, 8, 108, buf);
         snprintf(buf, sizeof(buf), "BOMBS %02d", g->bombs_remaining);
         draw_field_sign(g, 264, 39, 108, buf);
@@ -7445,16 +7466,16 @@ static void erase_painted_needle(SDL_Surface *s, const CockpitDial *d)
         }
 }
 
-static void build_cockpit_composite(Game *g)
+static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
 {
     SDL_Surface *c;
     pix_t key = PIX_PACK(255, 0, 255);
     int y, i;
-    if (!g->pilot_cockpit) return;
+    if (!painting) return NULL;
     c = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
                                        CANVAS_SCREEN_BITS,
                                        CANVAS_SCREEN_FORMAT);
-    if (!c) return;
+    if (!c) return NULL;
     SDL_FillRect(c, NULL, key);
     /* Underside of the upper wing: doped linen in its own shadow, warming
      * toward the leading edge where the low sun catches it. */
@@ -7497,10 +7518,19 @@ static void build_cockpit_composite(Game *g)
     draw_strut(c, 616, 46, 586, 318, 12, 9);
     draw_strut(c, 206, 46, 251, 236, 9, 7);
     draw_strut(c, 434, 46, 389, 236, 9, 7);
-    SDL_BlitSurface(g->pilot_cockpit, NULL, c, NULL);
+    SDL_BlitSurface(painting, NULL, c, NULL);
     for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
     SDL_SetColorKey(c, SDL_TRUE, key);
-    g->cockpit_composite = c;
+    return c;
+}
+
+/* The armed cockpit, and the 1914 one with no guns on the decking. */
+static void build_cockpit_composite(Game *g)
+{
+    g->cockpit_composite = cockpit_composite_from(g->pilot_cockpit);
+    g->cockpit_composite_unarmed =
+        cockpit_composite_from(g->pilot_cockpit_unarmed ?
+                               g->pilot_cockpit_unarmed : g->pilot_cockpit);
 }
 
 static void draw_needle(SDL_Surface *s, const CockpitDial *d, int ox, int oy,
@@ -7542,8 +7572,10 @@ static void draw_living_cockpit(Game *g)
     }
     if (g->cockpit_composite) {
         SDL_Rect at;
+        SDL_Surface *cockpit = mission_armed(g) || !g->cockpit_composite_unarmed ?
+                               g->cockpit_composite : g->cockpit_composite_unarmed;
         at.x = ox; at.y = oy; at.w = SCREEN_W; at.h = SCREEN_H;
-        SDL_BlitSurface(g->cockpit_composite, NULL, s, &at);
+        SDL_BlitSurface(cockpit, NULL, s, &at);
     } else if (g->pilot_cockpit) {
         SDL_BlitSurface(g->pilot_cockpit, NULL, s, NULL);
         return;
@@ -7779,7 +7811,7 @@ static void draw_dogfight_3d_sortie(Game *g)
         draw_gunner_airframe(g);
         draw_gunner_bullet_holes(g);
     }
-    if (gunner && g->gunner_moving_guns) {
+    if (gunner && mission_armed(g) && g->gunner_moving_guns) {
         SDL_Rect gun_source;
         SDL_Rect gun_position;
         float traverse = gunner_aim_traverse(g);
@@ -7810,6 +7842,8 @@ static void draw_dogfight_3d_sortie(Game *g)
         /* The rail is already painted into the airframe foreground.  The old
          * full-screen ring overlay belonged to the abandoned twin-gun mockup
          * and would duplicate the mount around the single Lewis. */
+    } else if (gunner && !mission_armed(g)) {
+        /* 1914: Tom rides in the back with a map and a pencil, no gun. */
     } else if (gunner && g->gunner_cockpit)
         SDL_BlitSurface(g->gunner_cockpit, NULL, s, NULL);
     else if (!gunner && g->pilot_cockpit)
@@ -7819,7 +7853,7 @@ static void draw_dogfight_3d_sortie(Game *g)
         circle(s, 320, 421, 96, rgb(s, 90, 61, 37));
         rect(s, 312, 318, 16, 82, rgb(s, 45, 44, 39));
     }
-    if (gunner) {
+    if (gunner && mission_armed(g)) {
         int ax = (int)g->player_x;
         int ay = (int)g->player_y;
         int blocked = gunner_tail_blocks_shot(g, ax, ay);
@@ -7842,7 +7876,10 @@ static void draw_dogfight_3d_sortie(Game *g)
     else
         snprintf(buf, sizeof(buf), "UNARMED PATROL");
     draw_field_sign(g, 8, 342, 130, buf);
-    snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+    if (mission_armed(g))
+        snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+    else
+        snprintf(buf, sizeof(buf), "UNARMED");
     draw_field_sign(g, 8, 371, 130, buf);
     if (gunner)
         snprintf(buf, sizeof(buf), "TAIL %03d", g->tail_integrity);
@@ -8022,7 +8059,10 @@ static void draw_sortie(Game *g)
     else
         snprintf(buf, sizeof(buf), "DUTY  PATROL");
     draw_field_sign(g, 8, 39, 112, buf);
-    snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+    if (mission_armed(g))
+        snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+    else
+        snprintf(buf, sizeof(buf), "UNARMED");
     draw_field_sign(g, 264, 8, 108, buf);
     snprintf(buf, sizeof(buf), "BOMBS %02d", g->bombs_remaining);
     draw_field_sign(g, 264, 39, 108, buf);
@@ -8558,6 +8598,7 @@ static int game_init(Game *g)
     g->dogfight_background = SDL_LoadBMP(CANVAS_DOGFIGHT_BACKGROUND_BMP);
     g->dogfight_enemy = SDL_LoadBMP(CANVAS_DOGFIGHT_ENEMY_BMP);
     g->pilot_cockpit = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_BMP);
+    g->pilot_cockpit_unarmed = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_UNARMED_BMP);
     g->gunner_cockpit = SDL_LoadBMP(CANVAS_GUNNER_COCKPIT_BMP);
     g->gunner_ring = SDL_LoadBMP(CANVAS_GUNNER_RING_BMP);
     g->gunner_airframe = SDL_LoadBMP(CANVAS_GUNNER_AIRFRAME_BMP);
@@ -8568,13 +8609,13 @@ static int game_init(Game *g)
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
             &g->dogfight_background, &g->dogfight_enemy,
-            &g->pilot_cockpit, &g->gunner_cockpit,
+            &g->pilot_cockpit, &g->pilot_cockpit_unarmed, &g->gunner_cockpit,
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas
         };
         int i;
-        for (i = 0; i < 11; ++i) if (*convert[i]) {
+        for (i = 0; i < 12; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -8585,13 +8626,14 @@ static int game_init(Game *g)
     }
     {
         SDL_Surface *keyed[] = {g->topdown_player, g->dogfight_enemy,
-                                g->pilot_cockpit, g->gunner_cockpit,
+                                g->pilot_cockpit, g->pilot_cockpit_unarmed,
+                                g->gunner_cockpit,
                                 g->gunner_ring, g->gunner_airframe,
                                 g->gunner_moving_guns,
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas};
         int i;
-        for (i = 0; i < 9; ++i) if (keyed[i])
+        for (i = 0; i < 10; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -9056,6 +9098,7 @@ int main(int argc, char **argv)
     if (g.dogfight_background) SDL_FreeSurface(g.dogfight_background);
     if (g.dogfight_enemy) SDL_FreeSurface(g.dogfight_enemy);
     if (g.pilot_cockpit) SDL_FreeSurface(g.pilot_cockpit);
+    if (g.pilot_cockpit_unarmed) SDL_FreeSurface(g.pilot_cockpit_unarmed);
     if (g.gunner_cockpit) SDL_FreeSurface(g.gunner_cockpit);
     if (g.gunner_ring) SDL_FreeSurface(g.gunner_ring);
     if (g.gunner_airframe) SDL_FreeSurface(g.gunner_airframe);
@@ -9076,6 +9119,7 @@ int main(int argc, char **argv)
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
     if (g.audio.record_data) SDL_free(g.audio.record_data);
     if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
+    if (g.cockpit_composite_unarmed) SDL_FreeSurface(g.cockpit_composite_unarmed);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
