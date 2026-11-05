@@ -1195,8 +1195,6 @@ static void present_frame(Game *g)
         g->window_surface = dst;
     }
     if (!dst) return;
-    black = SDL_MapRGB(dst->format, 0, 0, 0);
-    SDL_FillRect(dst, NULL, black);
     if (dst->w * SCREEN_H < dst->h * SCREEN_W) {
         dest.w = dst->w;
         dest.h = dst->w * SCREEN_H / SCREEN_W;
@@ -1206,6 +1204,19 @@ static void present_frame(Game *g)
     }
     dest.x = (dst->w - dest.w) / 2;
     dest.y = (dst->h - dest.h) / 2;
+    /* Only the letterbox bars need clearing: the frame covers the rest. */
+    if (dest.w < dst->w || dest.h < dst->h) {
+        SDL_Rect bar;
+        black = SDL_MapRGB(dst->format, 0, 0, 0);
+        bar.x = 0; bar.y = 0; bar.w = dst->w; bar.h = dest.y;
+        if (bar.h > 0) SDL_FillRect(dst, &bar, black);
+        bar.y = dest.y + dest.h; bar.h = dst->h - bar.y;
+        if (bar.h > 0) SDL_FillRect(dst, &bar, black);
+        bar.y = dest.y; bar.h = dest.h; bar.w = dest.x;
+        if (bar.w > 0) SDL_FillRect(dst, &bar, black);
+        bar.x = dest.x + dest.w; bar.w = dst->w - bar.x;
+        if (bar.w > 0) SDL_FillRect(dst, &bar, black);
+    }
     SDL_BlitScaled(g->screen, NULL, dst, &dest);
     SDL_UpdateWindowSurface(g->window);
 }
@@ -1316,6 +1327,18 @@ static void blend_rect(SDL_Surface *s, int x, int y, int w, int h,
     int keep = 255 - alpha;
     int add_r = r * alpha, add_g = g * alpha, add_b = b * alpha;
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    if (s->format->format == CANVAS_SCREEN_FORMAT) {
+        /* Our own pixel format: one pix_mix per pixel, no unpacking. */
+        pix_t colour = PIX_PACK(r, g, b);
+        int t = (alpha * 32 + 127) / 255;
+        int x0 = x < 0 ? 0 : x, x1 = x + w > s->w ? s->w : x + w;
+        for (py = y < 0 ? 0 : y; py < y + h && py < s->h; ++py) {
+            pix_t *row = PIX_ROW(s, py);
+            for (px = x0; px < x1; ++px) row[px] = pix_mix(row[px], colour, t);
+        }
+        if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+        return;
+    }
     for (py = y; py < y + h && py < s->h; ++py) {
         pix_t *row;
         if (py < 0) continue;
@@ -1341,6 +1364,30 @@ static void blend_circle(SDL_Surface *s, int cx, int cy, int radius,
     int px, py;
     if (radius <= 0) return;
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    if (s->format->format == CANVAS_SCREEN_FORMAT) {
+        /* Our own pixel format: work out each row's extent once and the
+         * fall-off in 16.16 fixed point, with no divide per pixel. */
+        pix_t colour = PIX_PACK(r, g, b);
+        uint32_t r2 = (uint32_t)(radius * radius);
+        uint32_t scale = ((uint32_t)alpha << 16) / r2;   /* alpha per unit d2 */
+        for (py = -radius; py <= radius; ++py) {
+            int yy = cy + py, half, x0, x1, xx;
+            pix_t *row;
+            if (yy < 0 || yy >= s->h) continue;
+            half = (int)sqrtf((float)(r2 - (uint32_t)(py * py)));
+            x0 = cx - half < 0 ? 0 : cx - half;
+            x1 = cx + half >= s->w ? s->w - 1 : cx + half;
+            row = PIX_ROW(s, yy);
+            for (xx = x0; xx <= x1; ++xx) {
+                int dx = xx - cx;
+                uint32_t left = r2 - (uint32_t)(dx * dx + py * py);
+                int aa = (int)((left * scale) >> 16);        /* 0..alpha */
+                if (aa > 0) row[xx] = pix_mix(row[xx], colour, (aa * 32 + 127) / 255);
+            }
+        }
+        if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+        return;
+    }
     for (py = -radius; py <= radius; ++py) {
         int yy = cy + py;
         pix_t *row;
@@ -1711,8 +1758,8 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     };
     int i;
     for (i = 0; i < frames; ++i) {
-        float t = (float)a->sample_clock / 11025.0f;
-        float cue_t = (float)a->cue_clock / 11025.0f;
+        float t = (float)a->sample_clock * (1.0f / 11025.0f);
+        float cue_t = (float)a->cue_clock * (1.0f / 11025.0f);
         int mood_index = a->music_mood - MUSIC_RECON;
         float tempo = a->music_mood == MUSIC_TENSION ? 2.05f :
                       a->music_mood == MUSIC_MOURNING ? 0.92f :
@@ -1725,7 +1772,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         if (a->scene == SCENE_DAWN) {
             /* A cold rotary being swung: two coughs that die, a third
              * that catches and settles into a rough idle. */
-            float t = (float)a->cue_clock / 11025.0f;
+            float t = (float)a->cue_clock * (1.0f / 11025.0f);
             float level = 0.0f, hz = 34.0f;
             float noise_sample = (float)((a->noise >> 16) & 0xffff) /
                                  32768.0f - 1.0f;
@@ -1738,9 +1785,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 if (run < 1.6f && ((a->noise >> 13) & 7u) == 0u)
                     level *= 0.25f;     /* missing on a cylinder or two */
             }
-            a->engine_phase += hz / 11025.0f;
+            a->engine_phase += hz * (1.0f / 11025.0f);
             if (a->engine_phase >= 1.0f) a->engine_phase -= 1.0f;
-            a->engine_sub_phase += hz * 0.5f / 11025.0f;
+            a->engine_sub_phase += hz * 0.5f * (1.0f / 11025.0f);
             if (a->engine_sub_phase >= 1.0f) a->engine_sub_phase -= 1.0f;
             sample = (triangle_wave(a->engine_phase) * 0.15f +
                       fast_sin_cycles(a->engine_sub_phase) * 0.10f +
@@ -1753,9 +1800,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             if (speed < 0.0f) speed = 0.0f;
             if (speed > 1.0f) speed = 1.0f;
             engine_hz = 46.0f + speed * 38.0f + a->engine_load * 7.0f;
-            a->engine_phase += engine_hz / 11025.0f;
+            a->engine_phase += engine_hz * (1.0f / 11025.0f);
             if (a->engine_phase >= 1.0f) a->engine_phase -= 1.0f;
-            a->engine_sub_phase += engine_hz * 0.5f / 11025.0f;
+            a->engine_sub_phase += engine_hz * 0.5f * (1.0f / 11025.0f);
             if (a->engine_sub_phase >= 1.0f) a->engine_sub_phase -= 1.0f;
             sample = triangle_wave(a->engine_phase) * (0.17f + speed * 0.09f);
             /* This must have its own continuous phase. Deriving a half-cycle
@@ -1764,12 +1811,12 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             sample += noise_sample * (0.012f + speed * 0.035f); /* slipstream */
             if (a->other_engine > 0.001f) {
                 float hz = 53.0f + a->other_pitch * 31.0f;
-                a->other_phase += hz / 11025.0f;
+                a->other_phase += hz * (1.0f / 11025.0f);
                 if (a->other_phase >= 1.0f) a->other_phase -= 1.0f;
                 sample += triangle_wave(a->other_phase) * a->other_engine * 0.16f;
             }
             if (a->vehicle_engine > 0.001f) {
-                a->vehicle_phase += 29.0f / 11025.0f;
+                a->vehicle_phase += 29.0f * (1.0f / 11025.0f);
                 if (a->vehicle_phase >= 1.0f) a->vehicle_phase -= 1.0f;
                 sample += triangle_wave(a->vehicle_phase) *
                           a->vehicle_engine * 0.13f;
@@ -1829,8 +1876,8 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 float beat_phase = wrap_unit(position);
                 float phrase = 0.72f + 0.28f *
                                fast_sin_cycles(0.5f * beat_phase);
-                a->synth_phase[4] += melody_hz / 11025.0f;
-                a->synth_phase[3] += bass_hz / 11025.0f;
+                a->synth_phase[4] += melody_hz * (1.0f / 11025.0f);
+                a->synth_phase[3] += bass_hz * (1.0f / 11025.0f);
                 if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
                 if (a->synth_phase[3] >= 1.0f) a->synth_phase[3] -= 1.0f;
                 sample = (fast_sin_cycles(a->synth_phase[4]) * 0.14f +
@@ -1884,9 +1931,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 float breath = (float)((a->noise >> 16) & 0xffff) /
                                32768.0f - 1.0f;
                 if (attack > 1.0f) attack = 1.0f;
-                a->synth_phase[0] += drone_d / 11025.0f;
-                a->synth_phase[1] += drone_a / 11025.0f;
-                a->synth_phase[4] += chanter_hz / 11025.0f;
+                a->synth_phase[0] += drone_d * (1.0f / 11025.0f);
+                a->synth_phase[1] += drone_a * (1.0f / 11025.0f);
+                a->synth_phase[4] += chanter_hz * (1.0f / 11025.0f);
                 if (a->synth_phase[0] >= 1.0f) a->synth_phase[0] -= 1.0f;
                 if (a->synth_phase[1] >= 1.0f) a->synth_phase[1] -= 1.0f;
                 if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
@@ -1902,7 +1949,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             if (mood_index < 0 || mood_index > 3) mood_index = 0;
             for (v = 0; v < 3; ++v) {
                 float f = note_hz(mood_chords[mood_index][bar][v]);
-                a->synth_phase[v] += f / 11025.0f;
+                a->synth_phase[v] += f * (1.0f / 11025.0f);
                 if (a->synth_phase[v] >= 1.0f) a->synth_phase[v] -= 1.0f;
                 pad += triangle_wave(a->synth_phase[v]) * 0.072f;
             }
@@ -1910,8 +1957,8 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                 float bass_hz = note_hz(mood_chords[mood_index][bar][0] - 12);
                 float melody_hz = note_hz(
                     mood_chords[mood_index][bar][(beat / 2) % 3] + 12);
-                a->synth_phase[3] += bass_hz / 11025.0f;
-                a->synth_phase[4] += melody_hz / 11025.0f;
+                a->synth_phase[3] += bass_hz * (1.0f / 11025.0f);
+                a->synth_phase[4] += melody_hz * (1.0f / 11025.0f);
                 if (a->synth_phase[3] >= 1.0f) a->synth_phase[3] -= 1.0f;
                 if (a->synth_phase[4] >= 1.0f) a->synth_phase[4] -= 1.0f;
             }
@@ -6861,47 +6908,59 @@ static void draw_simulator_terrain(Game *g)
 
     /* Two deterministic ridge rings bridge atmosphere and ground.  Their
      * bearings are fixed in the world, so they roll and pan with the same
-     * quaternion projection as the fields rather than sliding on the screen. */
-    for (pass = 0; pass < 2; ++pass) {
-        const int segments = 64;
-        float distance = pass == 0 ? 14200.0f : 9400.0f;
+     * quaternion projection as the fields rather than sliding on the screen.
+     * The ring's bearings and heights never change: they are worked out
+     * once, and each ring point is projected once a frame and shared by
+     * the two segments that meet there. */
+    {
+        enum { RIDGE_SEGMENTS = 64 };
+        static float ring_sin[RIDGE_SEGMENTS], ring_cos[RIDGE_SEGMENTS];
+        static float ring_height[2][RIDGE_SEGMENTS];
+        static int ring_ready;
+        Projected3D base[RIDGE_SEGMENTS], top[RIDGE_SEGMENTS];
         int segment;
-        for (segment = 0; segment < segments; ++segment) {
-            float a0 = (float)segment * (2.0f * (float)M_PI / segments);
-            float a1 = (float)(segment + 1) *
-                       (2.0f * (float)M_PI / segments);
-            uint32_t seed0 = scene_hash((uint32_t)segment * 92821u +
-                                        (uint32_t)pass * 0x48494c4cu);
-            uint32_t seed1 = scene_hash((uint32_t)((segment + 1) % segments) *
-                                        92821u +
-                                        (uint32_t)pass * 0x48494c4cu);
-            float height0 = (pass == 0 ? 430.0f : 260.0f) +
-                            (float)(seed0 % (pass == 0 ? 690u : 430u));
-            float height1 = (pass == 0 ? 430.0f : 260.0f) +
-                            (float)(seed1 % (pass == 0 ? 690u : 430u));
-            Vec3 w0 = {g->flight_x + sinf(a0) * distance, 0.0f,
-                       g->flight_z + cosf(a0) * distance};
-            Vec3 w1 = {g->flight_x + sinf(a1) * distance, 0.0f,
-                       g->flight_z + cosf(a1) * distance};
-            Projected3D b0 = project_world_point(g, w0);
-            Projected3D b1 = project_world_point(g, w1);
-            Projected3D t0, t1;
-            w0.y = height0;
-            w1.y = height1;
-            t0 = project_world_point(g, w0);
-            t1 = project_world_point(g, w1);
-            if (b0.visible && b1.visible && t0.visible && t1.visible &&
-                abs(b0.x) < 1500 && abs(b1.x) < 1500) {
-                uint32_t hill = pass == 0 ?
-                    pix_mix(PIX_PACK(64, 70, 66), g->world_haze, 21) :
-                    pix_mix(PIX_PACK(58, 66, 46), g->world_haze, 15);
-                fill_triangle(s, b0.x, b0.y, b1.x, b1.y,
-                              t1.x, t1.y, hill);
-                fill_triangle(s, b0.x, b0.y, t1.x, t1.y,
-                              t0.x, t0.y, hill);
-                if (pass == 1)
-                    line(s, t0.x, t0.y, t1.x, t1.y,
-                         pix_mix(PIX_PACK(96, 98, 74), g->world_haze, 14));
+        if (!ring_ready) {
+            for (segment = 0; segment < RIDGE_SEGMENTS; ++segment) {
+                float a = (float)segment *
+                          (2.0f * (float)M_PI / RIDGE_SEGMENTS);
+                ring_sin[segment] = sinf(a);
+                ring_cos[segment] = cosf(a);
+                for (pass = 0; pass < 2; ++pass) {
+                    uint32_t seed = scene_hash((uint32_t)segment * 92821u +
+                                               (uint32_t)pass * 0x48494c4cu);
+                    ring_height[pass][segment] =
+                        (pass == 0 ? 430.0f : 260.0f) +
+                        (float)(seed % (pass == 0 ? 690u : 430u));
+                }
+            }
+            ring_ready = 1;
+        }
+        for (pass = 0; pass < 2; ++pass) {
+            float distance = pass == 0 ? 14200.0f : 9400.0f;
+            uint32_t hill = pass == 0 ?
+                pix_mix(PIX_PACK(64, 70, 66), g->world_haze, 21) :
+                pix_mix(PIX_PACK(58, 66, 46), g->world_haze, 15);
+            uint32_t crest = pix_mix(PIX_PACK(96, 98, 74), g->world_haze, 14);
+            for (segment = 0; segment < RIDGE_SEGMENTS; ++segment) {
+                Vec3 w = {g->flight_x + ring_sin[segment] * distance, 0.0f,
+                          g->flight_z + ring_cos[segment] * distance};
+                base[segment] = project_world_point(g, w);
+                w.y = ring_height[pass][segment];
+                top[segment] = project_world_point(g, w);
+            }
+            for (segment = 0; segment < RIDGE_SEGMENTS; ++segment) {
+                int next = (segment + 1) % RIDGE_SEGMENTS;
+                Projected3D b0 = base[segment], b1 = base[next];
+                Projected3D t0 = top[segment], t1 = top[next];
+                if (b0.visible && b1.visible && t0.visible && t1.visible &&
+                    abs(b0.x) < 1500 && abs(b1.x) < 1500) {
+                    fill_triangle(s, b0.x, b0.y, b1.x, b1.y,
+                                  t1.x, t1.y, hill);
+                    fill_triangle(s, b0.x, b0.y, t1.x, t1.y,
+                                  t0.x, t0.y, hill);
+                    if (pass == 1)
+                        line(s, t0.x, t0.y, t1.x, t1.y, crest);
+                }
             }
         }
     }
@@ -7764,6 +7823,9 @@ static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
     SDL_BlitSurface(painting, NULL, c, NULL);
     for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
     SDL_SetColorKey(c, SDL_TRUE, key);
+    /* Nearly two thirds of the composite is clear: run-length encoding
+     * lets the per-frame blit skip it instead of testing every pixel. */
+    SDL_SetSurfaceRLE(c, 1);
     return c;
 }
 
