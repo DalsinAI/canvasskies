@@ -9,7 +9,12 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.1.0-alpha.1**, a playable vertical slice. See
+Current release: **0.2.0 RC1**, a release candidate. Download it from
+[the v0.2.0-rc1 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc1).
+New since the alpha: a cinematic cockpit view, open-sky dogfights, a pilot's
+career with medals, the story as a war diary, the morning paper and Book of
+Press Cuttings, the Christmas truce, the airship and Gotha raids, and period
+gramophone records. The earlier alpha is described in
 [docs/ALPHA_RELEASE_NOTES.md](docs/ALPHA_RELEASE_NOTES.md).
 
 ## Features
@@ -41,7 +46,11 @@ game's own 640x400.
 ## Requirements
 
 - AmigaOS 3.x on a 68040 with FPU (or an AmiCradle instance)
-- SDL2 for AmigaOS 3
+- RTG graphics: the game opens a 640x400 window on a 16-bit (or deeper)
+  Workbench screen
+- GFOpenUp with the OpenGPU SDL2 runtime (`LIBS:OpenGPU/SDL2.module` and
+  `LIBS:opengpu.library`)
+- AHI for sound
 
 ## Building
 
