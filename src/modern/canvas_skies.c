@@ -107,6 +107,9 @@
 #ifndef CANVAS_PILOT_COCKPIT_BMP
 #define CANVAS_PILOT_COCKPIT_BMP "assets/canvas-skies/pilot-cockpit.bmp"
 #endif
+#ifndef CANVAS_PILOT_COCKPIT_SINGLE_BMP
+#define CANVAS_PILOT_COCKPIT_SINGLE_BMP "assets/canvas-skies/pilot-cockpit-single.bmp"
+#endif
 #ifndef CANVAS_PILOT_COCKPIT_UNARMED_BMP
 #define CANVAS_PILOT_COCKPIT_UNARMED_BMP "assets/canvas-skies/pilot-cockpit-unarmed.bmp"
 #endif
@@ -495,6 +498,7 @@ typedef struct {
     SDL_Surface *dogfight_enemy;
     SDL_Surface *pilot_cockpit;
     SDL_Surface *pilot_cockpit_unarmed; /* 1914: no guns, no ring sight */
+    SDL_Surface *pilot_cockpit_single;  /* 1915 to spring 1917: one Vickers */
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
@@ -507,6 +511,7 @@ typedef struct {
     SDL_Surface *cockpit_composite;
     SDL_Surface *dawn_backdrop;
     SDL_Surface *cockpit_composite_unarmed;
+    SDL_Surface *cockpit_composite_single;
     pix_t *ground_mip[GROUND_MIPS];
     int ground_mips;
     pix_t ground_haze_tint;
@@ -3958,6 +3963,15 @@ static void burst_of_debris(Game *g, Vec3 at, Vec3 carry, int fabric)
 
 /* Two synchronised guns either side of the sight, converging on the ring
  * sight line 150 m out. */
+/* The pilot's forward guns: none in 1914, one synchronised Vickers from
+ * 1915 until the twin-gun Camels of the Cambrai chapter (late 1917). */
+#define TWIN_GUN_CHAPTER 4
+static int pilot_gun_count(const Game *g)
+{
+    if (!mission_armed(g)) return 0;
+    return g->chapter >= TWIN_GUN_CHAPTER ? 2 : 1;
+}
+
 static void fire_player_guns(Game *g)
 {
     Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
@@ -3965,9 +3979,11 @@ static void fire_player_guns(Game *g)
     Vec3 carry = aircraft_velocity(&g->flight);
     Vec3 aim = pose_point(&pose, 0.0f, -150.0f * 20.0f / WORLD_FOCAL, 150.0f);
     float spread = 0.012f - g->skill_gunnery * 0.008f;
-    int gun;
-    for (gun = 0; gun < 2; ++gun) {
-        Vec3 from = pose_point(&pose, gun ? 0.42f : -0.42f, -0.35f, 2.2f);
+    int gun, guns = pilot_gun_count(g);
+    for (gun = 0; gun < guns; ++gun) {
+        /* A single gun sits left of the centreline, as painted. */
+        Vec3 from = pose_point(&pose, guns == 1 ? -0.42f : gun ? 0.42f : -0.42f,
+                               -0.35f, 2.2f);
         Vec3 dir = vec3_sub(aim, from);
         float len = vec3_length(dir);
         WorldRound *r;
@@ -4634,8 +4650,9 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         fire_player_guns(g);
         new_dogfight_particle(g, 298.0f, 245.0f,
                               -54.0f, -68.0f, 0.42f, 2);
-        new_dogfight_particle(g, 344.0f, 245.0f,
-                               58.0f, -62.0f, 0.42f, 2);
+        if (pilot_gun_count(g) == 2)
+            new_dogfight_particle(g, 344.0f, 245.0f,
+                                   58.0f, -62.0f, 0.42f, 2);
         if (random_unit(g) < 0.004f - g->skill_gunnery * 0.0025f) {
             g->guns_jammed = 1;
             g->jam_clear_until = 0;
@@ -8276,15 +8293,31 @@ static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
         if (320 - half - 1 >= 0) row[320 - half - 1] = PIX_PACK(70, 54, 44);
         if (320 + half < SCREEN_W) row[320 + half] = PIX_PACK(70, 54, 44);
     }
-    /* Flying wires, interplane and cabane struts. */
-    line(c, 92, 46, 246, 262, PIX_PACK(58, 54, 50));
-    line(c, 548, 46, 394, 262, PIX_PACK(58, 54, 50));
-    line(c, 30, 46, 238, 270, PIX_PACK(66, 60, 54));
-    line(c, 610, 46, 402, 270, PIX_PACK(66, 60, 54));
-    draw_strut(c, 24, 46, 54, 318, 12, 9);
-    draw_strut(c, 616, 46, 586, 318, 12, 9);
-    draw_strut(c, 206, 46, 251, 236, 9, 7);
-    draw_strut(c, 434, 46, 389, 236, 9, 7);
+    /* The rigging, fixed to the airframe so it banks with it.  Each joint
+     * is a point the painting already shows: the interplane struts stand
+     * on the lower wing's fittings at (85, 311) and (555, 311), the cabane
+     * struts on the longeron posts beside the cockpit at (209, 286) and
+     * (431, 286); all four meet the underside of the top wing at y = 46.
+     * The flying wires climb from the cabane feet to the interplane tops;
+     * the landing wires fall from the centre section to the interplane
+     * feet.  The painting is laid over all of it, so every foot vanishes
+     * into the fitting it stands on. */
+    line(c, 211, 284, 44, 48, PIX_PACK(58, 54, 50));
+    line(c, 429, 284, 596, 48, PIX_PACK(58, 54, 50));
+    line(c, 236, 48, 87, 309, PIX_PACK(66, 60, 54));
+    line(c, 404, 48, 553, 309, PIX_PACK(66, 60, 54));
+    draw_strut(c, 40, 46, 85, 313, 12, 8);
+    draw_strut(c, 600, 46, 555, 313, 12, 8);
+    draw_strut(c, 238, 46, 209, 288, 9, 7);
+    draw_strut(c, 402, 46, 431, 288, 9, 7);
+    /* Iron fittings where the struts meet the top wing. */
+    {
+        static const int top_x[4] = {40, 600, 238, 402};
+        for (i = 0; i < 4; ++i) {
+            rect(c, top_x[i] - 8, 44, 16, 4, PIX_PACK(56, 48, 40));
+            rect(c, top_x[i] - 7, 44, 14, 1, PIX_PACK(150, 128, 96));
+        }
+    }
     SDL_BlitSurface(painting, NULL, c, NULL);
     for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
     SDL_SetColorKey(c, SDL_TRUE, key);
@@ -8294,13 +8327,17 @@ static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
     return c;
 }
 
-/* The armed cockpit, and the 1914 one with no guns on the decking. */
+/* The twin-gun cockpit, the single-gun one and the 1914 one with no
+ * guns on the decking. */
 static void build_cockpit_composite(Game *g)
 {
     g->cockpit_composite = cockpit_composite_from(g->pilot_cockpit);
     g->cockpit_composite_unarmed =
         cockpit_composite_from(g->pilot_cockpit_unarmed ?
                                g->pilot_cockpit_unarmed : g->pilot_cockpit);
+    g->cockpit_composite_single =
+        cockpit_composite_from(g->pilot_cockpit_single ?
+                               g->pilot_cockpit_single : g->pilot_cockpit);
 }
 
 static void draw_needle(SDL_Surface *s, const CockpitDial *d, int ox, int oy,
@@ -8342,8 +8379,12 @@ static void draw_living_cockpit(Game *g)
     }
     if (g->cockpit_composite) {
         SDL_Rect at;
-        SDL_Surface *cockpit = mission_armed(g) || !g->cockpit_composite_unarmed ?
-                               g->cockpit_composite : g->cockpit_composite_unarmed;
+        SDL_Surface *cockpit = g->cockpit_composite;
+        int guns = pilot_gun_count(g);
+        if (guns == 0 && g->cockpit_composite_unarmed)
+            cockpit = g->cockpit_composite_unarmed;
+        else if (guns == 1 && g->cockpit_composite_single)
+            cockpit = g->cockpit_composite_single;
         at.x = ox; at.y = oy; at.w = SCREEN_W; at.h = SCREEN_H;
         SDL_BlitSurface(cockpit, NULL, s, &at);
     } else if (g->pilot_cockpit) {
@@ -9433,6 +9474,7 @@ static int game_init(Game *g)
     g->dogfight_enemy = SDL_LoadBMP(CANVAS_DOGFIGHT_ENEMY_BMP);
     g->pilot_cockpit = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_BMP);
     g->pilot_cockpit_unarmed = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_UNARMED_BMP);
+    g->pilot_cockpit_single = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_SINGLE_BMP);
     g->gunner_cockpit = SDL_LoadBMP(CANVAS_GUNNER_COCKPIT_BMP);
     g->gunner_ring = SDL_LoadBMP(CANVAS_GUNNER_RING_BMP);
     g->gunner_airframe = SDL_LoadBMP(CANVAS_GUNNER_AIRFRAME_BMP);
@@ -9443,13 +9485,14 @@ static int game_init(Game *g)
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
             &g->dogfight_background, &g->dogfight_enemy,
-            &g->pilot_cockpit, &g->pilot_cockpit_unarmed, &g->gunner_cockpit,
+            &g->pilot_cockpit, &g->pilot_cockpit_unarmed,
+            &g->pilot_cockpit_single, &g->gunner_cockpit,
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas
         };
         int i;
-        for (i = 0; i < 12; ++i) if (*convert[i]) {
+        for (i = 0; i < 13; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -9461,13 +9504,14 @@ static int game_init(Game *g)
     {
         SDL_Surface *keyed[] = {g->topdown_player, g->dogfight_enemy,
                                 g->pilot_cockpit, g->pilot_cockpit_unarmed,
+                                g->pilot_cockpit_single,
                                 g->gunner_cockpit,
                                 g->gunner_ring, g->gunner_airframe,
                                 g->gunner_moving_guns,
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas};
         int i;
-        for (i = 0; i < 10; ++i) if (keyed[i])
+        for (i = 0; i < 11; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -9835,6 +9879,17 @@ int main(int argc, char **argv)
          * remains playable instead of completing before the window appears. */
         g.chapter = 6;
         g.mission = 5;
+        /* DOGFIGHT n: the first cockpit sortie of chapter n instead, to
+         * check that year's machine and guns. */
+        if (argc > 2 && argv[2][0] >= '0' && argv[2][0] <= '7') {
+            int m;
+            g.chapter = argv[2][0] - '0';
+            for (m = 0; m < MISSIONS_PER_CHAPTER; ++m)
+                if (campaign_missions[g.chapter][m].mode == MISSION_DOGFIGHT_3D) {
+                    g.mission = m;
+                    break;
+                }
+        }
         reset_sortie(&g);
         g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
@@ -10013,6 +10068,8 @@ int main(int argc, char **argv)
     if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
     if (g.dawn_backdrop) SDL_FreeSurface(g.dawn_backdrop);
     if (g.cockpit_composite_unarmed) SDL_FreeSurface(g.cockpit_composite_unarmed);
+    if (g.cockpit_composite_single) SDL_FreeSurface(g.cockpit_composite_single);
+    if (g.pilot_cockpit_single) SDL_FreeSurface(g.pilot_cockpit_single);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
