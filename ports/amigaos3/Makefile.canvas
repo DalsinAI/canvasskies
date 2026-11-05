@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -50,6 +50,12 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
 	-DCANVAS_ENEMY_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy.bmp\" \
+	-DCANVAS_PLAYER_TWOSEAT_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player-twoseat.bmp\" \
+	-DCANVAS_PLAYER_LATE_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player-late.bmp\" \
+	-DCANVAS_ENEMY_MONO_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy-mono.bmp\" \
+	-DCANVAS_ENEMY_LATE_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy-late.bmp\" \
+	-DCANVAS_TOPDOWN_TWOSEAT_BMP=\"PROGDIR:assets/canvas-skies/topdown-player-twoseat.bmp\" \
+	-DCANVAS_TOPDOWN_LATE_BMP=\"PROGDIR:assets/canvas-skies/topdown-player-late.bmp\" \
 	-DCANVAS_MARCH_WAV=\"PROGDIR:assets/canvas-skies/washington-post-gramophone.wav\" \
 	-DCANVAS_MESS_WAV=\"PROGDIR:assets/canvas-skies/colonel-bogey-gramophone.wav\" \
 	-DCANVAS_PIPER_WAV=\"PROGDIR:assets/canvas-skies/amazing-grace-bagpipes.wav\" \
