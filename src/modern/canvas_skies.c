@@ -4841,8 +4841,8 @@ static void fire_player_guns(Game *g)
     float spread = 0.012f - g->skill_gunnery * 0.008f;
     int gun, guns = pilot_gun_count(g);
     for (gun = 0; gun < guns; ++gun) {
-        /* A single gun sits left of the centreline, as painted. */
-        Vec3 from = pose_point(&pose, guns == 1 ? -0.42f : gun ? 0.42f : -0.42f,
+        /* A single gun is on the centreline, under the sight. */
+        Vec3 from = pose_point(&pose, guns == 1 ? 0.0f : gun ? 0.42f : -0.42f,
                                -0.35f, 2.2f);
         Vec3 dir = vec3_sub(aim, from);
         float len = vec3_length(dir);
@@ -5538,11 +5538,15 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.shot = 1500;
         g->gun_recoil = 1.0f;
         fire_player_guns(g);
-        new_dogfight_particle(g, 298.0f, 245.0f,
-                              -54.0f, -68.0f, 0.42f, 2);
-        if (pilot_gun_count(g) == 2)
+        if (pilot_gun_count(g) == 1) {
+            new_dogfight_particle(g, 330.0f, 245.0f,
+                                  58.0f, -62.0f, 0.42f, 2);
+        } else {
+            new_dogfight_particle(g, 298.0f, 245.0f,
+                                  -54.0f, -68.0f, 0.42f, 2);
             new_dogfight_particle(g, 344.0f, 245.0f,
-                                   58.0f, -62.0f, 0.42f, 2);
+                                  58.0f, -62.0f, 0.42f, 2);
+        }
         if (random_unit(g) < 0.004f - g->skill_gunnery * 0.0025f) {
             g->guns_jammed = 1;
             g->jam_clear_until = 0;
@@ -9585,37 +9589,40 @@ static void erase_painted_needle(SDL_Surface *s, const CockpitDial *d)
         }
 }
 
-/* The wing cellule seen from the cockpit, built in the airframe's own
- * axes (x forward, y right, z down, metres from the pilot's eye) and
- * projected with the world camera (centre 320,190, focal 330), so it is
- * fixed to the machine and banks with it.  Its size follows the painting:
- * the painted lower-wing roots in the corners put the lower wing about
- * 2.7 m ahead and 1 m below the eye.  The upper wing is staggered ahead
- * of the lower one; each side has a front and a rear interplane strut at
- * the same span station, standing square between the two wings, with
- * incidence wires crossing between them.  Short cabane struts carry the
- * centre section over the cowling either side of the guns, and the flying
- * and landing wires cross in the plane of each bay. */
+/* The wing cellule seen from the pilot's seat, built in the airframe's own
+ * axes (x forward, y right, z down, metres from the pilot's eye) to the
+ * Camel's measurements: the top wing 0.53 m over the eye with its leading
+ * edge 1.1 m ahead, so its underside runs across the top of the view and
+ * its trailing edge passes overhead; the lower wing a gap of 1.55 m below,
+ * staggered back.  The cabane struts stand close either side of the gun,
+ * from the centre section down past the coaming to the upper longerons;
+ * the interplane pairs are far out at the sides with the flying, landing
+ * and incidence wires crossing in each bay.  It is projected once, wide
+ * (112 degrees, as a pilot takes in his wings at a glance), into the
+ * cockpit composite, so it is fixed to the machine: the world rolls behind
+ * it when the machine banks. */
 typedef struct { float x, y, z; } CellPoint;
-#define CELL_UP_TE 2.05f
-#define CELL_UP_LE 3.4f
-#define CELL_UP_Z (-0.5f)
-#define CELL_UP_SPAN 4.2f
-#define CELL_LO_TE 1.9f
-#define CELL_LO_LE 3.25f
-#define CELL_LO_Z 1.0f
+#define CELL_FOCAL 216.0f
+#define CELL_CY 184.0f
+#define CELL_NEAR 0.06f
+#define CELL_UP_LE 1.10f
+#define CELL_UP_TE (-0.27f)
+#define CELL_UP_Z (-0.53f)
+#define CELL_UP_SPAN 4.27f
+#define CELL_CUTOUT_Y 0.38f
+#define CELL_CUTOUT_TO 0.28f       /* the cut-out runs back from here */
+#define CELL_LO_LE 0.64f
+#define CELL_LO_TE (-0.73f)
+#define CELL_LO_Z 1.02f
 #define CELL_LO_ROOT 0.42f
-#define CELL_DIHEDRAL 0.0524f      /* three degrees */
-#define CELL_STRUT_Y 1.95f
+#define CELL_DIHEDRAL 0.0875f      /* five degrees */
 #define CELL_FRONT_SPAR 0.25f
 #define CELL_REAR_SPAR 0.70f
 #define CELL_CABANE_Y 0.36f
+#define CELL_CABANE_FOOT_Y 0.46f
+#define CELL_CABANE_FOOT_Z 0.77f
 
-static void cell_project(float x, float y, float z, int *sx, int *sy)
-{
-    *sx = 320 + (int)floorf(y * 330.0f / x + 0.5f);
-    *sy = 190 + (int)floorf(z * 330.0f / x + 0.5f);
-}
+static const float cell_strut_y[2] = {1.25f, 2.75f};
 
 static float cell_lower_z(float y)
 {
@@ -9627,10 +9634,40 @@ static float cell_chord(float le, float te, float frac)
     return le - (le - te) * frac;
 }
 
+/* Clips a segment to the near plane; returns 0 if it lies behind the eye. */
+static int cell_clip(float *x0, float *y0, float *z0, float *x1, float *y1,
+                     float *z1)
+{
+    float t;
+    if (*x0 < CELL_NEAR && *x1 < CELL_NEAR) return 0;
+    if (*x0 < CELL_NEAR) {
+        t = (CELL_NEAR - *x0) / (*x1 - *x0);
+        *y0 += (*y1 - *y0) * t; *z0 += (*z1 - *z0) * t; *x0 = CELL_NEAR;
+    }
+    if (*x1 < CELL_NEAR) {
+        t = (CELL_NEAR - *x1) / (*x0 - *x1);
+        *y1 += (*y0 - *y1) * t; *z1 += (*z0 - *z1) * t; *x1 = CELL_NEAR;
+    }
+    return 1;
+}
+
+static void cell_project(float x, float y, float z, int *sx, int *sy)
+{
+    float px = 320.0f + y * CELL_FOCAL / x, py = CELL_CY + z * CELL_FOCAL / x;
+    /* Far off screen is still drawn toward the right edge. */
+    if (px < -4000.0f) px = -4000.0f;
+    if (px > 4000.0f) px = 4000.0f;
+    if (py < -4000.0f) py = -4000.0f;
+    if (py > 4000.0f) py = 4000.0f;
+    *sx = (int)floorf(px + 0.5f);
+    *sy = (int)floorf(py + 0.5f);
+}
+
 static void cell_line(SDL_Surface *s, float x0, float y0, float z0,
                       float x1, float y1, float z1, pix_t c)
 {
     int ax, ay, bx, by;
+    if (!cell_clip(&x0, &y0, &z0, &x1, &y1, &z1)) return;
     cell_project(x0, y0, z0, &ax, &ay);
     cell_project(x1, y1, z1, &bx, &by);
     line(s, ax, ay, bx, by, c);
@@ -9639,54 +9676,55 @@ static void cell_line(SDL_Surface *s, float x0, float y0, float z0,
 static void cell_strut(SDL_Surface *s, float x0, float y0, float z0,
                        float x1, float y1, float z1, float width)
 {
-    int ax, ay, bx, by;
+    int ax, ay, bx, by, wa, wb;
+    if (!cell_clip(&x0, &y0, &z0, &x1, &y1, &z1)) return;
     cell_project(x0, y0, z0, &ax, &ay);
     cell_project(x1, y1, z1, &bx, &by);
-    draw_strut(s, ax, ay, bx, by, (int)(width * 330.0f / x0 + 0.5f),
-               (int)(width * 330.0f / x1 + 0.5f));
+    wa = (int)(width * CELL_FOCAL / x0 + 0.5f);
+    wb = (int)(width * CELL_FOCAL / x1 + 0.5f);
+    if (wa > 60) wa = 60;
+    if (wb > 60) wb = 60;
+    draw_strut(s, ax, ay, bx, by, wa < 2 ? 2 : wa, wb < 2 ? 2 : wb);
 }
 
 /* Both wings' visible surfaces, cast pixel by pixel once when the
- * composite is built.  Each screen pixel's ray is met with the plane of
- * the upper wing's underside or the lower wing's top; four samples per
- * pixel give soft edges against the painted parts.  The underside is pale
- * clear-doped linen glowing where the low sun shines through it, with rib
- * tapes and a darker leading edge; the lower wing's top is the same
- * khaki-brown doped finish as the painted wing roots, its rib tapes
- * catching the light, fading a little with distance. */
+ * composite is built.  The top wing's underside is clear-doped linen with
+ * rib tapes, glowing where the low sun is behind it, its leading edge
+ * lit and the centre-section cut-out open to the sky over the pilot; the
+ * lower wing's top is the same PC10 khaki as the painted roots. */
 static int cellule_sample(float px, float py, float *r, float *gr, float *b)
 {
-    float dx = (px - 320.0f) / 330.0f, dz = (py - 190.0f) / 330.0f;
+    float dx = (px - 320.0f) / CELL_FOCAL, dz = (py - CELL_CY) / CELL_FOCAL;
     if (dz < -0.001f) {
         float x = CELL_UP_Z / dz, y = x * dx, chord, rib, tape, glow, edge;
-        if (x < CELL_UP_TE || x > CELL_UP_LE || fabsf(y) > CELL_UP_SPAN)
-            return 0;
-        chord = (x - CELL_UP_TE) / (CELL_UP_LE - CELL_UP_TE); /* 0 TE .. 1 LE */
+        if (x > CELL_UP_LE || fabsf(y) > CELL_UP_SPAN) return 0;
+        if (fabsf(y) < CELL_CUTOUT_Y && x < CELL_CUTOUT_TO) return 0;
+        chord = (x - CELL_UP_TE) / (CELL_UP_LE - CELL_UP_TE);
         rib = fabsf(y) / (CELL_UP_SPAN / 17.0f);
         rib -= floorf(rib);
         tape = rib < 0.06f || rib > 0.94f ? 1.0f : 0.0f;
         glow = 0.5f + 0.5f * (y / CELL_UP_SPAN);    /* the sun on the right */
-        edge = chord > 0.9f ? (chord - 0.9f) * 10.0f : 0.0f;
-        *r = 118.0f + glow * 52.0f + tape * 22.0f - edge * 42.0f;
-        *gr = 100.0f + glow * 38.0f + tape * 18.0f - edge * 36.0f;
-        *b = 82.0f + glow * 18.0f + tape * 12.0f - edge * 28.0f;
-        if (chord < 0.04f) { *r *= 0.7f; *gr *= 0.7f; *b *= 0.7f; }
+        edge = chord > 0.92f ? (chord - 0.92f) * 12.0f : 0.0f;
+        *r = 120.0f + glow * 52.0f + tape * 22.0f - edge * 30.0f;
+        *gr = 102.0f + glow * 38.0f + tape * 18.0f - edge * 26.0f;
+        *b = 82.0f + glow * 18.0f + tape * 12.0f - edge * 20.0f;
+        if (chord > 0.985f) { *r += 60.0f; *gr += 50.0f; *b += 34.0f; }
+        if (fabsf(y) < CELL_CUTOUT_Y + 0.03f && x < CELL_CUTOUT_TO + 0.03f) {
+            *r *= 0.55f; *gr *= 0.55f; *b *= 0.55f;  /* the cut-out's rim */
+        }
         return 1;
     }
     if (dz > 0.001f) {
         float k = fabsf(dx) * CELL_DIHEDRAL;
         float x = CELL_LO_Z / (dz + k), y = x * dx, chord, rib, tape, light, fade;
-        if (x < CELL_LO_TE || x > CELL_LO_LE || fabsf(y) < CELL_LO_ROOT ||
+        if (x > CELL_LO_LE || fabsf(y) < CELL_LO_ROOT ||
             fabsf(y) > CELL_UP_SPAN * 0.95f)
             return 0;
         chord = (x - CELL_LO_TE) / (CELL_LO_LE - CELL_LO_TE);
         rib = fabsf(y) / (CELL_UP_SPAN / 17.0f);
         rib -= floorf(rib);
         tape = rib < 0.07f || rib > 0.93f ? 1.0f : 0.0f;
-        /* PC10 khaki-green in the low sun: the same warm khaki as the
-         * painted roots beside the cockpit, darkening toward the tips and
-         * on the shadowed right, with doped-linen grain. */
-        light = 0.6f + 0.4f * (1.0f - chord);        /* glancing near the LE */
+        light = 0.6f + 0.4f * (1.0f - chord);
         fade = (fabsf(y) - CELL_LO_ROOT) / (CELL_UP_SPAN - CELL_LO_ROOT);
         {
             uint32_t h = scene_hash((uint32_t)(px * 7.0f) * 7919u ^
@@ -9707,8 +9745,8 @@ static int cellule_sample(float px, float py, float *r, float *gr, float *b)
 static void cellule_cast_pixel(int x, int y, pix_t *out, uint8_t *hit);
 static void draw_cellule_surfaces(SDL_Surface *c)
 {
-    /* Cast once and kept: the three cockpit composites share it, and the
-     * 68040 need only do the arithmetic a single time. */
+    /* Cast once and kept: the cockpit composites share it, and the 68040
+     * need only do the arithmetic a single time. */
     static pix_t *cast;
     static uint8_t *covered;
     int x, y;
@@ -9756,50 +9794,51 @@ static void cellule_cast_pixel(int x, int y, pix_t *out, uint8_t *hit)
 
 static void draw_cockpit_cellule(SDL_Surface *c)
 {
-    pix_t wire = PIX_PACK(52, 48, 44), landing = PIX_PACK(66, 60, 54);
-    int side, k;
+    pix_t wire = PIX_PACK(48, 44, 40), landing = PIX_PACK(62, 56, 50);
+    int side, k, bay;
     draw_cellule_surfaces(c);
     for (side = -1; side <= 1; side += 2) {
         float sy = (float)side;
-        float strut_y = sy * CELL_STRUT_Y;
         float root = sy * CELL_LO_ROOT;
-        /* Flying wires climb from the lower wing root to the top of the
-         * interplane struts; landing wires fall from the centre section
-         * to their feet.  One of each on the front and the rear spar. */
+        float inner = sy * cell_strut_y[0];
+        /* Wires first, so the struts stand over them.  Flying wires climb
+         * from the lower wing root to the top of the inner struts, landing
+         * wires fall from the centre section to their feet; in the outer
+         * bay they run from strut to strut; incidence wires cross between
+         * each front and rear pair. */
         for (k = 0; k < 2; ++k) {
-            float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
-            float ux = cell_chord(CELL_UP_LE, CELL_UP_TE, frac);
-            float lx = ux;          /* the strut's foot, square below */
-            cell_line(c, lx, root, cell_lower_z(root), ux, strut_y, CELL_UP_Z,
+            float ux = cell_chord(CELL_UP_LE, CELL_UP_TE,
+                                  k ? CELL_REAR_SPAR : CELL_FRONT_SPAR);
+            float lx = cell_chord(CELL_LO_LE, CELL_LO_TE,
+                                  k ? CELL_REAR_SPAR : CELL_FRONT_SPAR);
+            cell_line(c, lx, root, cell_lower_z(root), ux, inner, CELL_UP_Z,
                       wire);
-            cell_line(c, ux, sy * CELL_CABANE_Y, CELL_UP_Z, lx, strut_y,
-                      cell_lower_z(strut_y), landing);
+            cell_line(c, ux, sy * CELL_CABANE_Y, CELL_UP_Z, lx, inner,
+                      cell_lower_z(inner), landing);
+            cell_line(c, lx, inner, cell_lower_z(inner), ux,
+                      sy * cell_strut_y[1], CELL_UP_Z, wire);
+            cell_line(c, ux, inner, CELL_UP_Z, lx, sy * cell_strut_y[1],
+                      cell_lower_z(cell_strut_y[1]), landing);
         }
-        /* Incidence wires cross between the front and rear struts. */
-        cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
-                  strut_y, CELL_UP_Z,
-                  cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
-                  strut_y, cell_lower_z(strut_y), wire);
-        cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
-                  strut_y, CELL_UP_Z,
-                  cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
-                  strut_y, cell_lower_z(strut_y), wire);
-        /* Interplane struts, rear first so the front one stands over it. */
+        for (bay = 0; bay < 2; ++bay) {
+            float y = sy * cell_strut_y[bay];
+            float fu = cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR);
+            float ru = cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR);
+            float fl = cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_FRONT_SPAR);
+            float rl = cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_REAR_SPAR);
+            cell_line(c, fu, y, CELL_UP_Z, rl, y, cell_lower_z(y), wire);
+            cell_line(c, ru, y, CELL_UP_Z, fl, y, cell_lower_z(y), wire);
+            /* Interplane struts, rear first, raked with the stagger. */
+            cell_strut(c, ru, y, CELL_UP_Z, rl, y, cell_lower_z(y), 0.11f);
+            cell_strut(c, fu, y, CELL_UP_Z, fl, y, cell_lower_z(y), 0.11f);
+        }
+        /* Cabane struts from the centre section down past the coaming to
+         * the upper longerons; the painted cockpit hides their feet. */
         for (k = 1; k >= 0; --k) {
-            /* Square to the wings: top and foot at the same depth, so the
-             * strut stands upright in the view. */
-            float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
-            float sx = cell_chord(CELL_UP_LE, CELL_UP_TE, frac);
-            cell_strut(c, sx, strut_y, CELL_UP_Z, sx, strut_y,
-                       cell_lower_z(strut_y), 0.05f);
-        }
-        /* Cabane struts from the centre section down to the upper
-         * longerons; the painted cowling hides their feet. */
-        for (k = 0; k < 2; ++k) {
             float cx = cell_chord(CELL_UP_LE, CELL_UP_TE,
                                   k ? CELL_REAR_SPAR : CELL_FRONT_SPAR);
-            cell_strut(c, cx, sy * CELL_CABANE_Y, CELL_UP_Z,
-                       cx, sy * CELL_CABANE_Y, 0.32f, 0.04f);
+            cell_strut(c, cx, sy * CELL_CABANE_Y, CELL_UP_Z, cx - 0.15f,
+                       sy * CELL_CABANE_FOOT_Y, CELL_CABANE_FOOT_Z, 0.10f);
         }
     }
 }
@@ -10069,12 +10108,16 @@ static void draw_dogfight_simulator(Game *g)
     draw_dogfight_particles(g, 1);
     if (pilot_gun_count(g) > 0 && now >= g->last_shot &&
         now - g->last_shot < 45u) {
-        /* A flash at each Vickers muzzle: the left one always, the right
-         * one only on the twin-gun machines. */
-        fill_triangle(s, 288, 232, 292, 222, 297, 232,
-                      rgb(s, 255, 140, 45));
-        circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
-        if (pilot_gun_count(g) == 2) {
+        /* A flash at each Vickers muzzle: the single gun's on the
+         * centreline, the twin guns' either side of it. */
+        if (pilot_gun_count(g) == 1) {
+            fill_triangle(s, 316, 226, 320, 216, 325, 226,
+                          rgb(s, 255, 140, 45));
+            circle(s, 320, 222, 2, rgb(s, 255, 238, 157));
+        } else {
+            fill_triangle(s, 288, 232, 292, 222, 297, 232,
+                          rgb(s, 255, 140, 45));
+            circle(s, 292, 228, 2, rgb(s, 255, 238, 157));
             fill_triangle(s, 345, 232, 350, 222, 354, 232,
                           rgb(s, 255, 140, 45));
             circle(s, 350, 228, 2, rgb(s, 255, 238, 157));
