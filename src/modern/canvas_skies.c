@@ -137,6 +137,15 @@
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
 #endif
+#ifndef CANVAS_CINEMA_HUT_BMP
+#define CANVAS_CINEMA_HUT_BMP "assets/canvas-skies/cinema-hut.bmp"
+#endif
+#ifndef CANVAS_NEWSREELS_BIN
+#define CANVAS_NEWSREELS_BIN "assets/canvas-skies/newsreels.bin"
+#endif
+#ifndef CANVAS_PIANO_WAV
+#define CANVAS_PIANO_WAV "assets/canvas-skies/cinema-piano.wav"
+#endif
 #ifndef CANVAS_NEWSPAPER_TABLE_BMP
 #define CANVAS_NEWSPAPER_TABLE_BMP "assets/canvas-skies/newspaper-table.bmp"
 #endif
@@ -305,7 +314,8 @@ typedef enum {
     SCENE_DAWN,     /* the hangars before take-off */
     SCENE_MESS,     /* the mess that evening, after a mission won */
     SCENE_CONDUCT,  /* the Officer Commanding's memorandum */
-    SCENE_COURT_MARTIAL /* the end of a career in disgrace */
+    SCENE_COURT_MARTIAL, /* the end of a career in disgrace */
+    SCENE_CINEMA    /* the picture house, a chapter's first morning */
 } Scene;
 
 typedef enum {
@@ -536,6 +546,14 @@ enum {
     MIX_CONVOY_AMBULANCES, MIX_COUNT
 };
 
+typedef struct {
+    uint8_t *data;              /* the reel's bytes, read from disk */
+    uint32_t len, cursor, started;
+    int frames, shown, index;
+    char title[41];
+    uint8_t pix[192 * 120];     /* the frame being shown, 0..15 */
+} Newsreel;
+
 #define MAX_TD_OBJECTS 48
 #define MAX_TD_STRIPS 6
 
@@ -649,6 +667,10 @@ typedef struct {
     SDL_Surface *topdown_targets;   /* the painted mission targets */
     SDL_Surface *side_civilians;    /* farms, a church, carts, side-on */
     SDL_Surface *newspaper_table;   /* the paper on its bundle, untyped */
+    SDL_Surface *cinema_hut;        /* the picture house, its screen dark */
+    Newsreel newsreel;
+    int cinema_reel_slot;
+    int cinema_seen;                /* chapter + 1 whose reels were shown */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
@@ -804,6 +826,9 @@ static void show_notice(Game *g, const char *text);
 static float random_unit(Game *g);
 static int personal_shot(Game *g, int revolver);
 static void td_build_mission(Game *g);
+static void cinema_start(Game *g);
+static int cinema_reels_present(void);
+static void newsreel_free(Newsreel *r);
 static void td_bomb_on_own_line(Game *g, float x, float y);
 static void td_update(Game *g, float dt, uint32_t now);
 static void td_draw_ground(Game *g);
@@ -2532,12 +2557,14 @@ enum {
     RECORD_HOLYROOD,
     RECORD_VOICE_OF_THE_GUNS,
     RECORD_HOLST,
+    RECORD_PIANO,       /* the picture-house pianist */
     RECORD_COUNT
 };
 
 static const char *const record_paths[RECORD_COUNT] = {
     CANVAS_TIPPERARY_WAV, CANVAS_HOME_FIRES_WAV, CANVAS_KIT_BAG_WAV,
-    CANVAS_HOLYROOD_WAV, CANVAS_VOICE_OF_THE_GUNS_WAV, CANVAS_HOLST_WAV
+    CANVAS_HOLYROOD_WAV, CANVAS_VOICE_OF_THE_GUNS_WAV, CANVAS_HOLST_WAV,
+    CANVAS_PIANO_WAV
 };
 
 /* 1914 Tipperary, 1915 Keep the Home Fires Burning, 1916 Pack Up Your
@@ -2552,6 +2579,7 @@ static const int chapter_records[CHAPTER_COUNT] = {
 static int record_for_scene(const Game *g, Scene scene)
 {
     if (scene == SCENE_EPILOGUE) return RECORD_HOLST;
+    if (scene == SCENE_CINEMA) return RECORD_PIANO;
     if (scene == SCENE_STORY || scene == SCENE_BRIEFING)
         return chapter_records[g->chapter];
     return RECORD_NONE;
@@ -2631,6 +2659,7 @@ static void set_scene(Game *g, Scene scene)
         scene == SCENE_DAWN || scene == SCENE_MESS)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
+    if (scene == SCENE_CINEMA) cinema_start(g);
     if (scene == SCENE_COURT_MARTIAL) {
         /* Cashiered: the career ends here and the save says so. */
         g->court_martial_stage = 0;
@@ -11017,6 +11046,7 @@ static int game_init(Game *g)
     g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
     g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
     g->newspaper_table = SDL_LoadBMP(CANVAS_NEWSPAPER_TABLE_BMP);
+    g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -11027,10 +11057,10 @@ static int game_init(Game *g)
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
             &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
-            &g->side_civilians, &g->newspaper_table
+            &g->side_civilians, &g->newspaper_table, &g->cinema_hut
         };
         int i;
-        for (i = 0; i < 18; ++i) if (*convert[i]) {
+        for (i = 0; i < 19; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11275,6 +11305,195 @@ static void draw_court_martial(Game *g)
                     7, 11, PIX_PACK(200, 180, 140));
 }
 
+/* ---- The picture house ---------------------------------------------------
+ *
+ * On a chapter's first morning the squadron goes to the Y.M.C.A. hut
+ * behind the lines, where the week's reels are shown: real film of the
+ * period (see CANVAS_SKIES_SOURCES.md), two reels matched to the chapter,
+ * each after its title card, with the pianist in the pit.  The reels are
+ * read one at a time from newsreels.bin (make_cinema_reels.py): a key
+ * frame of 4-bit greys, then the 8x8 blocks that change, 8 frames a
+ * second, projected half as large again in sepia, with the flicker and
+ * scratches of a well-worn print. */
+#define REEL_W 192
+#define REEL_H 120
+#define REEL_FPS_MS 125u
+#define REEL_TITLE_MS 1600u
+#define CINEMA_SCREEN_X 176
+#define CINEMA_SCREEN_Y 70
+
+static int cinema_reels_present(void)
+{
+    FILE *f = fopen(CANVAS_NEWSREELS_BIN, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static void newsreel_free(Newsreel *r)
+{
+    free(r->data);
+    r->data = NULL;
+    r->len = 0;
+}
+
+/* Reads reel 'index' of the file and shows its key frame. */
+static int newsreel_load(Newsreel *r, int index)
+{
+    FILE *f = fopen(CANVAS_NEWSREELS_BIN, "rb");
+    uint8_t head[6], entry[48];
+    uint32_t offset, len;
+    int count, k;
+    newsreel_free(r);
+    if (!f) return 0;
+    if (fread(head, 1, 6, f) != 6 || memcmp(head, "CSNR", 4) != 0) {
+        fclose(f);
+        return 0;
+    }
+    count = (head[4] << 8) | head[5];
+    if (index < 0 || index >= count ||
+        fseek(f, 6L + (long)index * 48L, SEEK_SET) != 0 ||
+        fread(entry, 1, 48, f) != 48) {
+        fclose(f);
+        return 0;
+    }
+    offset = ((uint32_t)entry[0] << 24) | ((uint32_t)entry[1] << 16) |
+             ((uint32_t)entry[2] << 8) | entry[3];
+    len = ((uint32_t)entry[4] << 24) | ((uint32_t)entry[5] << 16) |
+          ((uint32_t)entry[6] << 8) | entry[7];
+    memcpy(r->title, entry + 8, 40);
+    r->title[40] = '\0';
+    r->data = (uint8_t *)malloc(len);
+    if (!r->data || len < 2 + REEL_W * REEL_H / 2 ||
+        fseek(f, (long)offset, SEEK_SET) != 0 ||
+        fread(r->data, 1, len, f) != len) {
+        fclose(f);
+        newsreel_free(r);
+        return 0;
+    }
+    fclose(f);
+    r->len = len;
+    r->frames = (r->data[0] << 8) | r->data[1];
+    for (k = 0; k < REEL_W * REEL_H / 2; ++k) {
+        r->pix[k * 2] = r->data[2 + k] >> 4;
+        r->pix[k * 2 + 1] = r->data[2 + k] & 15;
+    }
+    r->cursor = 2 + REEL_W * REEL_H / 2;
+    r->shown = 1;
+    r->index = index;
+    r->started = SDL_GetTicks();
+    return 1;
+}
+
+/* Applies the changed blocks of each frame due by now. */
+static void newsreel_advance(Newsreel *r, uint32_t now)
+{
+    uint32_t due;
+    if (!r->data || now < r->started + REEL_TITLE_MS) return;
+    due = (now - r->started - REEL_TITLE_MS) / REEL_FPS_MS + 1;
+    while ((uint32_t)r->shown < due && r->shown < r->frames &&
+           r->cursor + 45 <= r->len) {
+        const uint8_t *bits = r->data + r->cursor;
+        int k;
+        r->cursor += 45;
+        for (k = 0; k < (REEL_W / 8) * (REEL_H / 8); ++k) {
+            int bx, by, y, x;
+            const uint8_t *b;
+            if (!(bits[k >> 3] & (0x80 >> (k & 7)))) continue;
+            if (r->cursor + 32 > r->len) return;
+            b = r->data + r->cursor;
+            r->cursor += 32;
+            bx = (k % (REEL_W / 8)) * 8;
+            by = (k / (REEL_W / 8)) * 8;
+            for (y = 0; y < 8; ++y)
+                for (x = 0; x < 8; x += 2) {
+                    uint8_t v = b[y * 4 + x / 2];
+                    r->pix[(by + y) * REEL_W + bx + x] = v >> 4;
+                    r->pix[(by + y) * REEL_W + bx + x + 1] = v & 15;
+                }
+        }
+        ++r->shown;
+    }
+}
+
+static int newsreel_done(const Newsreel *r, uint32_t now)
+{
+    return !r->data || (r->shown >= r->frames &&
+           now >= r->started + REEL_TITLE_MS +
+                  (uint32_t)r->frames * REEL_FPS_MS + 400u);
+}
+
+#define CINEMA_REELS_PER_CHAPTER 2
+static void cinema_start(Game *g)
+{
+    g->cinema_reel_slot = 0;
+    if (!newsreel_load(&g->newsreel, g->chapter * CINEMA_REELS_PER_CHAPTER))
+        newsreel_free(&g->newsreel);
+}
+
+static void update_cinema(Game *g)
+{
+    uint32_t now = SDL_GetTicks();
+    newsreel_advance(&g->newsreel, now);
+    if (newsreel_done(&g->newsreel, now) &&
+        g->cinema_reel_slot + 1 < CINEMA_REELS_PER_CHAPTER && g->newsreel.data) {
+        ++g->cinema_reel_slot;
+        newsreel_load(&g->newsreel, g->chapter * CINEMA_REELS_PER_CHAPTER +
+                                    g->cinema_reel_slot);
+    }
+}
+
+static void draw_cinema(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    Newsreel *r = &g->newsreel;
+    uint32_t now = SDL_GetTicks();
+    int x, y;
+    if (g->cinema_hut) SDL_BlitSurface(g->cinema_hut, NULL, s, NULL);
+    else rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(20, 16, 12));
+    if (!r->data || now < r->started + REEL_TITLE_MS ||
+        newsreel_done(r, now)) {
+        /* The title card, white lettering on black, or the end of the
+         * programme. */
+        const char *title = r->data && !newsreel_done(r, now) ? r->title :
+                            "THAT IS ALL FOR TONIGHT";
+        rect(s, CINEMA_SCREEN_X, CINEMA_SCREEN_Y, REEL_W * 3 / 2,
+             REEL_H * 3 / 2, PIX_PACK(14, 12, 10));
+        rect(s, CINEMA_SCREEN_X + 10, CINEMA_SCREEN_Y + 10, REEL_W * 3 / 2 - 20,
+             1, PIX_PACK(200, 190, 170));
+        rect(s, CINEMA_SCREEN_X + 10, CINEMA_SCREEN_Y + REEL_H * 3 / 2 - 11,
+             REEL_W * 3 / 2 - 20, 1, PIX_PACK(200, 190, 170));
+        font_text(g, FONT_SUBHEAD, 320 - font_width(FONT_SUBHEAD, title) / 2,
+                  CINEMA_SCREEN_Y + 96, title, PIX_PACK(226, 218, 200));
+    } else {
+        /* The frame, half as large again, in sepia, the lamp flickering. */
+        pix_t lut[16];
+        int flicker = (int)(scene_hash(now / 90u) % 18u);
+        for (x = 0; x < 16; ++x) {
+            int v = x * 15 + 8 - flicker;
+            if (v < 0) v = 0;
+            lut[x] = PIX_PACK(v * 236 / 240, v * 214 / 240, v * 172 / 240);
+        }
+        if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+        for (y = 0; y < REEL_H * 3 / 2; ++y) {
+            pix_t *row = PIX_ROW(s, CINEMA_SCREEN_Y + y) + CINEMA_SCREEN_X;
+            const uint8_t *src = r->pix + (y * 2 / 3) * REEL_W;
+            for (x = 0; x < REEL_W * 3 / 2; ++x)
+                row[x] = lut[src[x * 2 / 3]];
+        }
+        if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+        for (x = 0; x < 2; ++x) {               /* scratches on the print */
+            uint32_t h = scene_hash(now / 125u * 7u + (uint32_t)x);
+            if (h % 5u == 0u)
+                rect(s, CINEMA_SCREEN_X + (int)(h % (REEL_W * 3 / 2)),
+                     CINEMA_SCREEN_Y, 1, REEL_H * 3 / 2,
+                     PIX_PACK(232, 224, 200));
+        }
+    }
+    typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 384, "ENTER",
+                    7, 11, PIX_PACK(226, 206, 166));
+}
+
 static void advance_after_debrief(Game *g)
 {
     if (!g->success && g->fatal_sortie && g->lives <= 0) {
@@ -11493,6 +11712,13 @@ static void handle_event(Game *g, SDL_Event *ev)
                 break;
             }
             advance_after_debrief(g);
+        } else if (g->scene == SCENE_CINEMA) {
+            if (SDL_GetTicks() - g->scene_started < 700u) break;
+            /* Out into the morning: on to the paper or the diary. */
+            newsreel_free(&g->newsreel);
+            set_scene(g, SCENE_STORY);
+            g->story_stage = news_index_for(g->chapter, g->mission) >= 0 ? 3 : 2;
+            g->reveal_started = SDL_GetTicks();
         } else if (g->scene == SCENE_COURT_MARTIAL) {
             if (SDL_GetTicks() - g->scene_started < 900u) break;
             if (++g->court_martial_stage < 3) {
@@ -11532,6 +11758,13 @@ static void handle_event(Game *g, SDL_Event *ev)
         } else if (g->scene == SCENE_STORY) {
             if (g->story_stage == 2 && !story_reveal_done(g)) {
                 g->reveal_started = SDL_GetTicks() - 60000u;
+            } else if (g->story_stage != 2 && g->mission == 0 &&
+                       (g->story_stage == 4 ||
+                        (g->story_stage == 0 && !new_machines_today(g))) &&
+                       g->cinema_seen != g->chapter + 1 &&
+                       cinema_reels_present()) {
+                g->cinema_seen = g->chapter + 1;
+                set_scene(g, SCENE_CINEMA);
             } else if (g->story_stage != 2) {
                 if (g->story_stage == 0 && new_machines_today(g))
                     g->story_stage = 4;
@@ -11577,7 +11810,8 @@ int main(int argc, char **argv)
      * starts the game normally on the player's campaign. */
     if (argc > 1) {
         static const char *const qa_modes[] = {
-            "AIRSHIP", "CHAPTER_SUCCESS", "COURTMARTIAL", "DEATH", "DEBRIEF",
+            "AIRSHIP", "CHAPTER_SUCCESS", "CINEMA", "COURTMARTIAL", "DEATH",
+            "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
             "GUNNER", "HOSPITAL", "MACHINES", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN",
             "TOPMIX",
@@ -11650,6 +11884,11 @@ int main(int argc, char **argv)
         g.career_counted = 1;
         g.conduct_pending = 0;
         set_scene(&g, g.offences >= 3 ? SCENE_COURT_MARTIAL : SCENE_CONDUCT);
+    } else if (argc > 2 && strcmp(argv[1], "CINEMA") == 0) {
+        /* CINEMA n: chapter n's evening at the picture house. */
+        g.chapter = atoi(argv[2]) % CHAPTER_COUNT;
+        g.mission = 0;
+        set_scene(&g, SCENE_CINEMA);
     } else if (argc > 2 && strcmp(argv[1], "MACHINES") == 0) {
         /* MACHINES n: chapter n's first morning, with its new machines. */
         g.chapter = atoi(argv[2]) % CHAPTER_COUNT;
@@ -11813,6 +12052,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_STORY || g.scene == SCENE_AWARD ||
             g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
             g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
+            g.scene == SCENE_CINEMA ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
@@ -11829,6 +12069,7 @@ int main(int argc, char **argv)
             case SCENE_MESS: draw_mess(&g); break;
             case SCENE_CONDUCT: draw_conduct(&g); break;
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
+            case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
@@ -11892,6 +12133,8 @@ int main(int argc, char **argv)
     if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
     if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
     if (g.newspaper_table) SDL_FreeSurface(g.newspaper_table);
+    if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
+    newsreel_free(&g.newsreel);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);

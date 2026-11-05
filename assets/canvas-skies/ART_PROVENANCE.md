@@ -50,3 +50,8 @@ and wrecked) is painted the same way by
 `newspaper-table.bmp` (the mess table, the newsvendor's bundle and its
 string, and the blank top copy with its halftone, screened from our own
 `title.bmp`) is painted by `ports/amigaos3/make_newspaper_table.py`.
+
+`cinema-hut.bmp` (the Y.M.C.A. picture house) is painted by
+`ports/amigaos3/make_cinema_hut.py`. The film in `newsreels.bin` is real
+period footage; its sources and licences are listed in
+`CANVAS_SKIES_SOURCES.md`.

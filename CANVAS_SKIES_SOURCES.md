@@ -266,3 +266,47 @@ main head over stacked decks, narrow justified columns divided by rules,
 small boxed notices, and (as the Mirror did) a screened photograph. The
 photograph is our own title painting, dithered; the filler items and
 notices are written for the game.
+
+## The picture house's newsreels
+
+The reels shown in the picture house (`newsreels.bin`, made by
+`ports/amigaos3/make_cinema_reels.py`) are five-second cuts of real film of
+1914-1919, each public domain or released under CC0. Australia Prepared
+(1916) was shortlisted but left out because its scan carries the archive's
+logo and timecode. The pianist's score (`cinema-piano.wav`) is composed
+for the game by `ports/amigaos3/make_cinema_piano.py`.
+
+| Film | Licence | Held by | Source |
+|---|---|---|---|
+| German War Film, 1914-1918 | Public domain (US government compilation) | US National Archives | <https://upload.wikimedia.org/wikipedia/commons/b/bf/German_War_Film%2C_1914-1918.webm> |
+| The Battle of the Somme (1916) | Public domain (expired UK Crown copyright) | Wikimedia Commons | <https://upload.wikimedia.org/wikipedia/commons/3/31/The_Battle_of_the_Somme_%281916%29.webm> |
+| Kitchener's Great Army in the Battle of the Somme (1916) | Public domain | Wikimedia Commons / Internet Archive | <https://upload.wikimedia.org/wikipedia/commons/6/6e/Kitchener%27s_Great_Army_in_the_Battle_of_the_Somme_%281916%29.webm> |
+| BL 9.2 inch howitzer firing (from America Goes Over, 1918) | Public domain (US Army Signal Corps) | Wikimedia Commons / Internet Archive | <https://upload.wikimedia.org/wikipedia/commons/4/4a/9.2inchhowitzerfiringWWI.ogv> |
+| Third Aviation Instruction Center (France, 1917-1918) | Public domain (US Army Signal Corps), NAID 24982 | US National Archives | <https://catalog.archives.gov/medialz/mopix/111/h/111-h-1481-r1.mp4> |
+| Flashes of Action: Actualities of the World War (1919) | Public domain (US Army Signal Corps) | US National Archives | <https://upload.wikimedia.org/wikipedia/commons/3/39/Flashes_of_Action-_Actualities_of_the_World_War.webm> |
+| Paris manifeste sa joie le jour de l'Armistice (11 November 1918) | CC0 (Musée Albert-Kahn) | Musée départemental Albert-Kahn | <https://upload.wikimedia.org/wikipedia/commons/4/4b/Paris_manifeste_sa_joie_le_jour_de_l%27Armistice_-_AI90875.webm> |
+| The First Air Depot (France, 1918) | Public domain (US Army Signal Corps), NAID 24981 | US National Archives | <https://catalog.archives.gov/medialz/mopix/111/h/111-h-1480-r1.mp4> |
+
+| Reel | Film | From | Seconds |
+|---|---|---|---|
+| THE ENEMY MARCHES WEST - 1914 | German War Film, 1914-1918 | 397 s | 5 |
+| TROOPS IN THE ORCHARDS | German War Film, 1914-1918 | 623 s | 5 |
+| MACHINES ON THE AERODROME | Third Aviation Instruction Center (France, 1917-1918) | 234 s | 5 |
+| A MACHINE IN ITS CANVAS HANGAR | The First Air Depot (France, 1918) | 97 s | 5 |
+| THE BATTALION WAITS - SOMME, 1916 | The Battle of the Somme (1916) | 821 s | 5 |
+| THE GUNS BEFORE THE ATTACK | Kitchener's Great Army in the Battle of the Somme (1916) | 1352 s | 5 |
+| A SCOUT OVER THE FIELD - 1917 | Third Aviation Instruction Center (France, 1917-1918) | 401 s | 5 |
+| MEN IN THE LINE | Kitchener's Great Army in the Battle of the Somme (1916) | 1722 s | 5 |
+| A HEAVY HOWITZER FIRES | BL 9.2 inch howitzer firing (from America Goes Over, 1918) | 3 s | 5 |
+| UNDER THE BARRAGE | Flashes of Action: Actualities of the World War (1919) | 2159 s | 5 |
+| THE RUINS OF THE LINE - 1918 | Flashes of Action: Actualities of the World War (1919) | 388 s | 5 |
+| MEN GOING UP | Kitchener's Great Army in the Battle of the Somme (1916) | 4259 s | 5 |
+| THE ADVANCE | Flashes of Action: Actualities of the World War (1919) | 499 s | 5 |
+| AT THE AIR DEPOT | The First Air Depot (France, 1918) | 347 s | 5 |
+| PARIS, 11 NOVEMBER 1918 | Paris manifeste sa joie le jour de l'Armistice (11 November 1918) | 229 s | 5 |
+| THE NEWS REACHES THE FRONT | Flashes of Action: Actualities of the World War (1919) | 2601 s | 5 |
+
+With thanks to the US National Archives and Records Administration, the
+Musée départemental Albert-Kahn, the Internet Archive and Wikimedia Commons.
+The sha256 of each source file is recorded with the cuts in
+`ports/amigaos3/newsreel-sources.json`.
