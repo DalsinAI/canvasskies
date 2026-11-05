@@ -53,7 +53,13 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_ENEMY_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-enemy.bmp\" \
 	-DCANVAS_MARCH_WAV=\"PROGDIR:assets/canvas-skies/washington-post-gramophone.wav\" \
 	-DCANVAS_MESS_WAV=\"PROGDIR:assets/canvas-skies/colonel-bogey-gramophone.wav\" \
-	-DCANVAS_PIPER_WAV=\"PROGDIR:assets/canvas-skies/amazing-grace-bagpipes.wav\"
+	-DCANVAS_PIPER_WAV=\"PROGDIR:assets/canvas-skies/amazing-grace-bagpipes.wav\" \
+	-DCANVAS_TIPPERARY_WAV=\"PROGDIR:assets/canvas-skies/tipperary-gramophone.wav\" \
+	-DCANVAS_HOME_FIRES_WAV=\"PROGDIR:assets/canvas-skies/home-fires-gramophone.wav\" \
+	-DCANVAS_KIT_BAG_WAV=\"PROGDIR:assets/canvas-skies/kit-bag-gramophone.wav\" \
+	-DCANVAS_HOLYROOD_WAV=\"PROGDIR:assets/canvas-skies/holyrood-gramophone.wav\" \
+	-DCANVAS_VOICE_OF_THE_GUNS_WAV=\"PROGDIR:assets/canvas-skies/voice-of-the-guns-gramophone.wav\" \
+	-DCANVAS_HOLST_WAV=\"PROGDIR:assets/canvas-skies/holst-second-suite-gramophone.wav\"
 LDFLAGS := -m68040 -m68881 -noixemul -L$(SYSROOT)/lib
 LDLIBS := -lSDL2 -lm -lamiga
 

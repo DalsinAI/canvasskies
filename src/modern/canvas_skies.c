@@ -159,6 +159,25 @@
 #ifndef CANVAS_PIPER_WAV
 #define CANVAS_PIPER_WAV "assets/canvas-skies/amazing-grace-bagpipes.wav"
 #endif
+/* Period gramophone records for the story, diary and briefing of each year. */
+#ifndef CANVAS_TIPPERARY_WAV
+#define CANVAS_TIPPERARY_WAV "assets/canvas-skies/tipperary-gramophone.wav"
+#endif
+#ifndef CANVAS_HOME_FIRES_WAV
+#define CANVAS_HOME_FIRES_WAV "assets/canvas-skies/home-fires-gramophone.wav"
+#endif
+#ifndef CANVAS_KIT_BAG_WAV
+#define CANVAS_KIT_BAG_WAV "assets/canvas-skies/kit-bag-gramophone.wav"
+#endif
+#ifndef CANVAS_HOLYROOD_WAV
+#define CANVAS_HOLYROOD_WAV "assets/canvas-skies/holyrood-gramophone.wav"
+#endif
+#ifndef CANVAS_VOICE_OF_THE_GUNS_WAV
+#define CANVAS_VOICE_OF_THE_GUNS_WAV "assets/canvas-skies/voice-of-the-guns-gramophone.wav"
+#endif
+#ifndef CANVAS_HOLST_WAV
+#define CANVAS_HOLST_WAV "assets/canvas-skies/holst-second-suite-gramophone.wav"
+#endif
 #ifndef CANVAS_SAVE_PATH
 #define CANVAS_SAVE_PATH "PROGDIR:CanvasSkies.save"
 #endif
@@ -265,7 +284,8 @@ typedef enum {
     MUSIC_MOURNING,
     MUSIC_ARMISTICE,
     MUSIC_MESS,
-    MUSIC_PIPER
+    MUSIC_PIPER,
+    MUSIC_RECORD
 } MusicMood;
 
 typedef struct {
@@ -432,6 +452,12 @@ typedef struct {
     uint8_t *piper_data;
     uint32_t piper_len;
     uint32_t piper_pos;
+    /* One period record at a time: the chapter's, loaded when it is
+     * first needed, so a 68040 never holds every record at once. */
+    uint8_t *record_data;
+    uint32_t record_len;
+    uint32_t record_pos;
+    int record_track;
     volatile int scene;
     volatile int shot;
     volatile int blast;
@@ -1696,6 +1722,23 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                           triangle_wave(a->synth_phase[4]) * 0.055f) * phrase;
                 sample += triangle_wave(a->synth_phase[3]) * 0.105f;
             }
+        } else if (a->music_mood == MUSIC_RECORD &&
+                   a->record_data && a->record_len >= 2) {
+            uint32_t total_frames = a->record_len / 2;
+            uint32_t frame = a->record_pos / 2;
+            uint32_t fade_frames = total_frames > 8192 ? 2048 : total_frames / 4;
+            int16_t *music = (int16_t *)(a->record_data + a->record_pos);
+            float music_sample = (float)music[0] / 32768.0f;
+            if (fade_frames > 0 && frame >= total_frames - fade_frames) {
+                uint32_t intro_frame = frame - (total_frames - fade_frames);
+                int16_t *intro = (int16_t *)(a->record_data + intro_frame * 2);
+                float crossfade = (float)intro_frame / (float)fade_frames;
+                music_sample = music_sample * (1.0f - crossfade) +
+                               (float)intro[0] / 32768.0f * crossfade;
+            }
+            sample = music_sample * 0.50f;
+            a->record_pos += 2;
+            if (a->record_pos + 2 > a->record_len) a->record_pos = 0;
         } else if (a->music_mood == MUSIC_PIPER) {
             if (a->piper_data && a->piper_pos + 2 <= a->piper_len) {
                 int16_t *pipes = (int16_t *)(a->piper_data + a->piper_pos);
@@ -1846,9 +1889,46 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     }
 }
 
+enum {
+    RECORD_NONE = -1,
+    RECORD_TIPPERARY,
+    RECORD_HOME_FIRES,
+    RECORD_KIT_BAG,
+    RECORD_HOLYROOD,
+    RECORD_VOICE_OF_THE_GUNS,
+    RECORD_HOLST,
+    RECORD_COUNT
+};
+
+static const char *const record_paths[RECORD_COUNT] = {
+    CANVAS_TIPPERARY_WAV, CANVAS_HOME_FIRES_WAV, CANVAS_KIT_BAG_WAV,
+    CANVAS_HOLYROOD_WAV, CANVAS_VOICE_OF_THE_GUNS_WAV, CANVAS_HOLST_WAV
+};
+
+/* 1914 Tipperary, 1915 Keep the Home Fires Burning, 1916 Pack Up Your
+ * Troubles, then Holyrood and The Voice of the Guns through 1917 and 1918;
+ * the Armistice chapter has Holst's Second Suite. */
+static const int chapter_records[CHAPTER_COUNT] = {
+    RECORD_TIPPERARY, RECORD_HOME_FIRES, RECORD_KIT_BAG, RECORD_HOLYROOD,
+    RECORD_VOICE_OF_THE_GUNS, RECORD_HOLYROOD, RECORD_VOICE_OF_THE_GUNS,
+    RECORD_HOLST
+};
+
+static int record_for_scene(const Game *g, Scene scene)
+{
+    if (scene == SCENE_EPILOGUE) return RECORD_HOLST;
+    if (scene == SCENE_STORY || scene == SCENE_BRIEFING)
+        return chapter_records[g->chapter];
+    return RECORD_NONE;
+}
+
 static int music_mood_for_scene(const Game *g, Scene scene)
 {
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    int record = record_for_scene(g, scene);
+    if (record != RECORD_NONE && g->audio.record_data &&
+        g->audio.record_track == record)
+        return MUSIC_RECORD;
     if (scene == SCENE_TITLE || scene == SCENE_MENU) return MUSIC_MARCH;
     if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
     if (scene == SCENE_AWARD) return MUSIC_MESS;
@@ -1872,9 +1952,40 @@ static int thyne_lost_tonight(const Game *g)
     return g->chapter == 4 && g->mission == 9;
 }
 
+static uint8_t *load_mono_wav(const char *path, uint32_t *len_out);
+
+/* Loads the scene's record if another is in memory.  The file is read
+ * while the previous music keeps playing, then the buffers are swapped
+ * under the audio lock and the old record freed, so a scene change never
+ * leaves a gap in the sound. */
+static void prepare_record(Game *g, Scene scene)
+{
+    int record = record_for_scene(g, scene);
+    uint8_t *data, *old;
+    uint32_t len = 0;
+    if (record == RECORD_NONE || !g->audio.device ||
+        record == g->audio.record_track)
+        return;
+    data = load_mono_wav(record_paths[record], &len);
+    if (!data) {
+        fprintf(stderr, "Gramophone record unavailable; using synth: %s\n",
+                SDL_GetError());
+        return;
+    }
+    SDL_LockAudioDevice(g->audio.device);
+    old = g->audio.record_data;
+    g->audio.record_data = data;
+    g->audio.record_len = len;
+    g->audio.record_pos = 0;
+    g->audio.record_track = record;
+    SDL_UnlockAudioDevice(g->audio.device);
+    if (old) SDL_free(old);
+}
+
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    prepare_record(g, scene);
     if (scene == SCENE_STORY)
         g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 : 2;
     if (scene == SCENE_STORY || scene == SCENE_AWARD)
@@ -7687,6 +7798,41 @@ static void draw_epilogue(Game *g)
     typewriter_text(g, 73, 348, "ENTER  RETURN TO TITLE", 7, 11, ink);
 }
 
+/* A WAV as mono 16-bit 11 kHz, the mixer's own rate. */
+static uint8_t *load_mono_wav(const char *path, uint32_t *len_out)
+{
+    SDL_AudioSpec spec;
+    SDL_AudioCVT cvt;
+    uint8_t *data = NULL;
+    uint32_t len = 0;
+    int result;
+    if (!SDL_LoadWAV(path, &spec, &data, &len)) return NULL;
+    result = SDL_BuildAudioCVT(&cvt, spec.format, spec.channels, spec.freq,
+                               AUDIO_S16SYS, 1, 11025);
+    if (result < 0) {
+        SDL_FreeWAV(data);
+        return NULL;
+    }
+    if (!cvt.needed) {
+        *len_out = len;
+        return data;
+    }
+    cvt.len = (int)len;
+    cvt.buf = (uint8_t *)SDL_malloc((size_t)len * cvt.len_mult);
+    if (!cvt.buf) {
+        SDL_FreeWAV(data);
+        return NULL;
+    }
+    memcpy(cvt.buf, data, len);
+    SDL_FreeWAV(data);
+    if (SDL_ConvertAudio(&cvt) != 0) {
+        SDL_free(cvt.buf);
+        return NULL;
+    }
+    *len_out = (uint32_t)cvt.len_cvt;
+    return cvt.buf;
+}
+
 static int init_audio(Game *g)
 {
     SDL_AudioSpec want, wav_spec;
@@ -7792,6 +7938,7 @@ static int init_audio(Game *g)
     want.callback = audio_callback;
     want.userdata = &g->audio;
     g->audio.noise = 0x19171917u;
+    g->audio.record_track = RECORD_NONE;
     g->audio.device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
     if (!g->audio.device) {
         fprintf(stderr, "Canvas Skies audio disabled: %s\n", SDL_GetError());
@@ -8415,6 +8562,7 @@ int main(int argc, char **argv)
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
+    if (g.audio.record_data) SDL_free(g.audio.record_data);
     if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
