@@ -16,3 +16,21 @@ to uncompressed 24-bit BMP for SDL 2 on AmigaOS.
 
 The grave inscription and hospital memorandum are rendered by the game at
 runtime so the generated bitmaps contain no baked-in lettering.
+
+## Painted on the host
+
+The 1914 weapons in hand (`cockpit-revolver.bmp`, `rear-carbine.bmp`) and
+the top-down mission targets (`topdown-targets.bmp`) are original art for
+this game, painted procedurally on the host by
+`ports/amigaos3/make_personal_arms.py` and
+`ports/amigaos3/make_topdown_targets.py` with the shared painter
+`ports/amigaos3/paint.py`. Each part is painted at four times size with
+shading lit from the low sun, a soft inner rim, grain and edge highlights,
+then filtered down to game size. No photograph, film still or other game's
+art was used. The ambulances are marked by a pale tilt and the word
+AMBULANCE; the protected red cross emblem is deliberately not drawn.
+
+`pilot-cockpit-single.bmp` is assembled from the existing cockpit
+paintings by `ports/amigaos3/make_single_gun_cockpit.py`, and
+`journal.bmp` is the existing journal painting with its ruled lines lifted
+off by `ports/amigaos3/make_journal_page.py`.

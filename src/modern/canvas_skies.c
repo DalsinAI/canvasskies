@@ -18,6 +18,7 @@
 #include "canvas_campaign.h"
 #include "canvas_news.h"
 #include "canvas_fonts.h"
+#include "canvas_topdown_sprites.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -133,6 +134,9 @@
 #endif
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
+#endif
+#ifndef CANVAS_TOPDOWN_TARGETS_BMP
+#define CANVAS_TOPDOWN_TARGETS_BMP "assets/canvas-skies/topdown-targets.bmp"
 #endif
 #ifndef CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP
 #define CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP "assets/canvas-skies/topdown-explosion-atlas.bmp"
@@ -273,7 +277,9 @@ typedef enum {
     SCENE_AWARD,
     SCENE_SCRAPBOOK,
     SCENE_DAWN,     /* the hangars before take-off */
-    SCENE_MESS      /* the mess that evening, after a mission won */
+    SCENE_MESS,     /* the mess that evening, after a mission won */
+    SCENE_CONDUCT,  /* the Officer Commanding's memorandum */
+    SCENE_COURT_MARTIAL /* the end of a career in disgrace */
 } Scene;
 
 typedef enum {
@@ -408,6 +414,46 @@ typedef struct {
     int burst_left;
 } Target;
 
+/* ---- Top-down missions built from segments --------------------------------
+ *
+ * A top-down sortie from 1915 on is a run of ground segments, each with its
+ * own targets: a road with a convoy, a railway with a train and a station,
+ * a base, a village, a trench line.  The mix for each sortie is chosen by
+ * date (see topdown_mixes).  Civilians, ambulances and our own line are on
+ * the ground too, and hitting them is an offence. */
+typedef enum {
+    SEG_NONE, SEG_CONVOY, SEG_DEPOT, SEG_RAIL, SEG_STATION_VILLAGE,
+    SEG_BASE, SEG_VILLAGE, SEG_TRENCH, SEG_AMBULANCES
+} SegmentKind;
+
+typedef enum {
+    TDK_LORRY, TDK_AMBULANCE, TDK_LOCO, TDK_WAGON, TDK_STATION, TDK_HANGAR,
+    TDK_TENTS, TDK_DUMP, TDK_DEPOT, TDK_FARM, TDK_CHURCH, TDK_CART,
+    TDK_REFUGEES, TDK_MG, TDK_DUGOUT, TDK_COUNT
+} TdKind;
+
+enum { CIV_NONE, CIV_CIVILIAN, CIV_AMBULANCE, CIV_OWN_LINE };
+
+typedef struct {
+    float world_x, x, speed;   /* speed: world units a second, down-screen */
+    int kind, hp, active, wrecked;
+    uint32_t last_shot, wrecked_at;
+} TdObject;
+
+typedef struct {
+    int sprite_a, sprite_b;    /* tiles; b alternates with a when set */
+    float x, from, to;         /* screen column and world range */
+} TdStrip;
+
+enum {
+    MIX_NONE, MIX_CONVOY_DEPOT, MIX_RAILWAY, MIX_AERODROME, MIX_TRENCH_RAILHEAD,
+    MIX_VILLAGE_STATION, MIX_TRENCH_RUN, MIX_BASE_AMBULANCES,
+    MIX_CONVOY_AMBULANCES, MIX_COUNT
+};
+
+#define MAX_TD_OBJECTS 48
+#define MAX_TD_STRIPS 6
+
 typedef struct {
     float x, y, z;
 } Vec3;
@@ -515,6 +561,7 @@ typedef struct {
     SDL_Surface *gunner_moving_guns;
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
+    SDL_Surface *topdown_targets;   /* the painted mission targets */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
@@ -544,6 +591,7 @@ typedef struct {
     int qa_hold;
     int qa_diary_all;   /* test entry: turn every diary page in turn */
     int qa_tracers;     /* test entry: rounds fired at every angle */
+    int qa_autopilot;   /* test entry: fly a top-down mix as a pilot would */
     int arms_rounds;        /* 1914: rounds left in the carbine or revolver */
     uint32_t arms_ready_at; /* the bolt worked, or the reload done */
     int success;
@@ -568,8 +616,17 @@ typedef struct {
     int saved_wingman_health[3];
     /* Pilot's record: victories, decorations, rank and growing skills. */
     int victories, sorties, rank;
+    /* Conduct, kept with the career: the squadron's morale, offences
+     * against civilians, ambulances or our own line (three is a court
+     * martial), sorties left before an award may be made, rank lost. */
+    int morale, offences, award_hold, rank_penalty, disgraced;
+    int grounded_next;          /* the next sortie is flown without him */
+    int conduct_pending;        /* a memorandum waits after the debrief */
+    int offence_last_sortie;    /* the diary and the paper still remember */
+    int court_martial_stage;
     unsigned awards;
     int saved_victories, saved_sorties, saved_rank;
+    int saved_conduct[5];       /* morale, offences, hold, penalty, disgraced */
     unsigned saved_awards;
     float saved_skill[3];
     int pending_award, pending_rank;
@@ -638,6 +695,13 @@ typedef struct {
     float skill_gunnery;
     float skill_engine;
     Target targets[MAX_TARGETS];
+    TdObject td[MAX_TD_OBJECTS];
+    int td_count;
+    TdStrip td_strips[MAX_TD_STRIPS];
+    int td_strip_count;
+    int td_mix, td_goal;
+    int sortie_offences;       /* civilians, ambulances, our line: today */
+    int sortie_offence_kind;   /* the last of them, CIV_... */
     BulletHole bullet_holes[MAX_BULLET_HOLES];
     int next_bullet_hole;
 } Game;
@@ -648,6 +712,11 @@ static void reset_wingmen(Game *g);
 static void show_notice(Game *g, const char *text);
 static float random_unit(Game *g);
 static int personal_shot(Game *g, int revolver);
+static void td_build_mission(Game *g);
+static void td_bomb_on_own_line(Game *g, float x, float y);
+static void td_update(Game *g, float dt, uint32_t now);
+static void td_draw_ground(Game *g);
+static void td_draw_objects(Game *g);
 static float wrap_angle(float angle);
 static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
                                    float east, float down);
@@ -802,7 +871,7 @@ static int load_campaign_save_path(Game *g, const char *path)
     if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
                &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
         strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
-        (version < 1 || version > 4) ||
+        (version < 1 || version > 5) ||
         chapter < 0 || chapter >= CHAPTER_COUNT ||
         mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
         wingman0 < 0 || wingman0 > 100 ||
@@ -831,6 +900,20 @@ static int load_campaign_save_path(Game *g, const char *path)
          skill[2] < 0 || skill[2] > 100)) {
         fclose(file);
         return 0;
+    }
+    /* Version 5 adds conduct.  Older saves start with a cheerful mess. */
+    {
+        int conduct[5] = {70, 0, 0, 0, 0};
+        if (version >= 5 &&
+            (fscanf(file, "%d %d %d %d %d", &conduct[0], &conduct[1],
+                    &conduct[2], &conduct[3], &conduct[4]) != 5 ||
+             conduct[0] < 0 || conduct[0] > 100 || conduct[1] < 0 ||
+             conduct[1] > 3 || conduct[2] < 0 || conduct[3] < 0 ||
+             conduct[3] > 3 || conduct[4] < 0 || conduct[4] > 1)) {
+            fclose(file);
+            return 0;
+        }
+        memcpy(g->saved_conduct, conduct, sizeof(conduct));
     }
     fclose(file);
     g->saved_victories = victories;
@@ -872,15 +955,17 @@ static int save_campaign(Game *g)
     int ok;
     int backed_up;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 4\n%d %d\n%d %d %d\n%d\n%d\n"
-                 "%d %d %u %d %d %d %d\n",
+    ok = fprintf(file, "CANVAS_SKIES_SAVE 5\n%d %d\n%d %d %d\n%d\n%d\n"
+                 "%d %d %u %d %d %d %d\n%d %d %d %d %d\n",
                  g->chapter, g->mission,
                  g->wingman_health[0], g->wingman_health[1],
                  g->wingman_health[2], g->campaign_complete, g->lives,
                  g->victories, g->sorties, g->awards, g->rank,
                  (int)(g->skill_flying * 100.0f + 0.5f),
                  (int)(g->skill_gunnery * 100.0f + 0.5f),
-                 (int)(g->skill_engine * 100.0f + 0.5f)) > 0;
+                 (int)(g->skill_engine * 100.0f + 0.5f),
+                 g->morale, g->offences, g->award_hold, g->rank_penalty,
+                 g->disgraced) > 0;
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(save_new_path);
@@ -915,6 +1000,11 @@ static int save_campaign(Game *g)
     g->saved_skill[0] = g->skill_flying;
     g->saved_skill[1] = g->skill_gunnery;
     g->saved_skill[2] = g->skill_engine;
+    g->saved_conduct[0] = g->morale;
+    g->saved_conduct[1] = g->offences;
+    g->saved_conduct[2] = g->award_hold;
+    g->saved_conduct[3] = g->rank_penalty;
+    g->saved_conduct[4] = g->disgraced;
     g->has_save = 1;
     g->save_loaded_from_backup = 0;
     return 1;
@@ -962,12 +1052,18 @@ static const char *rank_names[4] = {
 
 static const char *rank_short[4] = {"2ND LT.", "LT.", "CAPT.", "MAJOR"};
 
-static int earned_rank(const Game *g)
+static int earned_rank_before_conduct(const Game *g)
 {
     if (g->victories >= 25 && g->chapter >= 5) return 3;
     if (g->victories >= 12 && g->chapter >= 3) return 2;
     if (g->victories >= 3 || g->sorties >= 10) return 1;
     return 0;
+}
+
+static int earned_rank(const Game *g)
+{
+    int rank = earned_rank_before_conduct(g) - g->rank_penalty;
+    return rank < 0 ? 0 : rank;
 }
 
 static void reset_career(Game *g)
@@ -977,6 +1073,9 @@ static void reset_career(Game *g)
     g->skill_flying = g->skill_gunnery = g->skill_engine = 0.0f;
     g->pending_award = 0;
     g->pending_rank = 0;
+    g->morale = 70;
+    g->offences = g->award_hold = g->rank_penalty = g->disgraced = 0;
+    g->grounded_next = g->conduct_pending = 0;
 }
 
 static void restore_saved_career(Game *g)
@@ -990,6 +1089,12 @@ static void restore_saved_career(Game *g)
     g->skill_engine = g->saved_skill[2];
     g->pending_award = 0;
     g->pending_rank = 0;
+    g->morale = g->saved_conduct[0];
+    g->offences = g->saved_conduct[1];
+    g->award_hold = g->saved_conduct[2];
+    g->rank_penalty = g->saved_conduct[3];
+    g->disgraced = g->saved_conduct[4];
+    g->grounded_next = g->conduct_pending = 0;
 }
 
 static float grow_skill(float skill, float amount)
@@ -1017,6 +1122,37 @@ static void count_sortie_in_record(Game *g)
             g->awards |= 1u << i;
             g->pending_award |= 1 << i;
         }
+    /* Conduct.  Each civilian place, ambulance or length of our own line
+     * hit is an offence.  The first brings a reprimand on the record and
+     * no award for three sorties; the second costs a rank, or grounds a
+     * pilot who has none to lose; the third is a court martial. */
+    if (g->award_hold > 0) {
+        --g->award_hold;
+        g->awards &= ~(unsigned)g->pending_award;
+        g->pending_award = 0;
+    }
+    if (g->sortie_offences > 0) {
+        int before = g->offences;
+        g->morale -= 15 * g->sortie_offences;
+        if (g->morale < 0) g->morale = 0;
+        g->offences += g->sortie_offences;
+        if (g->offences > 3) g->offences = 3;
+        if (before < 1) g->award_hold = 3;
+        g->awards &= ~(unsigned)g->pending_award;
+        g->pending_award = 0;
+        if (before < 2 && g->offences >= 2 && g->offences < 3) {
+            if (g->rank > 0) {
+                ++g->rank_penalty;
+                --g->rank;
+            } else {
+                g->grounded_next = 1;
+            }
+        }
+        g->conduct_pending = 1;
+        g->offence_last_sortie = 1;
+    } else if (g->success && g->morale < 90) {
+        g->morale += 2;
+    }
     rank = earned_rank(g);
     if (g->fatal_sortie) rank = g->rank;
     g->pending_rank = rank > g->rank;
@@ -1078,7 +1214,8 @@ static int save_mission_result(Game *g)
  * which is always the last plaque. */
 static int campaign_menu_count(const Game *g)
 {
-    return ((g->has_save && g->saved_lives > 0) ? 7 : 6) + 1;
+    return ((g->has_save && g->saved_lives > 0 && !g->saved_conduct[4]) ?
+            7 : 6) + 1;
 }
 
 static float gunner_traverse(const Game *g)
@@ -2402,6 +2539,12 @@ static void set_scene(Game *g, Scene scene)
         scene == SCENE_DAWN || scene == SCENE_MESS)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
+    if (scene == SCENE_COURT_MARTIAL) {
+        /* Cashiered: the career ends here and the save says so. */
+        g->court_martial_stage = 0;
+        g->disgraced = 1;
+        save_campaign(g);
+    }
     if (scene == SCENE_DEBRIEF && g->mission_save_state == 0)
         save_mission_result(g);
     g->scene = scene;
@@ -2544,6 +2687,7 @@ static int current_mission_goal(const Game *g)
     if (special == SPECIAL_GOTHA) return 2;
     if (special == SPECIAL_TRUCE) return 0;
     if (armistice_quiet(g)) return 0;
+    if (mode == MISSION_TOP_DOWN && g->td_mix != MIX_NONE) return g->td_goal;
     if (is_perspective_mode(mode)) {
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
@@ -2786,6 +2930,20 @@ static void reset_sortie(Game *g)
         g->targets[i].burst_left = 0;
     }
     g->special = campaign_missions[g->chapter][g->mission].special;
+    g->sortie_offences = 0;
+    g->sortie_offence_kind = CIV_NONE;
+    g->offence_last_sortie = 0;
+    td_build_mission(g);
+    if (g->td_mix != MIX_NONE) {
+        /* The painted targets replace the old gun pits; two Archie
+         * batteries stay to shell the sortie. */
+        for (i = 0; i < MAX_TARGETS; ++i) {
+            g->targets[i].active = i < 2;
+            g->targets[i].type = 1;
+            g->targets[i].world_x = 900.0f +
+                (chapters[g->chapter].distance - 1800.0f) * (float)i;
+        }
+    }
     g->pudding_delivered = 0;
     g->raider_through = 0;
     g->wreck_started = 0;
@@ -3545,6 +3703,402 @@ static void age_explosions(Game *g, float dt)
     }
 }
 
+/* What each kind of ground target is: its painted whole and wrecked forms,
+ * how many rounds it takes (bombs always finish it), whether only a bomb
+ * will do, whether it counts towards the sortie's objective, and whether
+ * hitting it is an offence. */
+typedef struct {
+    short whole, wreck;
+    unsigned char hp, bomb_only, military, civ, fires;
+    short half_w, half_h;
+} TdKindInfo;
+
+static const TdKindInfo td_kinds[TDK_COUNT] = {
+    {TD_LORRY_GREY, TD_LORRY_WRECK, 2, 0, 1, CIV_NONE, 0, 10, 28},
+    {TD_AMBULANCE, TD_AMBULANCE_WRECK, 1, 0, 0, CIV_AMBULANCE, 0, 10, 28},
+    {TD_LOCO, TD_LOCO_WRECK, 6, 0, 1, CIV_NONE, 0, 12, 36},
+    {TD_WAGON_GREY, TD_WAGON_WRECK, 3, 0, 1, CIV_NONE, 0, 11, 28},
+    {TD_STATION, TD_STATION_WRECK, 1, 1, 1, CIV_NONE, 0, 20, 58},
+    {TD_HANGAR, TD_HANGAR_WRECK, 1, 1, 1, CIV_NONE, 0, 46, 30},
+    {TD_TENTS, TD_TENTS_WRECK, 3, 0, 1, CIV_NONE, 0, 26, 26},
+    {TD_DUMP, TD_DUMP_WRECK, 1, 1, 1, CIV_NONE, 0, 34, 34},
+    {TD_DEPOT, TD_DEPOT_WRECK, 1, 1, 1, CIV_NONE, 0, 30, 20},
+    {TD_FARM, TD_FARM_WRECK, 1, 0, 0, CIV_CIVILIAN, 0, 22, 20},
+    {TD_CHURCH, TD_CHURCH_WRECK, 1, 0, 0, CIV_CIVILIAN, 0, 40, 56},
+    {TD_CART, TD_CART_WRECK, 1, 0, 0, CIV_CIVILIAN, 0, 10, 22},
+    {TD_REFUGEES, TD_REFUGEES_WRECK, 1, 0, 0, CIV_CIVILIAN, 0, 18, 28},
+    {TD_MG, TD_MG_WRECK, 2, 0, 1, CIV_NONE, 1, 16, 16},
+    {TD_DUGOUT, TD_DUGOUT_WRECK, 1, 1, 1, CIV_NONE, 0, 14, 14}
+};
+
+/* A sortie's mix: up to three segments flown in order, its name for the
+ * briefing, and the warning the briefing gives. */
+typedef struct {
+    unsigned char seg[3];
+    const char *orders[3];
+} TopdownMix;
+
+static const TopdownMix topdown_mixes[MIX_COUNT] = {
+    {{SEG_NONE, SEG_NONE, SEG_NONE}, {NULL, NULL, NULL}},
+    {{SEG_CONVOY, SEG_DEPOT, SEG_NONE},
+     {"STRAFE THE LORRY COLUMN ON THE ROAD EAST.",
+      "FOLLOW THE ROAD TO ITS DEPOT AND BOMB THE SHEDS.", NULL}},
+    {{SEG_RAIL, SEG_NONE, SEG_NONE},
+     {"A TRAIN IS DUE ON THE LINE TO THE FRONT.",
+      "STOP IT: BOMB THE ENGINE, THEN THE WAGONS.", NULL}},
+    {{SEG_BASE, SEG_NONE, SEG_NONE},
+     {"THEIR AERODROME LIES BEHIND THE WOOD.",
+      "BOMB THE HANGARS, THE DUMP AND THE STORES.", NULL}},
+    {{SEG_TRENCH, SEG_RAIL, SEG_NONE},
+     {"FLY ALONG THEIR FRONT LINE: GUN POSTS AND DUGOUTS.",
+      "THEN THE RAILHEAD BEHIND IT.",
+      "OUR OWN LINE IS IN KHAKI SANDBAGS. DO NOT BOMB IT."}},
+    {{SEG_STATION_VILLAGE, SEG_NONE, SEG_NONE},
+     {"BOMB THE STATION AND THE TRAIN STANDING IN IT.",
+      "THE VILLAGE IS STILL OCCUPIED BY CIVILIANS:",
+      "TAKE CARE. NO BOMBS ON THE HOUSES OR THE CHURCH."}},
+    {{SEG_TRENCH, SEG_TRENCH, SEG_NONE},
+     {"TRENCH RUN: FOLLOW THEIR LINE LOW AND HARD.",
+      "GUN POSTS, DUGOUTS AND THE DUMPS BEHIND THEM.",
+      "OUR OWN LINE IS IN KHAKI SANDBAGS. DO NOT BOMB IT."}},
+    {{SEG_BASE, SEG_AMBULANCES, SEG_NONE},
+     {"BOMB THE DEPOT AND ITS HANGARS.",
+      "AMBULANCES ON THE ROAD: HOLD FIRE.", NULL}},
+    {{SEG_CONVOY, SEG_VILLAGE, SEG_NONE},
+     {"STRAFE THE COLUMNS ON THE ROAD WEST.",
+      "AMBULANCES ON THE ROAD: HOLD FIRE.",
+      "REFUGEES AND FARMS BEYOND: TAKE CARE."}}
+};
+
+/* By date: 1915's raids on railways and aerodromes; the Somme and Arras
+ * trench lines and the stations behind them; Cambrai's trench runs; the
+ * roads of the spring retreat crowded with ambulances and refugees; the
+ * railways of the Hundred Days.  1914 and the Armistice keep their own. */
+static const unsigned char mixes_by_chapter[CHAPTER_COUNT][4] = {
+    {MIX_NONE, MIX_NONE, MIX_NONE, MIX_NONE},
+    {MIX_CONVOY_DEPOT, MIX_RAILWAY, MIX_AERODROME, MIX_RAILWAY},
+    {MIX_TRENCH_RAILHEAD, MIX_VILLAGE_STATION, MIX_TRENCH_RUN, MIX_AERODROME},
+    {MIX_RAILWAY, MIX_BASE_AMBULANCES, MIX_TRENCH_RAILHEAD, MIX_TRENCH_RUN},
+    {MIX_TRENCH_RUN, MIX_CONVOY_DEPOT, MIX_VILLAGE_STATION, MIX_TRENCH_RUN},
+    {MIX_CONVOY_AMBULANCES, MIX_TRENCH_RUN, MIX_BASE_AMBULANCES,
+     MIX_CONVOY_AMBULANCES},
+    {MIX_RAILWAY, MIX_CONVOY_AMBULANCES, MIX_VILLAGE_STATION, MIX_TRENCH_RAILHEAD},
+    {MIX_NONE, MIX_NONE, MIX_NONE, MIX_NONE}
+};
+
+static int topdown_mix_for(int chapter, int mission)
+{
+    int m, k = 0;
+    if (campaign_missions[chapter][mission].mode != MISSION_TOP_DOWN ||
+        campaign_missions[chapter][mission].special != SPECIAL_NONE)
+        return MIX_NONE;
+    for (m = 0; m < mission; ++m)
+        if (campaign_missions[chapter][m].mode == MISSION_TOP_DOWN) ++k;
+    if (k > 3) k = 3;
+    return mixes_by_chapter[chapter][k];
+}
+
+static void td_add(Game *g, int kind, float world_x, float x, float speed)
+{
+    TdObject *o;
+    if (g->td_count >= MAX_TD_OBJECTS) return;
+    o = &g->td[g->td_count++];
+    memset(o, 0, sizeof(*o));
+    o->kind = kind;
+    o->world_x = world_x;
+    o->x = x;
+    o->speed = speed;
+    o->hp = td_kinds[kind].hp;
+    o->active = 1;
+}
+
+static void td_strip(Game *g, int a, int b, float x, float from, float to)
+{
+    TdStrip *t;
+    if (g->td_strip_count >= MAX_TD_STRIPS) return;
+    t = &g->td_strips[g->td_strip_count++];
+    t->sprite_a = a; t->sprite_b = b; t->x = x; t->from = from; t->to = to;
+}
+
+static void td_build_segment(Game *g, int seg, float from, float to)
+{
+    float mid = (from + to) * 0.5f, w;
+    int k;
+    switch (seg) {
+    case SEG_CONVOY:
+    case SEG_AMBULANCES:
+        td_strip(g, TD_TILE_ROAD, -1, 430.0f, from - 200.0f, to + 400.0f);
+        for (k = 0; k < 6; ++k) {
+            int kind = seg == SEG_AMBULANCES ? (k & 1 ? TDK_AMBULANCE : -1) :
+                       (g->td_mix == MIX_CONVOY_AMBULANCES && (k == 2 || k == 5)) ?
+                       TDK_AMBULANCE : TDK_LORRY;
+            if (kind < 0) continue;
+            td_add(g, kind, from + 220.0f + (float)k * 74.0f, 430.0f, 22.0f);
+        }
+        if (seg == SEG_CONVOY)
+            td_add(g, TDK_MG, mid + 160.0f, 520.0f, 0.0f);
+        break;
+    case SEG_DEPOT:
+        td_strip(g, TD_TILE_ROAD, -1, 430.0f, from - 200.0f, to);
+        td_add(g, TDK_DEPOT, mid - 120.0f, 520.0f, 0.0f);
+        td_add(g, TDK_DEPOT, mid + 40.0f, 525.0f, 0.0f);
+        td_add(g, TDK_DUMP, mid - 40.0f, 330.0f, 0.0f);
+        td_add(g, TDK_MG, mid + 160.0f, 330.0f, 0.0f);
+        break;
+    case SEG_RAIL:
+    case SEG_STATION_VILLAGE:
+        td_strip(g, TD_TILE_RAIL, -1, 200.0f, from - 300.0f, to + 400.0f);
+        w = seg == SEG_RAIL ? 26.0f : 0.0f;  /* a train under way, or standing */
+        td_add(g, TDK_LOCO, from + 240.0f, 200.0f, w);
+        for (k = 0; k < 4; ++k)
+            td_add(g, TDK_WAGON, from + 302.0f + (float)k * 59.0f, 200.0f, w);
+        td_add(g, TDK_STATION, mid + 140.0f, 238.0f, 0.0f);
+        if (seg == SEG_STATION_VILLAGE) {
+            td_add(g, TDK_FARM, mid + 30.0f, 330.0f, 0.0f);
+            td_add(g, TDK_CHURCH, mid + 160.0f, 360.0f, 0.0f);
+            td_add(g, TDK_FARM, mid + 280.0f, 320.0f, 0.0f);
+            td_add(g, TDK_CART, mid + 90.0f, 420.0f, -12.0f);
+            td_add(g, TDK_REFUGEES, mid + 230.0f, 290.0f, -6.0f);
+        } else {
+            td_add(g, TDK_DUMP, mid + 60.0f, 330.0f, 0.0f);
+            td_add(g, TDK_MG, mid - 60.0f, 300.0f, 0.0f);
+        }
+        break;
+    case SEG_BASE:
+        td_add(g, TDK_HANGAR, mid - 140.0f, 260.0f, 0.0f);
+        td_add(g, TDK_HANGAR, mid + 20.0f, 420.0f, 0.0f);
+        td_add(g, TDK_TENTS, mid - 40.0f, 140.0f, 0.0f);
+        td_add(g, TDK_DUMP, mid + 150.0f, 230.0f, 0.0f);
+        td_add(g, TDK_DEPOT, mid + 120.0f, 470.0f, 0.0f);
+        td_add(g, TDK_MG, mid - 210.0f, 360.0f, 0.0f);
+        td_add(g, TDK_MG, mid + 230.0f, 340.0f, 0.0f);
+        break;
+    case SEG_VILLAGE:
+        td_add(g, TDK_FARM, mid - 150.0f, 180.0f, 0.0f);
+        td_add(g, TDK_FARM, mid - 40.0f, 240.0f, 0.0f);
+        td_add(g, TDK_CHURCH, mid + 90.0f, 200.0f, 0.0f);
+        td_add(g, TDK_REFUGEES, mid - 60.0f, 430.0f, 16.0f);
+        td_add(g, TDK_CART, mid + 40.0f, 430.0f, 16.0f);
+        td_add(g, TDK_MG, mid + 220.0f, 520.0f, 0.0f);
+        td_strip(g, TD_TILE_ROAD, -1, 430.0f, from, to + 300.0f);
+        break;
+    case SEG_TRENCH:
+        /* Their line down the middle, ours in khaki to the east. */
+        td_strip(g, TD_TILE_TRENCH_A, TD_TILE_TRENCH_B, 300.0f, from, to);
+        td_strip(g, TD_TILE_OURS_A, TD_TILE_OURS_B, 540.0f, from, to);
+        for (k = 0; k < 4; ++k) {
+            float at = from + 120.0f + (float)k * (to - from - 200.0f) / 4.0f;
+            td_add(g, TDK_MG, at, 300.0f + (k & 1 ? 26.0f : -26.0f), 0.0f);
+            td_add(g, TDK_DUGOUT, at + 80.0f, 300.0f + (k & 1 ? -40.0f : 40.0f),
+                   0.0f);
+        }
+        td_add(g, TDK_DUMP, mid, 150.0f, 0.0f);
+        break;
+    default:
+        break;
+    }
+}
+
+/* Lays out the sortie's segments along its length and sets the objective:
+ * three in five of its military targets, so it can be won without
+ * destroying everything, and never by bombing anything it must not. */
+static void td_build_mission(Game *g)
+{
+    const TopdownMix *mix;
+    float start = 360.0f, length = chapters[g->chapter].distance - 640.0f;
+    int n = 0, k, military = 0;
+    g->td_count = 0;
+    g->td_strip_count = 0;
+    g->td_goal = 0;
+    g->td_mix = topdown_mix_for(g->chapter, g->mission);
+    if (g->td_mix == MIX_NONE) return;
+    mix = &topdown_mixes[g->td_mix];
+    while (n < 3 && mix->seg[n] != SEG_NONE) ++n;
+    for (k = 0; k < n; ++k)
+        td_build_segment(g, mix->seg[k], start + length * (float)k / (float)n,
+                         start + length * (float)(k + 1) / (float)n);
+    for (k = 0; k < g->td_count; ++k)
+        if (td_kinds[g->td[k].kind].military) ++military;
+    g->td_goal = (military * 3 + 4) / 5;
+    if (g->td_goal < 2) g->td_goal = 2;
+}
+
+static void td_screen(const Game *g, const TdObject *o, float *sx, float *sy)
+{
+    *sx = o->x;
+    *sy = SCREEN_H - (o->world_x - g->scroll);
+}
+
+static void td_offence(Game *g, int civ)
+{
+    ++g->sortie_offences;
+    g->sortie_offence_kind = civ;
+}
+
+static void td_wreck(Game *g, TdObject *o, int by_bomb)
+{
+    const TdKindInfo *k = &td_kinds[o->kind];
+    float sx, sy;
+    td_screen(g, o, &sx, &sy);
+    o->wrecked = 1;
+    o->wrecked_at = SDL_GetTicks();
+    o->speed = 0.0f;
+    new_ground_explosion(g, sx, sy, by_bomb || k->hp >= 3 ? 3 : 1);
+    g->audio.blast = 7000;
+    if (k->military) {
+        ++g->objectives;
+        g->score += 500;
+    }
+    if (k->civ != CIV_NONE) td_offence(g, k->civ);
+}
+
+/* Our own bomb bursting on our own trench line. */
+static void td_bomb_on_own_line(Game *g, float x, float y)
+{
+    int i;
+    float world = g->scroll + (SCREEN_H - y);
+    for (i = 0; i < g->td_strip_count; ++i) {
+        const TdStrip *t = &g->td_strips[i];
+        if (t->sprite_a != TD_TILE_OURS_A) continue;
+        if (fabsf(x - t->x) < 36.0f && world >= t->from && world <= t->to) {
+            td_offence(g, CIV_OWN_LINE);
+            return;
+        }
+    }
+}
+
+static void td_update(Game *g, float dt, uint32_t now)
+{
+    int i, j;
+    for (i = 0; i < g->td_count; ++i) {
+        TdObject *o = &g->td[i];
+        const TdKindInfo *k = &td_kinds[o->kind];
+        float sx, sy;
+        if (!o->active) continue;
+        o->world_x -= o->speed * dt;
+        td_screen(g, o, &sx, &sy);
+        if (sy > SCREEN_H + 140.0f) { o->active = 0; continue; }
+        if (o->wrecked || sy < -80.0f) continue;
+        if (k->fires && sy > 18.0f && sy < SCREEN_H - 12.0f &&
+            now - o->last_shot > 1500u + (uint32_t)(i * 131 % 700)) {
+            aimed_fire(g, sx, sy, 245.0f, 0);
+            o->last_shot = now;
+        }
+        for (j = 0; j < MAX_BULLETS; ++j) {
+            Bullet *b = &g->bullets[j];
+            if (!b->active || b->enemy || b->missed) continue;
+            if (b->type == 1) {
+                /* A bomb strikes where it lands, in its last moments. */
+                if (b->life > 0.30f) continue;
+                if (fabsf(b->x - sx) > (float)k->half_w + 14.0f ||
+                    fabsf(b->y - sy) > (float)k->half_h + 14.0f) continue;
+                b->active = 0;
+                td_wreck(g, o, 1);
+                break;
+            }
+            if (k->bomb_only) continue;
+            if (fabsf(b->x - sx) < (float)k->half_w + 3.0f &&
+                fabsf(b->y - sy) < (float)k->half_h + 3.0f) {
+                b->active = 0;
+                if (--o->hp <= 0) {
+                    td_wreck(g, o, 0);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/* A sprite from the painted atlas with its shadow cast to the lower right. */
+static void td_blit(Game *g, int sprite, int cx, int cy)
+{
+    SDL_Surface *s = g->screen, *a = g->topdown_targets;
+    const short *r = topdown_sprite_rect[sprite];
+    SDL_Rect src = {r[0], r[1], r[2], r[3]};
+    SDL_Rect dst = {cx - r[2] / 2, cy - r[3] / 2, r[2], r[3]};
+    uint32_t key = 0;
+    int x, y;
+    if (!a) return;
+    if (dst.y > SCREEN_H || dst.y + r[3] < 0) return;
+    SDL_GetColorKey(a, &key);
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (y = 0; y < r[3]; ++y) {
+        int ty = dst.y + y + 5;
+        const pix_t *row;
+        pix_t *out;
+        if (ty < 0 || ty >= s->h) continue;
+        row = (const pix_t *)((const uint8_t *)a->pixels +
+                              (r[1] + y) * a->pitch) + r[0];
+        out = PIX_ROW(s, ty);
+        for (x = 0; x < r[2]; ++x) {
+            int tx = dst.x + x + 4;
+            if (row[x] == (pix_t)key || tx < 0 || tx >= s->w) continue;
+            out[tx] = pix_mix(out[tx], PIX_PACK(20, 18, 14), 12);
+        }
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+    SDL_BlitSurface(a, &src, s, &dst);
+}
+
+static void td_draw_ground(Game *g)
+{
+    int i;
+    for (i = 0; i < g->td_strip_count; ++i) {
+        const TdStrip *t = &g->td_strips[i];
+        const short *r = topdown_sprite_rect[t->sprite_a];
+        int tile = r[3] > 1 ? r[3] - 1 : 64;   /* rows overlap by one */
+        int k0 = (int)floorf((g->scroll - 40.0f - t->from) / (float)tile);
+        int k1 = (int)floorf((g->scroll + SCREEN_H + 80.0f - t->from) /
+                             (float)tile);
+        int k;
+        if (k0 < 0) k0 = 0;
+        for (k = k0; k <= k1; ++k) {
+            float world = t->from + (float)k * (float)tile;
+            int sy;
+            int sprite = t->sprite_b >= 0 && (k & 1) ? t->sprite_b : t->sprite_a;
+            const short *rr = topdown_sprite_rect[sprite];
+            SDL_Rect src = {rr[0], rr[1], rr[2], rr[3]}, dst;
+            if (world > t->to) break;
+            sy = SCREEN_H - (int)(world - g->scroll);
+            dst.x = (int)t->x - rr[2] / 2;
+            dst.y = sy - rr[3];
+            dst.w = rr[2];
+            dst.h = rr[3];
+            if (g->topdown_targets)
+                SDL_BlitSurface(g->topdown_targets, &src, g->screen, &dst);
+        }
+    }
+}
+
+static void td_draw_objects(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t now = SDL_GetTicks();
+    int i;
+    for (i = 0; i < g->td_count; ++i) {
+        const TdObject *o = &g->td[i];
+        const TdKindInfo *k = &td_kinds[o->kind];
+        float sx, sy;
+        if (!o->active) continue;
+        td_screen(g, o, &sx, &sy);
+        if (sy < -80.0f || sy > SCREEN_H + 80.0f) continue;
+        td_blit(g, o->wrecked ? k->wreck : k->whole, (int)sx, (int)sy);
+        if (o->wrecked && now - o->wrecked_at < 20000u) {
+            /* Fire and smoke drifting downwind from the wreck. */
+            int p;
+            for (p = 0; p < 4; ++p) {
+                uint32_t t = (now / 70u + (uint32_t)(p * 37 + i * 11)) % 40u;
+                int r = 4 + (int)t / 4;
+                blend_circle(s, (int)sx + (int)t / 2 + (p - 2) * 3,
+                             (int)sy - (int)t, r, 40, 38, 36,
+                             (uint8_t)(120 - (int)t * 3));
+            }
+            if (((now / 90u) + (uint32_t)i) % 3u)
+                blend_circle(s, (int)sx - 2, (int)sy, 5, 255, 150, 60, 170);
+        }
+    }
+}
+
 static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
 {
     int i, j;
@@ -3553,6 +4107,46 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
     if (keys[SDL_SCANCODE_Z]) g->airspeed -= 42.0f * dt;
     if (g->airspeed < 72.0f) g->airspeed = 72.0f;
     if (g->airspeed > 152.0f) g->airspeed = 152.0f;
+    if (g->qa_autopilot) {
+        /* Line up on the nearest military target ahead; strafe what rounds
+         * can stop, bomb what they cannot, and never bomb near people. */
+        static uint8_t fake[SDL_NUM_SCANCODES];
+        float best = 1e9f, aim_x = 320.0f;
+        int k, bomb = 0;
+        memcpy(fake, keys, sizeof(fake));
+        fake[SDL_SCANCODE_SPACE] = fake[SDL_SCANCODE_B] = 0;
+        fake[SDL_SCANCODE_LEFT] = fake[SDL_SCANCODE_RIGHT] = 0;
+        for (k = 0; k < g->td_count; ++k) {
+            const TdObject *o = &g->td[k];
+            float sx, sy, ahead;
+            if (!o->active || o->wrecked || !td_kinds[o->kind].military)
+                continue;
+            td_screen(g, o, &sx, &sy);
+            ahead = g->player_y - sy;
+            if (ahead < 40.0f || ahead > 420.0f || ahead >= best) continue;
+            best = ahead;
+            aim_x = sx;
+            bomb = td_kinds[o->kind].bomb_only || td_kinds[o->kind].hp >= 3;
+            if (bomb && ahead > 95.0f && ahead < 135.0f &&
+                fabsf(sx - g->player_x) < 16.0f) {
+                int c, near_civ = 0;
+                for (c = 0; c < g->td_count; ++c) {
+                    float cx, cy;
+                    if (!g->td[c].active || g->td[c].wrecked ||
+                        td_kinds[g->td[c].kind].civ == CIV_NONE) continue;
+                    td_screen(g, &g->td[c], &cx, &cy);
+                    if (fabsf(cx - sx) < 60.0f && fabsf(cy - sy) < 70.0f)
+                        near_civ = 1;
+                }
+                if (!near_civ) fake[SDL_SCANCODE_B] = 1;
+            }
+        }
+        if (aim_x < g->player_x - 4.0f) fake[SDL_SCANCODE_LEFT] = 1;
+        if (aim_x > g->player_x + 4.0f) fake[SDL_SCANCODE_RIGHT] = 1;
+        if (best < 1e8f && !bomb && fabsf(aim_x - g->player_x) < 14.0f)
+            fake[SDL_SCANCODE_SPACE] = 1;
+        keys = fake;
+    }
     if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 175.0f * dt;
     if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 175.0f * dt;
     if (keys[SDL_SCANCODE_UP]) g->player_y -= 150.0f * dt;
@@ -3611,6 +4205,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             if (g->special != SPECIAL_TRUCE) {
                 new_ground_explosion(g, b->x, b->y, 2);
                 g->audio.blast = 7000;
+                td_bomb_on_own_line(g, b->x, b->y);
             }
             b->active = 0;
         } else if (b->life <= 0.0f || b->y < -30.0f || b->y > SCREEN_H + 30.0f) {
@@ -3620,7 +4215,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             fabsf(b->x - g->player_x) < 24.0f &&
             fabsf(b->y - g->player_y) < 24.0f &&
             now - g->last_damage > 240u) {
-            g->health -= 4;
+            if (!g->qa_hold || g->health > 30) g->health -= 4;
             g->last_damage = now;
             b->active = 0;
             new_explosion(g, g->player_x, g->player_y, 0);
@@ -3664,6 +4259,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             }
         }
     }
+    td_update(g, dt, now);
     if (g->scroll > chapters[g->chapter].distance ||
         g->fuel <= 0.0f || g->health <= 0) {
         if (g->health <= 0 && hold_for_wreck(g, g->player_x, g->player_y))
@@ -5287,7 +5883,8 @@ static void draw_campaign_menu(Game *g)
     };
     SDL_Surface *s = g->screen;
     int count = campaign_menu_count(g);
-    int has_continue = g->has_save && g->saved_lives > 0;
+    int has_continue = g->has_save && g->saved_lives > 0 &&
+                       !g->saved_conduct[4];
     int i;
     draw_title(g);
     blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 5, 7, 10, 150);
@@ -5324,6 +5921,11 @@ static void draw_campaign_menu(Game *g)
         draw_victorian_plaque(g, 128, 112 + i * (count > 7 ? 28 : 31), 384,
                               label, i == g->menu_selection);
     }
+    if (g->has_save && g->saved_conduct[4])
+        typewriter_text(g, 320 - typewriter_width(
+                            "THE LAST CAREER ENDED: CASHIERED", 11) / 2, 352,
+                        "THE LAST CAREER ENDED: CASHIERED", 7, 11,
+                        rgb(s, 214, 120, 96));
     if (g->confirm_overwrite) {
         blend_rect(s, 106, 69, 428, 266, 5, 7, 10, 170);
         rect(s, 140, 160, 360, 84, rgb(s, 183, 139, 63));
@@ -5610,7 +6212,11 @@ static void draw_newspaper(Game *g, int index, const char *footer)
     rect(s, 44, 300, 552, 1, ink);
     font_text(g, FONT_NEWS_ITALIC, 50, 316, "In Brief", red);
     if (n->brief[0]) font_text(g, FONT_NEWS_BODY, 50, 334, n->brief[0], ink);
-    if (n->brief[1]) font_text(g, FONT_NEWS_BODY, 330, 334, n->brief[1], ink);
+    if (g->offence_last_sortie && g->scene == SCENE_STORY)
+        font_text(g, FONT_NEWS_BODY, 330, 334, "INQUIRY INTO AN AIRMAN'S CONDUCT.",
+                  ink);
+    else if (n->brief[1])
+        font_text(g, FONT_NEWS_BODY, 330, 334, n->brief[1], ink);
     rect(s, 320, 304, 1, 36, grey);
     rect(s, 44, 344, 552, 1, ink);
     if (footer)
@@ -5773,6 +6379,14 @@ static void draw_mess(Game *g)
     lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u : (pick & 3u)];
     lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
                                      close_lines[(pick >> 4) % 3u];
+    if (g->sortie_offences > 0) {
+        /* Nobody drinks to a day like that. */
+        lines[1] = "NOBODY TOASTS ANYTHING. THE GRAMOPHONE STAYS SHUT.";
+        lines[2] = "TOM TAKES HIS GLASS TO THE FAR END OF THE TABLE.";
+        lines[3] = "I GO TO BED EARLY. NOBODY SAYS GOOD NIGHT.";
+    } else if (g->morale < 30) {
+        lines[3] = "THE TALK IS SHORT AND SOUR. THEY HAVE NOT FORGOTTEN.";
+    }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
     /* Lamplight and the gramophone horn. */
     blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
@@ -5855,6 +6469,9 @@ static void draw_story(Game *g)
                       22, red);
     snprintf(buf, sizeof(buf), "VICTORIES %d", g->victories);
     journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 14), buf, ink);
+    if (g->offence_last_sortie)
+        journal_text(g, 110, journal_line_y(JOURNAL_LEFT, 18),
+                     "The Major's letter is in my pocket.", red);
     draw_victory_tally(g, 116, journal_line_y(JOURNAL_LEFT, 16) + 5,
                        g->victories, ink);
     journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 0), mission->title, red);
@@ -5984,6 +6601,16 @@ static void draw_squadron_roster(Game *g)
              (int)(g->skill_flying * 10.0f), (int)(g->skill_gunnery * 10.0f),
              (int)(g->skill_engine * 10.0f));
     typewriter_text(g, 410, y, buf, 7, 11, ink);
+    y += 15;
+    typewriter_text(g, 410, y, "MORALE", 7, 11, ink);
+    typewriter_text(g, 530, y, g->morale >= 65 ? "GOOD" : g->morale >= 45 ?
+                    "FAIR" : g->morale >= 25 ? "LOW" : "SULLEN", 7, 11,
+                    g->morale >= 45 ? ink : red);
+    if (g->offences > 0) {
+        y += 15;
+        snprintf(buf, sizeof(buf), "REPRIMANDS %d", g->offences);
+        typewriter_text(g, 410, y, buf, 7, 11, red);
+    }
 }
 
 static void draw_briefing(Game *g)
@@ -6025,6 +6652,13 @@ static void draw_briefing(Game *g)
         order1 = mission_armed(g) ? "DEFEND THE REAR QUARTER WITH THE LEWIS GUN." :
                                     "WATCH THE REAR QUARTER. YOU HAVE A CARBINE.";
         order2 = "KEEP THE TWO-SEATER IN THE AIR.";
+    } else if (mission->mode == MISSION_TOP_DOWN &&
+               topdown_mix_for(g->chapter, g->mission) != MIX_NONE) {
+        const TopdownMix *mix =
+            &topdown_mixes[topdown_mix_for(g->chapter, g->mission)];
+        order0 = mix->orders[0] ? mix->orders[0] : chapter->orders[0];
+        order1 = mix->orders[1] ? mix->orders[1] : chapter->orders[1];
+        order2 = mix->orders[2] ? mix->orders[2] : chapter->orders[2];
     } else {
         order0 = chapter->orders[0];
         order1 = chapter->orders[1];
@@ -6633,6 +7267,8 @@ static void draw_top_down_sortie(Game *g)
     }
     if (g->special == SPECIAL_TRUCE)
         blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 232, 234, 238, 70);
+    td_draw_ground(g);
+    td_draw_objects(g);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         float fx, fy;
         int tx, ty;
@@ -9805,6 +10441,7 @@ static int game_init(Game *g)
     g->gunner_moving_guns = SDL_LoadBMP(CANVAS_GUNNER_MOVING_BMP);
     g->explosion_atlas = SDL_LoadBMP(CANVAS_EXPLOSION_ATLAS_BMP);
     g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
+    g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -9814,10 +10451,10 @@ static int game_init(Game *g)
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
-            &g->cockpit_revolver, &g->rear_carbine
+            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets
         };
         int i;
-        for (i = 0; i < 15; ++i) if (*convert[i]) {
+        for (i = 0; i < 16; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -9835,9 +10472,10 @@ static int game_init(Game *g)
                                 g->gunner_moving_guns,
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas,
-                                g->cockpit_revolver, g->rear_carbine};
+                                g->cockpit_revolver, g->rear_carbine,
+                                g->topdown_targets};
         int i;
-        for (i = 0; i < 13; ++i) if (keyed[i])
+        for (i = 0; i < 14; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -9883,6 +10521,159 @@ static int game_init(Game *g)
     return 1;
 }
 
+/* ---- Conduct ----------------------------------------------------------- */
+static const char *offence_words(int kind)
+{
+    return kind == CIV_AMBULANCE ? "FIRED ON A MOTOR AMBULANCE" :
+           kind == CIV_OWN_LINE ? "BOMBED OUR OWN FRONT LINE" :
+                                  "FIRED ON CIVILIANS AND THEIR PROPERTY";
+}
+
+/* An office plate: aged paper, a border, a crest of crown and laurel drawn
+ * in ink, and a red rubber stamp. */
+static void draw_office_paper(Game *g, const char *heading, const char *sub,
+                              const char *stamp)
+{
+    SDL_Surface *s = g->screen;
+    pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(140, 34, 26);
+    int k, w;
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
+    rect(s, 96, 30, 460, 344, PIX_PACK(14, 10, 8));
+    rect(s, 90, 24, 460, 344, PIX_PACK(222, 210, 178));
+    blend_rect(s, 90, 24, 460, 344, 180, 150, 90, 40);
+    for (k = 0; k < 9; ++k)                     /* foxing on the old paper */
+        blend_circle(s, 110 + (int)(scene_hash((uint32_t)k * 77u) % 420u),
+                     40 + (int)(scene_hash((uint32_t)k * 131u) % 310u),
+                     6 + k % 5, 150, 112, 60, 40);
+    rect(s, 104, 38, 432, 1, PIX_PACK(150, 120, 80));
+    rect(s, 104, 353, 432, 1, PIX_PACK(150, 120, 80));
+    /* The crest: a crown over a laurel wreath. */
+    for (k = 0; k < 10; ++k) {
+        float a = (float)M_PI * (0.6f + 0.08f * (float)k);
+        ellipse(s, 320 + (int)(cosf(a) * 16.0f), 60 + (int)(sinf(a) * 14.0f),
+                3, 2, ink);
+        ellipse(s, 320 - (int)(cosf(a) * 16.0f), 60 + (int)(sinf(a) * 14.0f),
+                3, 2, ink);
+    }
+    rect(s, 312, 48, 17, 5, ink);
+    fill_triangle(s, 312, 48, 315, 41, 318, 48, ink);
+    fill_triangle(s, 317, 48, 320, 39, 323, 48, ink);
+    fill_triangle(s, 322, 48, 325, 41, 328, 48, ink);
+    w = display_width(heading, 23);
+    display_text(g, 320 - w / 2, 80, heading, 16, 23, ink);
+    w = typewriter_width(sub, 11);
+    typewriter_text(g, 320 - w / 2, 108, sub, 7, 11, red);
+    rect(s, 120, 126, 400, 1, ink);
+    if (stamp) {
+        w = typewriter_width(stamp, 15);
+        rect(s, 372, 318, w + 20, 30, red);
+        rect(s, 375, 321, w + 14, 24, PIX_PACK(222, 204, 170));
+        blend_rect(s, 375, 321, w + 14, 24, 160, 40, 30, 50);
+        typewriter_text(g, 382, 325, stamp, 10, 15, red);
+    }
+}
+
+static void draw_conduct(Game *g)
+{
+    char buf[80];
+    pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(140, 34, 26);
+    int second = g->offences >= 2;
+    draw_office_paper(g, "MEMORANDUM",
+                      "FROM THE OFFICER COMMANDING THE SQUADRON",
+                      "ON THE RECORD");
+    snprintf(buf, sizeof(buf), "TO:    %s N. SEAGOON", rank_short[g->rank & 3]);
+    typewriter_text(g, 124, 140, buf, 7, 11, ink);
+    snprintf(buf, sizeof(buf), "DATE:  %s", mission_date(g));
+    typewriter_text(g, 124, 156, buf, 7, 11, ink);
+    snprintf(buf, sizeof(buf), "YOU ARE REPORTED TO HAVE %s.",
+             offence_words(g->sortie_offence_kind));
+    wrapped_text_limit(g, 124, 182, buf, 56, 16, 1000, 1, ink);
+    typewriter_text(g, 124, 216, "THE MARKINGS WERE PLAIN AND THE ORDERS WERE PLAIN.",
+                    7, 11, ink);
+    if (!second) {
+        typewriter_text(g, 124, 244, "A REPRIMAND IS ENTERED ON YOUR RECORD.",
+                        7, 11, red);
+        typewriter_text(g, 124, 262, "NO RECOMMENDATION FOR AN AWARD WILL BE MADE.",
+                        7, 11, red);
+    } else if (g->rank_penalty > 0 && !g->grounded_next) {
+        typewriter_text(g, 124, 244, "A SECOND OFFENCE. YOU REVERT ONE RANK.",
+                        7, 11, red);
+        typewriter_text(g, 124, 262, "A THIRD WILL BE A COURT MARTIAL.", 7, 11,
+                        red);
+    } else {
+        typewriter_text(g, 124, 244, "A SECOND OFFENCE. YOU ARE GROUNDED", 7, 11,
+                        red);
+        typewriter_text(g, 124, 262, "FOR THE NEXT SORTIE. A THIRD WILL BE A COURT",
+                        7, 11, red);
+        typewriter_text(g, 124, 278, "MARTIAL.", 7, 11, red);
+    }
+    typewriter_text(g, 124, 300, "MAJOR, COMMANDING", 7, 11, ink);
+    typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 378, "ENTER",
+                    7, 11, PIX_PACK(200, 180, 140));
+}
+
+static void draw_court_martial(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(140, 34, 26);
+    char buf[80];
+    if (g->court_martial_stage == 0) {
+        snprintf(buf, sizeof(buf), "HELD IN THE FIELD, %s", mission_date(g));
+        draw_office_paper(g, "GENERAL COURT MARTIAL", buf, "CASHIERED");
+        snprintf(buf, sizeof(buf), "ACCUSED:  %s N. SEAGOON, %s",
+                 rank_short[g->rank & 3], corps_short(g));
+        typewriter_text(g, 124, 140, buf, 7, 11, ink);
+        typewriter_text(g, 124, 164, "CHARGE:   CONDUCT TO THE PREJUDICE OF GOOD", 7,
+                        11, ink);
+        typewriter_text(g, 124, 180, "          ORDER AND MILITARY DISCIPLINE, IN",
+                        7, 11, ink);
+        typewriter_text(g, 124, 196, "          THAT, HAVING BEEN WARNED, HE FIRED",
+                        7, 11, ink);
+        typewriter_text(g, 124, 212, "          A THIRD TIME ON WHAT HE WAS BOUND",
+                        7, 11, ink);
+        typewriter_text(g, 124, 228, "          TO SPARE.", 7, 11, ink);
+        typewriter_text(g, 124, 252, "PLEA:     NOT GUILTY.", 7, 11, ink);
+        typewriter_text(g, 124, 270, "FINDING:  GUILTY.", 7, 11, red);
+        typewriter_text(g, 124, 288, "SENTENCE: TO BE CASHIERED.", 7, 11, red);
+        typewriter_text(g, 124, 304, "CONFIRMED BY THE COMMANDER-IN-CHIEF.", 7, 11,
+                        ink);
+    } else if (g->court_martial_stage == 1) {
+        /* The last page of the diary. */
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
+        if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
+        draw_journal_rules(g);
+        journal_text(g, 110, journal_line_y(JOURNAL_LEFT, 0), "The Last Page",
+                     red);
+        journal_paragraph(g, 110, journal_line_y(JOURNAL_LEFT, 4),
+                          "They took my wings this morning. Tom would not "
+                          "look at me.", 24, ink);
+        journal_paragraph(g, 338, journal_line_y(JOURNAL_RIGHT, 0),
+                          "I was warned, and I did it again. There is no one "
+                          "to blame but the man who writes this.", 25, ink);
+        journal_paragraph(g, 338, journal_line_y(JOURNAL_RIGHT, 10),
+                          "I go home tomorrow on the leave boat, a civilian.",
+                          25, ink);
+    } else {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
+        rect(s, 156, 90, 330, 200, PIX_PACK(16, 12, 10));
+        rect(s, 150, 84, 330, 200, PIX_PACK(222, 210, 178));
+        font_text(g, FONT_NEWS_ITALIC, 166, 108, "The Western Courier", ink);
+        rect(s, 164, 114, 302, 1, ink);
+        font_text(g, FONT_NEWS_HEAD, 315 - font_width(FONT_NEWS_HEAD,
+                  "AIRMAN CASHIERED.") / 2, 146, "AIRMAN CASHIERED.", red);
+        font_text(g, FONT_NEWS_BODY, 166, 176,
+                  "A GENERAL COURT MARTIAL IN FRANCE", ink);
+        font_text(g, FONT_NEWS_BODY, 166, 194,
+                  "HAS SENTENCED AN OFFICER OF THE", ink);
+        font_text(g, FONT_NEWS_BODY, 166, 212,
+                  "FLYING SERVICE TO BE CASHIERED.", ink);
+        font_text(g, FONT_NEWS_BODY, 166, 230,
+                  "THE COURT SAT IN PRIVATE.", ink);
+    }
+    typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 378, "ENTER",
+                    7, 11, PIX_PACK(200, 180, 140));
+}
+
 static void advance_after_debrief(Game *g)
 {
     if (!g->success && g->fatal_sortie && g->lives <= 0) {
@@ -9892,6 +10683,11 @@ static void advance_after_debrief(Game *g)
     else if (!g->success) set_scene(g, SCENE_BRIEFING);
     else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
         ++g->mission;
+        /* Grounded: the squadron flies the next sortie without him. */
+        if (g->grounded_next && g->mission + 1 < MISSIONS_PER_CHAPTER) {
+            ++g->mission;
+            g->grounded_next = 0;
+        }
         apply_story_wingmen(g);
         set_scene(g, SCENE_STORY);
     } else if (g->chapter + 1 >= CHAPTER_COUNT) {
@@ -10007,7 +10803,8 @@ static void handle_event(Game *g, SDL_Event *ev)
         else if (g->scene == SCENE_MENU) {
             static const int start_chapter[6] = {0, 0, 1, 2, 3, 5};
             int pilot;
-            int has_continue = g->has_save && g->saved_lives > 0;
+            int has_continue = g->has_save && g->saved_lives > 0 &&
+                       !g->saved_conduct[4];
             if (g->menu_selection == campaign_menu_count(g) - 1) {
                 int i;
                 g->confirm_overwrite = 0;
@@ -10069,6 +10866,12 @@ static void handle_event(Game *g, SDL_Event *ev)
                     break;
                 }
             }
+            if (g->conduct_pending) {
+                g->conduct_pending = 0;
+                set_scene(g, g->offences >= 3 ? SCENE_COURT_MARTIAL :
+                                                 SCENE_CONDUCT);
+                break;
+            }
             /* The evening Thyne is lost has its own card; no party. */
             if (g->success && !g->mess_done &&
                 !(g->chapter == 4 && g->mission == 8)) {
@@ -10081,6 +10884,23 @@ static void handle_event(Game *g, SDL_Event *ev)
                 break;
             }
             advance_after_debrief(g);
+        } else if (g->scene == SCENE_CONDUCT) {
+            if (SDL_GetTicks() - g->scene_started < 900u) break;
+            if (g->success && !g->mess_done) {
+                g->mess_done = 1;
+                set_scene(g, SCENE_MESS);
+                break;
+            }
+            advance_after_debrief(g);
+        } else if (g->scene == SCENE_COURT_MARTIAL) {
+            if (SDL_GetTicks() - g->scene_started < 900u) break;
+            if (++g->court_martial_stage < 3) {
+                g->scene_started = SDL_GetTicks();
+                g->redraw_static = 1;
+                break;
+            }
+            g->menu_selection = 0;
+            set_scene(g, SCENE_TITLE);
         } else if (g->scene == SCENE_MESS) {
             if (SDL_GetTicks() - g->reveal_started < MESS_LINES * 1100u + 600u) {
                 g->reveal_started = SDL_GetTicks() - 60000u;
@@ -10149,9 +10969,11 @@ int main(int argc, char **argv)
      * starts the game normally on the player's campaign. */
     if (argc > 1) {
         static const char *const qa_modes[] = {
-            "AIRSHIP", "CHAPTER_SUCCESS", "DEATH", "DEBRIEF",
+            "AIRSHIP", "CHAPTER_SUCCESS", "COURTMARTIAL", "DEATH", "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
-            "GUNNER", "HOSPITAL", "NEWS", "SIDE", "TOPDOWN", "TRACERS", "TRUCE",
+            "GUNNER", "HOSPITAL", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN", "TOPMIX",
+            "TRACERS",
+            "TRUCE",
             "UNARMED",
             "UNARMED_GUNNER"
         };
@@ -10176,6 +10998,35 @@ int main(int argc, char **argv)
         reset_sortie(&g);
         g.qa_hold = argv[1][0] != 'T';
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 2 && strcmp(argv[1], "TOPMIX") == 0) {
+        /* TOPMIX n: the first sortie flown with top-down mix n. */
+        int want = atoi(argv[2]), c, m, found = 0;
+        for (c = 0; c < CHAPTER_COUNT && !found; ++c)
+            for (m = 0; m < MISSIONS_PER_CHAPTER && !found; ++m)
+                if (topdown_mix_for(c, m) == want) {
+                    g.chapter = c;
+                    g.mission = m;
+                    found = 1;
+                }
+        reset_sortie(&g);
+        g.qa_hold = 1;
+        g.qa_autopilot = argc > 3;   /* TOPMIX n FLY: the autopilot flies it */
+        set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && (strcmp(argv[1], "REPRIMAND") == 0 ||
+                            strcmp(argv[1], "COURTMARTIAL") == 0)) {
+        /* An ambulance hit on a 1918 convoy sortie: the first offence, or
+         * the third. */
+        g.chapter = 5;
+        g.mission = 0;
+        reset_sortie(&g);
+        g.offences = argv[1][0] == 'C' ? 2 : 0;
+        g.sortie_offences = 1;
+        g.sortie_offence_kind = CIV_AMBULANCE;
+        g.success = 1;
+        count_sortie_in_record(&g);
+        g.career_counted = 1;
+        g.conduct_pending = 0;
+        set_scene(&g, g.offences >= 3 ? SCENE_COURT_MARTIAL : SCENE_CONDUCT);
     } else if (argc > 1 && strcmp(argv[1], "DIARY") == 0) {
         g.qa_diary_all = 1;
         set_scene(&g, SCENE_STORY);
@@ -10331,6 +11182,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_SORTIE || g.scene == SCENE_DEBRIEF ||
             g.scene == SCENE_STORY || g.scene == SCENE_AWARD ||
             g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
+            g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
@@ -10345,6 +11197,8 @@ int main(int argc, char **argv)
             case SCENE_SCRAPBOOK: draw_scrapbook(&g); break;
             case SCENE_DAWN: draw_dawn(&g); break;
             case SCENE_MESS: draw_mess(&g); break;
+            case SCENE_CONDUCT: draw_conduct(&g); break;
+            case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
@@ -10398,6 +11252,7 @@ int main(int argc, char **argv)
     if (g.pilot_cockpit_single) SDL_FreeSurface(g.pilot_cockpit_single);
     if (g.cockpit_revolver) SDL_FreeSurface(g.cockpit_revolver);
     if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
+    if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
