@@ -279,7 +279,9 @@ typedef enum {
     SCENE_DEBRIEF,
     SCENE_EPILOGUE,
     SCENE_AWARD,
-    SCENE_SCRAPBOOK
+    SCENE_SCRAPBOOK,
+    SCENE_DAWN,     /* the hangars before take-off */
+    SCENE_MESS      /* the mess that evening, after a mission won */
 } Scene;
 
 typedef enum {
@@ -525,6 +527,7 @@ typedef struct {
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
     SDL_Surface *cockpit_composite;
+    SDL_Surface *dawn_backdrop;
     SDL_Surface *cockpit_composite_unarmed;
     pix_t *ground_mip[GROUND_MIPS];
     int ground_mips;
@@ -574,6 +577,7 @@ typedef struct {
     int pending_award, pending_rank;
     int career_counted;
     int story_stage;
+    int mess_done;  /* this sortie's evening in the mess has been shown */
     int scrap_index;
     int special;           /* MissionSpecial of the sortie being flown */
     int pudding_delivered; /* Christmas 1914 */
@@ -1564,10 +1568,28 @@ static void journal_text(Game *g, int x, int y, const char *str,
                 x, y, str, color);
 }
 
-static int journal_line_y(int line)
+/* The ruled lines photographed in the journal, left page then right,
+ * measured on the 640x360 painting (they open out a little toward the
+ * foot of the page).  Writing sits on every second rule: the hand is
+ * eleven pixels tall and the rules only ten or eleven apart. */
+#define JOURNAL_LEFT 0
+#define JOURNAL_RIGHT 1
+#define JOURNAL_RULES 20
+#define JOURNAL_LINE_STEP 20    /* two rules */
+static const short journal_rules[2][JOURNAL_RULES] = {
+    {88, 99, 108, 118, 128, 138, 147, 158, 168, 178,
+     188, 199, 210, 220, 231, 242, 253, 264, 275, 287},
+    {85, 96, 106, 115, 125, 135, 145, 155, 165, 175,
+     186, 196, 207, 218, 228, 239, 250, 261, 273, 285}
+};
+
+/* The top of a line of writing whose foot rests on rule n of the page;
+ * n = -2 is the heading, in the unruled margin under the page's top edge. */
+static int journal_line_y(int page, int rule)
 {
-    /* The photographed notebook rules are 17 pixels apart at game size. */
-    return 72 + line * 17;
+    if (rule < 0) return journal_rules[page][0] - 24;
+    if (rule >= JOURNAL_RULES) rule = JOURNAL_RULES - 1;
+    return journal_rules[page][rule] - 11;
 }
 
 static void journal_paragraph(Game *g, int x, int y, const char *str,
@@ -1587,7 +1609,7 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
         if (line_len && line_len + 1 + word_len > columns) {
             line_buf[line_len] = '\0';
             journal_text(g, x, y, line_buf, color);
-            y += 17;
+            y += JOURNAL_LINE_STEP;
             line_len = 0;
         }
         if (line_len) line_buf[line_len++] = ' ';
@@ -1701,7 +1723,30 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         float pad = 0.0f, bass, melody, drums = 0.0f, sample;
         int v;
         a->noise = a->noise * 1664525u + 1013904223u;
-        if (a->scene == SCENE_SORTIE) {
+        if (a->scene == SCENE_DAWN) {
+            /* A cold rotary being swung: two coughs that die, a third
+             * that catches and settles into a rough idle. */
+            float t = (float)a->cue_clock / 11025.0f;
+            float level = 0.0f, hz = 34.0f;
+            float noise_sample = (float)((a->noise >> 16) & 0xffff) /
+                                 32768.0f - 1.0f;
+            if (t > 1.6f && t < 1.95f) level = (1.95f - t) * 2.6f;
+            else if (t > 2.9f && t < 3.3f) level = (3.3f - t) * 2.2f;
+            else if (t > 4.3f) {
+                float run = t - 4.3f;
+                level = run < 0.8f ? run * 1.1f : 0.88f;
+                hz = 30.0f + (run < 2.0f ? run * 7.0f : 14.0f);
+                if (run < 1.6f && ((a->noise >> 13) & 7u) == 0u)
+                    level *= 0.25f;     /* missing on a cylinder or two */
+            }
+            a->engine_phase += hz / 11025.0f;
+            if (a->engine_phase >= 1.0f) a->engine_phase -= 1.0f;
+            a->engine_sub_phase += hz * 0.5f / 11025.0f;
+            if (a->engine_sub_phase >= 1.0f) a->engine_sub_phase -= 1.0f;
+            sample = (triangle_wave(a->engine_phase) * 0.15f +
+                      fast_sin_cycles(a->engine_sub_phase) * 0.10f +
+                      noise_sample * 0.05f) * level;
+        } else if (a->scene == SCENE_SORTIE) {
             float speed = (a->engine_speed - 62.0f) / 80.0f;
             float noise_sample = (float)((a->noise >> 16) & 0xffff) /
                                  32768.0f - 1.0f;
@@ -1883,7 +1928,8 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         /* No synthetic needle ticks or periodic drum impulses here.  The
          * gramophone character is continuous filtering and low-level hiss;
          * rhythmic transients were being heard as an irritating clock tick. */
-        if (a->scene != SCENE_SORTIE && a->music_mood != MUSIC_PIPER) {
+        if (a->scene != SCENE_SORTIE && a->scene != SCENE_DAWN &&
+            a->music_mood != MUSIC_PIPER) {
             /* Narrow-band acoustic horn / shellac response.  This is a
              * continuous filter plus a low bed of surface hiss—not clicks. */
             float filtered;
@@ -2003,7 +2049,7 @@ static int music_mood_for_scene(const Game *g, Scene scene)
     if (scene == SCENE_TITLE || scene == SCENE_MENU ||
         scene == SCENE_SCRAPBOOK) return MUSIC_MARCH;
     if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
-    if (scene == SCENE_AWARD) return MUSIC_MESS;
+    if (scene == SCENE_AWARD || scene == SCENE_MESS) return MUSIC_MESS;
     if (scene == SCENE_DEBRIEF)
         return g->success ? MUSIC_MESS :
                (g->fatal_sortie && g->lives <= 0) ?
@@ -2061,7 +2107,8 @@ static void set_scene(Game *g, Scene scene)
     if (scene == SCENE_STORY)
         g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 :
                          news_index_for(g->chapter, g->mission) >= 0 ? 3 : 2;
-    if (scene == SCENE_STORY || scene == SCENE_AWARD)
+    if (scene == SCENE_STORY || scene == SCENE_AWARD ||
+        scene == SCENE_DAWN || scene == SCENE_MESS)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
     if (scene == SCENE_DEBRIEF && g->mission_save_state == 0)
@@ -2240,6 +2287,7 @@ static void reset_sortie(Game *g)
     const Chapter *chapter = &chapters[g->chapter];
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     g->mission_save_state = 0;
+    g->mess_done = 0;
     g->fatal_sortie = 0;
     g->life_lost_this_sortie = 0;
     g->career_counted = 0;
@@ -5040,6 +5088,154 @@ static void draw_scrapbook(Game *g)
                     PIX_PACK(36, 30, 26));
 }
 
+/* ---- Before and after --------------------------------------------------
+ *
+ * Dawn at the hangars before every sortie: the engine is swung and
+ * coughs, and a few lines of nerves are typed out.  The evening in the
+ * mess after a mission won: the gramophone, toasts, and the day's
+ * victories chalked on the squadron board.  All words are our own. */
+
+static const char *const dawn_lines[CHAPTER_COUNT][3] = {
+    {"MIST ON THE FIELD. THE MECHANICS SWING THE PROPELLER.",
+     "TOM CHECKS THE MAP CASE TWICE. NEITHER OF US EATS.",
+     "NOBODY YET KNOWS WHAT AN AEROPLANE IS FOR."},
+    {"SOMEONE SAYS THE FOKKER CAN FIRE THROUGH ITS PROPELLER.",
+     "I WRITE A LETTER HOME AND LEAVE IT ON MY BED.",
+     "TOM'S HAND RESTS ON THE COWLING FOR A MOMENT."},
+    {"THE GUNS HAVE NOT STOPPED ALL NIGHT.",
+     "WE DO NOT TALK ABOUT THE EMPTY BEDS.",
+     "THE RIGGER TAPS EVERY WIRE AND LISTENS TO IT SING."},
+    {"THREE NEW PILOTS CAME LAST NIGHT. I DID NOT ASK THEIR NAMES.",
+     "THE SQUADRON LEADER WISHES US LUCK AND DOES NOT SMILE.",
+     "MY HANDS WILL NOT KEEP STILL UNTIL THE ENGINE CATCHES."},
+    {"FROST ON THE WINGS. THE RIGGERS SCRAPE IT OFF BY HAND.",
+     "WE HEARD THE TANKS GO UP IN THE DARK.",
+     "TOM SAYS NOTHING. HE HAS SAID NOTHING SINCE THYNE."},
+    {"THE LINE BROKE IN THE NIGHT. THE AERODROME IS PACKING.",
+     "LORRIES ON THE ROAD, ALL OF THEM GOING THE WRONG WAY.",
+     "WE TAKE OFF OVER OUR OWN TENTS."},
+    {"FOR ONCE THE MAPS ARE OUT OF DATE BECAUSE WE ARE WINNING.",
+     "THE BOYS IN THE MESS GET YOUNGER EVERY WEEK.",
+     "I STILL CANNOT EAT BEFORE A PATROL."},
+    {"THEY SAY IT WILL BE OVER ANY DAY NOW.",
+     "NOBODY WANTS TO BE THE LAST.",
+     "TOM SHAKES MY HAND BEFORE I CLIMB IN. HE HAS NEVER DONE THAT."}
+};
+
+static void draw_dawn(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
+    const CampaignMission *mission = &campaign_missions[g->chapter][g->mission];
+    int night = mission->special == SPECIAL_AIRSHIP;
+    int i;
+    char buf[64];
+    if (!g->dawn_backdrop) {
+        SDL_Surface *b = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
+            CANVAS_SCREEN_BITS, s->format->format);
+        if (b) {
+            rect(b, 0, 0, SCREEN_W, SCREEN_H, rgb(b, 14, 18, 30));
+            if (g->title) SDL_BlitSurface(g->title, NULL, b, NULL);
+            /* First light: cold blue over the warm painting, darkest low
+             * down where the text sits. */
+            blend_rect(b, 0, 0, SCREEN_W, SCREEN_H, 18, 26, 48, 120);
+            blend_rect(b, 0, 250, SCREEN_W, SCREEN_H - 250, 8, 10, 18, 170);
+            g->dawn_backdrop = b;
+        }
+    }
+    if (g->dawn_backdrop) SDL_BlitSurface(g->dawn_backdrop, NULL, s, NULL);
+    else rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 14, 18, 30));
+    if (night)
+        blend_rect(s, 0, 0, SCREEN_W, 250, 4, 6, 16, 150);
+    snprintf(buf, sizeof(buf), "%s, %s", night ? "NIGHT" : "DAWN",
+             mission_date(g));
+    typewriter_text(g, 40, 262, buf, 10, 15, PIX_PACK(232, 210, 160));
+    for (i = 0; i < 3; ++i)
+        if (elapsed > 700u + (uint32_t)i * 1500u)
+            typewriter_text(g, 40, 290 + i * 18, dawn_lines[g->chapter][i],
+                            7, 11, PIX_PACK(214, 200, 168));
+    /* The third cough catches. */
+    if (elapsed > 4300u)
+        display_text(g, 470, 254, "CONTACT", 16, 23, PIX_PACK(214, 92, 62));
+    if (elapsed > 1200u)
+        typewriter_text(g, 40, 374, "ENTER - TAKE OFF", 7, 11,
+                        PIX_PACK(200, 180, 140));
+}
+
+#define MESS_LINES 4
+
+static void draw_mess(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
+    const CampaignMission *mission = &campaign_missions[g->chapter][g->mission];
+    uint32_t pick = scene_hash((uint32_t)(g->chapter * 31 + g->mission) * 2654435761u);
+    const char *lines[MESS_LINES];
+    char first[64], board[32];
+    static const char *const toasts[4] = {
+        "ECCLES RAISES HIS GLASS: TO THE MACHINES THAT CAME HOME.",
+        "BLUEBOTTLE STANDS ON A CHAIR AND MAKES A SPEECH NOBODY HEARS.",
+        "TOM SINGS. NOBODY HAS THE HEART TO STOP HIM.",
+        "THE COLONEL LOOKS IN, SAYS WELL DONE, AND LEAVES US TO IT."
+    };
+    static const char *const close_lines[3] = {
+        "THE GRAMOPHONE PLAYS UNTIL THE NEEDLE GIVES OUT.",
+        "SOMEONE OPENS THE LAST BOTTLE FROM THE CHRISTMAS HAMPER.",
+        "WE SING EVERY SONG WE KNOW, AND THEN THE RUDE ONES."
+    };
+    int i, x;
+    if (g->kills > 0)
+        snprintf(first, sizeof(first), "BLUEBOTTLE CHALKS %d MORE ON THE BOARD.",
+                 g->kills);
+    else if (mission->special == SPECIAL_TRUCE)
+        snprintf(first, sizeof(first), "A CHRISTMAS TOAST TO THE MEN ACROSS THE WIRE.");
+    else if (!mission_armed(g))
+        snprintf(first, sizeof(first), "TOM'S PHOTOGRAPHS GO UP ON THE WALL.");
+    else
+        snprintf(first, sizeof(first), "EVERYONE CAME HOME. THAT IS ENOUGH.");
+    lines[0] = "THE MESS, THAT EVENING.";
+    lines[1] = first;
+    lines[2] = toasts[pick & 3u];
+    lines[3] = close_lines[(pick >> 4) % 3u];
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
+    /* Lamplight and the gramophone horn. */
+    blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
+    circle(s, 520, 118, 4, PIX_PACK(255, 220, 130));
+    fill_triangle(s, 560, 210, 620, 170, 620, 250, PIX_PACK(150, 112, 50));
+    rect(s, 540, 206, 30, 16, PIX_PACK(80, 52, 30));
+    /* Bunting strung across the ceiling. */
+    for (x = 0; x < SCREEN_W; x += 40) {
+        uint32_t c = (x / 40) % 3 == 0 ? PIX_PACK(176, 40, 34) :
+                     (x / 40) % 3 == 1 ? PIX_PACK(230, 224, 210) :
+                                         PIX_PACK(40, 60, 128);
+        int sag = 8 - abs((x % 160) - 80) / 10;
+        fill_triangle(s, x, 14 + sag, x + 30, 14 + sag, x + 15, 38 + sag, c);
+    }
+    line(s, 0, 14, SCREEN_W, 14, PIX_PACK(120, 100, 70));
+    /* The squadron board: every victory in chalk, today's in yellow. */
+    rect(s, 40, 64, 300, 196, PIX_PACK(96, 62, 34));
+    rect(s, 48, 72, 284, 180, PIX_PACK(26, 38, 30));
+    typewriter_text(g, 64, 84, "SQUADRON BOARD", 10, 15, PIX_PACK(232, 228, 214));
+    snprintf(board, sizeof(board), "VICTORIES %d", g->victories);
+    typewriter_text(g, 64, 108, board, 7, 11, PIX_PACK(220, 218, 204));
+    for (i = 0; i < g->victories && i < 60; ++i) {
+        int cx = 66 + (i % 15) * 17, cy = 134 + (i / 15) * 26;
+        int today = i >= g->victories - g->kills;
+        uint32_t chalk = today && ((elapsed / 400u) & 1u) ?
+                         PIX_PACK(250, 230, 120) :
+                         today ? PIX_PACK(240, 214, 96) : PIX_PACK(214, 214, 204);
+        line(s, cx, cy, cx, cy + 16, chalk);
+        line(s, cx + 1, cy, cx + 1, cy + 16, chalk);
+    }
+    for (i = 0; i < MESS_LINES; ++i)
+        if (elapsed > 300u + (uint32_t)i * 1100u)
+            typewriter_text(g, 40, 286 + i * 20, lines[i], 7, 11,
+                            i == 0 ? PIX_PACK(214, 92, 62) : PIX_PACK(226, 210, 172));
+    if (elapsed > MESS_LINES * 1100u + 600u)
+        typewriter_text(g, 270, 374, "ENTER", 7, 11, PIX_PACK(200, 180, 140));
+}
+
+
 static void draw_story(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -5060,38 +5256,45 @@ static void draw_story(Game *g)
     }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
-    journal_text(g, 112, journal_line_y(0), "FLIGHT LOG", red);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, -2), "FLIGHT LOG", red);
     snprintf(buf, sizeof(buf), "%s NEDDY SEAGOON", rank_short[g->rank & 3]);
-    journal_text(g, 112, journal_line_y(2), buf, ink);
-    journal_text(g, 112, journal_line_y(3), corps_name(g), ink);
-    journal_text(g, 112, journal_line_y(5), mission_date(g), red);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 0), buf, ink);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 2), corps_name(g), ink);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 4), mission_date(g), red);
     snprintf(buf, sizeof(buf), "CHAPTER %d / MISSION %d",
              g->chapter + 1, g->mission + 1);
-    journal_text(g, 112, journal_line_y(7), buf, ink);
-    journal_paragraph(g, 112, journal_line_y(9), chapter->title, 22, red);
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 6), buf, ink);
+    journal_paragraph(g, 112, journal_line_y(JOURNAL_LEFT, 8), chapter->title,
+                      22, red);
     snprintf(buf, sizeof(buf), "VICTORIES %d", g->victories);
-    journal_text(g, 112, journal_line_y(11), buf, ink);
-    draw_victory_tally(g, 116, journal_line_y(12) + 6, g->victories, ink);
-    journal_text(g, 348, journal_line_y(0), mission->title, red);
-    journal_text(g, 348, journal_line_y(2), mission_mode_name(mission->mode), ink);
-    done = wrapped_text_limit(g, 348, journal_line_y(4), mission->log, 25, 17,
+    journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 12), buf, ink);
+    draw_victory_tally(g, 116, journal_line_y(JOURNAL_LEFT, 14) + 5,
+                       g->victories, ink);
+    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, -2), mission->title, red);
+    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 0),
+                 mission_mode_name(mission->mode), ink);
+    done = wrapped_text_limit(g, 348, journal_line_y(JOURNAL_RIGHT, 2),
+                              mission->log, 25, JOURNAL_LINE_STEP,
                               revealed_letters(g, JOURNAL_LETTERS_PER_SECOND),
                               0, ink);
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
-        journal_text(g, 348, journal_line_y(11), "FLYING WITH:", red);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 12), "FLYING WITH:", red);
         if (wingman_sick(g, 2))
             snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
         else
             snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                      allied_pilot_names[2]);
-        journal_text(g, 348, journal_line_y(12), buf, ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), buf, ink);
         if (g->wingman_health[1] > 0)
-            journal_text(g, 348, journal_line_y(13), allied_pilot_names[1], ink);
+            journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
+                         allied_pilot_names[1], ink);
     } else if (mission->mode == MISSION_GUNNER_3D) {
-        journal_text(g, 348, journal_line_y(11), "REAR COCKPIT:", red);
-        journal_text(g, 348, journal_line_y(12), "TOM AT THE CONTROLS", ink);
-        journal_text(g, 348, journal_line_y(13), "LEWIS GUN READY", ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 12), "REAR COCKPIT:", red);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14),
+                     "TOM AT THE CONTROLS", ink);
+        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
+                     mission_armed(g) ? "LEWIS GUN READY" : "NO GUN ABOARD", ink);
     }
     typewriter_text(g, 348, 374, "ENTER - READ ORDERS", 7, 11,
                     PIX_PACK(226, 206, 166));
@@ -5799,8 +6002,20 @@ static void draw_top_down_sortie(Game *g)
             circle(s, (int)b->x - 1, (int)b->y - body / 2,
                    body / 2, rgb(s, 178, 145, 79));
         } else {
+            /* A round is a short streak along its own line of flight, so
+             * an enemy's aimed burst slants the way it is travelling. */
             uint32_t c = b->enemy ? rgb(s, 255, 107, 53) : rgb(s, 255, 230, 143);
-            rect(s, (int)b->x - 1, (int)b->y - 7, 3, 12, c);
+            uint32_t tip = b->enemy ? rgb(s, 255, 196, 150) : rgb(s, 255, 250, 214);
+            float speed = sqrtf(b->vx * b->vx + b->vy * b->vy);
+            float dx = speed > 0.01f ? b->vx / speed : 0.0f;
+            float dy = speed > 0.01f ? b->vy / speed : -1.0f;
+            int hx = (int)(b->x + dx * 5.0f), hy = (int)(b->y + dy * 5.0f);
+            int tx = (int)(b->x - dx * 7.0f), ty = (int)(b->y - dy * 7.0f);
+            int px = (int)(-dy * 1.5f), py = (int)(dx * 1.5f);
+            line(s, tx, ty, hx, hy, c);
+            line(s, tx + px, ty + py, hx + px, hy + py, c);
+            line(s, tx - px, ty - py, hx - px, hy - py, c);
+            line(s, hx - (int)(dx * 3.0f), hy - (int)(dy * 3.0f), hx, hy, tip);
         }
     }
     draw_explosions(g);
@@ -8875,12 +9090,30 @@ static void handle_event(Game *g, SDL_Event *ev)
             set_scene(g, SCENE_STORY);
         }
         else if (g->scene == SCENE_BRIEFING) {
+            set_scene(g, SCENE_DAWN);
+        } else if (g->scene == SCENE_DAWN) {
+            if (SDL_GetTicks() - g->scene_started < 1200u) break;
             reset_sortie(g);
             set_scene(g, SCENE_SORTIE);
         } else if (g->scene == SCENE_DEBRIEF) {
             if (g->mission_save_state < 0) {
                 g->mission_save_state = 0;
                 if (!save_mission_result(g)) break;
+            }
+            if (g->success && !g->mess_done) {
+                g->mess_done = 1;
+                set_scene(g, SCENE_MESS);
+                break;
+            }
+            if (g->pending_award || g->pending_rank) {
+                set_scene(g, SCENE_AWARD);
+                break;
+            }
+            advance_after_debrief(g);
+        } else if (g->scene == SCENE_MESS) {
+            if (SDL_GetTicks() - g->reveal_started < MESS_LINES * 1100u + 600u) {
+                g->reveal_started = SDL_GetTicks() - 60000u;
+                break;
             }
             if (g->pending_award || g->pending_rank) {
                 set_scene(g, SCENE_AWARD);
@@ -8968,6 +9201,14 @@ int main(int argc, char **argv)
         g.chapter = 2;
         g.mission = 1;
         reset_sortie(&g);
+        set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && (strcmp(argv[1], "UNARMED") == 0 ||
+                            strcmp(argv[1], "UNARMED_GUNNER") == 0)) {
+        /* 1914 from the cockpit or the rear seat: no gun aboard. */
+        g.chapter = 0;
+        g.mission = strcmp(argv[1], "UNARMED") == 0 ? 5 : 2;
+        reset_sortie(&g);
+        g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "DOGFIGHT") == 0) {
         /* Use a durable late-war squadron for visual QA so the direct test
@@ -9077,12 +9318,18 @@ int main(int argc, char **argv)
             merge_joystick_keys(&g, merged);
             keys = merged;
         }
+        /* The dawn scene takes off by itself if nobody presses Enter. */
+        if (g.scene == SCENE_DAWN && SDL_GetTicks() - g.scene_started > 11000u) {
+            reset_sortie(&g);
+            set_scene(&g, SCENE_SORTIE);
+        }
         if (g.scene == SCENE_SORTIE) update_sortie(&g, dt, keys);
         /* The officers' menu is static: it is redrawn only when the selection
          * or prompt changes (redraw_static), not every frame. */
         if (g.scene == SCENE_TITLE ||
             g.scene == SCENE_SORTIE || g.scene == SCENE_DEBRIEF ||
             g.scene == SCENE_STORY || g.scene == SCENE_AWARD ||
+            g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
             g.redraw_static) {
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
@@ -9095,6 +9342,8 @@ int main(int argc, char **argv)
             case SCENE_EPILOGUE: draw_epilogue(&g); break;
             case SCENE_AWARD: draw_award(&g); break;
             case SCENE_SCRAPBOOK: draw_scrapbook(&g); break;
+            case SCENE_DAWN: draw_dawn(&g); break;
+            case SCENE_MESS: draw_mess(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
@@ -9148,6 +9397,7 @@ int main(int argc, char **argv)
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
     if (g.audio.record_data) SDL_free(g.audio.record_data);
     if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
+    if (g.dawn_backdrop) SDL_FreeSurface(g.dawn_backdrop);
     if (g.cockpit_composite_unarmed) SDL_FreeSurface(g.cockpit_composite_unarmed);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
