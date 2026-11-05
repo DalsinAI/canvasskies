@@ -87,11 +87,11 @@ def side_frame(kind, frame):
         # front-and-rear pairs, the far pair a shade behind them; short
         # cabane struts carry the centre section over the front cockpit.
         for x in (40, 50, 66, 76):
-            c.line(R([(x + 1.5, 9.5)])[0], R([(x + 0.5, 28.5)])[0], (60, 44, 30), 1.2)
+            c.line(R([(x + 1.5, 9.5)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.9)
         for x in (38, 48, 64, 74):
-            c.line(R([(x, 9.5)])[0], R([(x - 1, 28.5)])[0], WOOD, 1.7)
+            c.line(R([(x, 9.5)])[0], R([(x - 2, 28.5)])[0], WOOD, 2.6)
         for x in (70, 78):
-            c.line(R([(x, 9.5)])[0], R([(x + 1, 15)])[0], WOOD, 1.4)
+            c.line(R([(x, 9.5)])[0], R([(x - 2, 15)])[0], WOOD, 2.0)
         c.part(R([(8, 9), (16, 9), (20, 17), (8, 18)]), wing, round_=0.8)  # fin
         for k, col in enumerate((BLUE, WHITE, RED)):          # rudder stripes
             c.part(R([(2 + k * 2.4, 10), (4.4 + k * 2.4, 10), (4.4 + k * 2.4, 22),
@@ -115,11 +115,11 @@ def side_frame(kind, frame):
                gloss=0.25, round_=0.8)
         # One bay, a front and rear strut each side, and the cabanes.
         for x in (54, 76):
-            c.line(R([(x + 1.5, 9)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.2)
+            c.line(R([(x + 1.5, 9)])[0], R([(x - 1, 28.5)])[0], (60, 44, 30), 1.9)
         for x in (52, 74):
-            c.line(R([(x, 9)])[0], R([(x - 2, 28.5)])[0], WOOD, 1.8)
+            c.line(R([(x, 9)])[0], R([(x - 2.5, 28.5)])[0], WOOD, 2.7)
         for x in (72, 80):
-            c.line(R([(x, 9)])[0], R([(x + 1, 13.5)])[0], WOOD, 1.4)
+            c.line(R([(x, 9)])[0], R([(x - 2, 13.5)])[0], WOOD, 2.0)
         c.part(R([(6, 8), (16, 8), (22, 17), (6, 19)]), body, round_=1.0)
         for k, col in enumerate((BLUE, WHITE, RED)):
             c.part(R([(2 + k * 2.4, 9), (4.4 + k * 2.4, 9), (4.4 + k * 2.4, 22),
@@ -137,7 +137,7 @@ def side_frame(kind, frame):
                round_=0.4)
         c.part(R([(50, 14), (80, 14), (80, 16.5), (50, 16.5)]), wing,
                gloss=0.25, round_=0.6)             # the shoulder wing
-        c.line(R([(62, 13)])[0], R([(62, 4)])[0], DARK, 1.6)   # the pylon
+        c.line(R([(62, 13)])[0], R([(62, 4)])[0], DARK, 2.4)   # the pylon
         c.line(R([(62, 4)])[0], R([(44, 14)])[0], (60, 56, 50), 0.6)
         c.line(R([(62, 4)])[0], R([(82, 14)])[0], (60, 56, 50), 0.6)
         c.line(R([(68, 36)])[0], R([(50, 16.5)])[0], (60, 56, 50), 0.6)  # landing
@@ -161,10 +161,10 @@ def side_frame(kind, frame):
         c.part(R([(42, 28.5), (78, 28.5), (78, 31.5), (42, 31.5)]),
                LOZENGE[1], gloss=0.2, round_=0.8)
         for x in (74, 80):                         # cabanes
-            c.line(R([(x, 9)])[0], R([(x + 1, 13.5)])[0], DARK, 1.4)
+            c.line(R([(x, 9)])[0], R([(x - 2, 13.5)])[0], DARK, 2.0)
         for x in (52, 72):                         # N-struts
-            c.line(R([(x, 9)])[0], R([(x - 3, 28.5)])[0], DARK, 1.7)
-        c.line(R([(52, 9)])[0], R([(69, 28.5)])[0], DARK, 1.3)
+            c.line(R([(x, 9)])[0], R([(x - 3, 28.5)])[0], DARK, 2.6)
+        c.line(R([(52, 9)])[0], R([(69, 28.5)])[0], DARK, 2.0)
         c.part(R([(6, 9), (16, 9), (22, 18), (6, 20)]), WHITE, round_=1.2)
         cross(c, *R([(12, 14.5)])[0], 4.2)
         cross(c, *R([(40, 21.5)])[0], 4.6)
@@ -200,9 +200,10 @@ def side_frame(kind, frame):
         c.line(R([(x, 17)])[0], R([(x, 25)])[0], (70, 68, 64), 0.4)
     c.line(R([(76, 26.5)])[0], R([(68, 28.5)])[0], (54, 46, 40), 1.0)  # exhaust
     if kind != "mono":
-        top_y, low_y = 8.0, 30.0
-        c.line(R([(40, top_y)])[0], R([(74, low_y)])[0], (64, 60, 56), 0.35)
-        c.line(R([(74, top_y)])[0], R([(40, low_y)])[0], (64, 60, 56), 0.35)
+        # Flying wires from the lower wing root up to the outer strut top,
+        # landing wires from the centre section down to the strut foot.
+        c.line(R([(60, 29.5)])[0], R([(44, 8.5)])[0], (54, 50, 46), 0.6)
+        c.line(R([(70, 9.0)])[0], R([(46, 29.0)])[0], (54, 50, 46), 0.6)
     # Weathering: oil streaks back from the cowling, scuffs on the fabric.
     for k in range(4):
         y = 18 + k * 2.0
