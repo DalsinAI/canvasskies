@@ -9410,26 +9410,53 @@ static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
             }
         }
     }
-    /* Struts, wires, undercarriage, pilot and the spinning propeller. */
-    if (centre.depth < 520.0f) {
-        static const float struts[][6] = {
-            {-5.6f, 1.35f, 0.9f, -5.1f, -0.95f, 0.9f},
-            {5.6f, 1.35f, 0.9f, 5.1f, -0.95f, 0.9f},
-            {-5.6f, 1.35f, -0.4f, -5.1f, -0.95f, -0.4f},
-            {5.6f, 1.35f, -0.4f, 5.1f, -0.95f, -0.4f},
-            {-0.7f, 1.35f, 1.2f, -0.6f, 0.7f, 1.6f},
-            {0.7f, 1.35f, 1.2f, 0.6f, 0.7f, 1.6f},
-            {-0.6f, -0.8f, 2.6f, -0.9f, -2.1f, 2.4f},
-            {0.6f, -0.8f, 2.6f, 0.9f, -2.1f, 2.4f}
-        };
+    /* Struts, wires, undercarriage, pilot and the spinning propeller.  The
+     * struts follow the machine's own rigging and are drawn as lines at
+     * every range, so a distant biplane never shows floating wings. */
+    if (centre.depth < 1600.0f) {
+        float struts[10][6];
+        int count = 0;
         pix_t strut = pix_mix(PIX_PACK(42, 34, 28), g->world_haze, haze);
+        {
+            const MachineType *t = kind == 1 ?
+                &our_machines[our_machine_index(mesh_chapter)] :
+                &their_machines[kind == 3 ? 1 : their_machine_index(mesh_chapter)];
+            float scale = kind == 3 ? 1.5f : 1.0f;
+            float chord = t->chord * 2.0f, gap = t->gap * 1.55f;
+            float up_y = t->monoplane ? 0.35f : gap * 0.58f, low_y = -gap * 0.42f;
+            float up_le = 1.8f + t->stagger * 2.0f, sx = t->span * 0.64f;
+            float fs = up_le - chord * 0.3f, rs = up_le - chord * 0.75f;
+            float st = t->stagger * 2.0f;
+            int side;
+#define STRUT(a, b, c2, d, e, f) do { if (count < 10) { \
+    struts[count][0] = (a) * scale; struts[count][1] = (b) * scale; \
+    struts[count][2] = (c2) * scale; struts[count][3] = (d) * scale; \
+    struts[count][4] = (e) * scale; struts[count][5] = (f) * scale; \
+    ++count; } } while (0)
+            for (side = -1; side <= 1; side += 2) {
+                float x = (float)side * sx;
+                if (t->monoplane) {
+                    STRUT(0.0f, 1.9f, 0.6f, x, up_y, 0.6f);
+                    STRUT(0.0f, -1.6f, 0.9f, x, up_y, 0.6f);
+                } else {
+                    STRUT(x, up_y, fs, x * 0.95f, low_y, fs - st);
+                    STRUT(x, up_y, rs, x * 0.95f, low_y, rs - st);
+                    STRUT((float)side * 0.7f, up_y, fs, (float)side * 0.6f,
+                          0.7f, fs + 0.4f);
+                }
+                STRUT((float)side * 0.6f, -0.8f, 2.6f, (float)side * 0.9f,
+                      -2.1f, 2.4f);
+            }
+            if (t->monoplane) STRUT(0.0f, up_y, 0.6f, 0.0f, 1.9f, 0.6f);
+#undef STRUT
+        }
         Projected3D head = project_world_point(g,
             pose_point(pose, 0.0f, 1.0f, -0.4f));
         Projected3D hub = project_world_point(g,
             pose_point(pose, 0.0f, 0.0f, 4.7f));
         Projected3D tip = project_world_point(g,
             pose_point(pose, 0.0f, 1.3f, 4.7f));
-        for (i = 0; i < 8; ++i) {
+        for (i = 0; i < count; ++i) {
             Projected3D a = project_world_point(g, pose_point(pose,
                 struts[i][0], struts[i][1], struts[i][2]));
             Projected3D b = project_world_point(g, pose_point(pose,
