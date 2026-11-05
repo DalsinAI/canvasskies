@@ -2439,6 +2439,55 @@ static void draw_plane(Game *g, int x, int y, int enemy, int pitch_frame)
     if (SDL_MUSTLOCK(atlas)) SDL_UnlockSurface(atlas);
 }
 
+/* The synchronised gun's muzzle on top of the cowling, just behind the
+ * propeller, in each of the five pitch frames of the 96x48 side-on art.
+ * Our machines face right and frame 0 is nose up; theirs face left and
+ * frame 0 is nose down.  Each frame turns the nose about 3.2 degrees. */
+static const unsigned char side_muzzle[2][5][2] = {
+    {{82, 10}, {83, 12}, {84, 15}, {84, 16}, {85, 18}},
+    {{13, 18}, {13, 16}, {14, 14}, {14, 13}, {14, 12}}
+};
+#define SIDE_PITCH_STEP (3.2f * (float)M_PI / 180.0f)
+
+static int side_pitch_frame(int frame)
+{
+    return frame < 0 ? 0 : frame > 4 ? 4 : frame;
+}
+
+/* Where a side-on machine drawn at (x, y) has its gun muzzle, and the
+ * angle its nose points, radians above the horizontal it faces along. */
+static void side_muzzle_at(int x, int y, int enemy, int frame,
+                           float *mx, float *my, float *nose)
+{
+    frame = side_pitch_frame(frame);
+    *mx = (float)(x - 36) + (float)side_muzzle[enemy][frame][0] * 0.75f;
+    *my = (float)(y - 18) + (float)side_muzzle[enemy][frame][1] * 0.75f;
+    *nose = (float)(enemy ? frame - 2 : 2 - frame) * SIDE_PITCH_STEP;
+}
+
+/* The gun itself, a short dark barrel lying along the nose, with a flash
+ * at the muzzle while it fires. */
+static void draw_side_gun(Game *g, int x, int y, int enemy, int frame,
+                          int firing)
+{
+    SDL_Surface *s = g->screen;
+    float mx, my, nose, dir = enemy ? -1.0f : 1.0f;
+    float ux, uy;
+    side_muzzle_at(x, y, enemy, frame, &mx, &my, &nose);
+    ux = cosf(nose) * dir;
+    uy = -sinf(nose);
+    line(s, (int)(mx - ux * 7.0f), (int)(my - uy * 7.0f), (int)mx, (int)my,
+         rgb(s, 34, 32, 30));
+    line(s, (int)(mx - ux * 7.0f), (int)(my - uy * 7.0f) - 1, (int)mx,
+         (int)my - 1, rgb(s, 70, 66, 58));
+    if (firing) {
+        blend_circle(s, (int)(mx + ux * 3.0f), (int)(my + uy * 3.0f), 5,
+                     255, 214, 120, 200);
+        circle(s, (int)(mx + ux * 2.0f), (int)(my + uy * 2.0f), 1,
+               rgb(s, 255, 250, 220));
+    }
+}
+
 static int terrain_y(float world_x)
 {
     return 358 + (int)(8.0f * sinf(world_x * 0.007f)
@@ -2839,10 +2888,13 @@ static void artillery_fire(Game *g, Target *target, float x, float y,
 static void fire(Game *g)
 {
     uint32_t now = SDL_GetTicks();
+    float mx, my, nose;
     if (g->ammunition <= 0) return;
     if (now - g->last_shot < 130) return;
-    if (new_bullet(g, g->player_x + 34.0f, g->player_y - 1.0f,
-                   390.0f, g->player_vy * 0.12f, 0, 0, 2.0f)) {
+    side_muzzle_at((int)g->player_x, (int)g->player_y, 0,
+                   2 + (int)(g->player_vy / 45.0f), &mx, &my, &nose);
+    if (new_bullet(g, mx, my, 390.0f * cosf(nose),
+                   -390.0f * sinf(nose) + g->player_vy * 0.12f, 0, 0, 2.0f)) {
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = 1700;
@@ -4914,8 +4966,21 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         if (sx < -80) g->enemies[i].active = 0;
         if (sx > g->player_x + 65.0f && sx < SCREEN_W + 20.0f &&
             now - g->enemies[i].last_shot > fire_delay + (uint32_t)(i * 47 % 260)) {
-            aimed_fire(g, sx - 30.0f, sy, shot_speed, 0);
-            g->enemies[i].last_shot = now;
+            /* A scout's guns are fixed: it fires along its nose, so it
+             * holds fire until the nose is within about 15 degrees of us,
+             * and the pilot's last touch of rudder bends the line half way. */
+            float mx, my, nose, aim;
+            side_muzzle_at((int)sx, (int)sy, 1,
+                           2 + (int)(sinf(g->scroll * 0.02f + i) * 1.2f),
+                           &mx, &my, &nose);
+            aim = atan2f(my - g->player_y, mx - g->player_x);
+            if (fabsf(aim - nose) < 0.26f) {
+                float line_of_fire = (aim + nose) * 0.5f;
+                if (new_bullet(g, mx, my, -cosf(line_of_fire) * shot_speed,
+                               -sinf(line_of_fire) * shot_speed, 1, 0, 3.5f))
+                    g->audio.shot = 1700;
+                g->enemies[i].last_shot = now;
+            }
         }
         for (j = 0; j < MAX_BULLETS; ++j) if (g->bullets[j].active) {
             if (!g->bullets[j].enemy && g->bullets[j].type == 0 &&
@@ -8744,7 +8809,11 @@ static void draw_sortie(Game *g)
                 draw_aircraft_smoke(g, sx, sy, health, 1,
                                     0x454e454du + (uint32_t)i * 97u);
             }
-            draw_plane(g, sx, sy, 1, 2 + (int)(sinf(g->scroll * 0.02f + i) * 1.2f));
+            int frame = 2 + (int)(sinf(g->scroll * 0.02f + i) * 1.2f);
+            draw_plane(g, sx, sy, 1, frame);
+            if (mission_armed(g))
+                draw_side_gun(g, sx, sy, 1, frame,
+                              SDL_GetTicks() - g->enemies[i].last_shot < 70u);
         }
     }
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
@@ -8780,6 +8849,9 @@ static void draw_sortie(Game *g)
     {
         int pitch = 2 + (int)(g->player_vy / 45.0f);
         draw_plane(g, (int)g->player_x, (int)g->player_y, 0, pitch);
+        if (mission_armed(g))
+            draw_side_gun(g, (int)g->player_x, (int)g->player_y, 0, pitch,
+                          SDL_GetTicks() - g->last_shot < 60u);
     }
     if (g->shake > 0.0f) {
         uint32_t now = SDL_GetTicks();
