@@ -22,6 +22,22 @@ Current release: **0.1.0-alpha.1**, a playable vertical slice. See
 - Period fonts, painted art and gramophone-style music
 - F9 toggles aspect-correct fullscreen
 
+## Screenshots
+
+Captured from the 68040 Amiga build running on AmigaOS with GFOpenUp, at the
+game's own 640x400.
+
+| | |
+|---|---|
+| ![Title screen](docs/screenshots/title.png) | ![Officers' menu](docs/screenshots/menu.png) |
+| The title screen | The officers' menu: begin the war or join it in any year |
+| ![Chapter card](docs/screenshots/chapter-card.png) | ![Pilot's diary](docs/screenshots/diary.png) |
+| Each chapter opens with its date and title | Neddy Seagoon's flight log, written as you watch |
+| ![Briefing](docs/screenshots/briefing.png) | ![Cockpit dogfight](docs/screenshots/cockpit-dogfight.png) |
+| General Headquarters' orders and the squadron roster | A dogfight from the cockpit, an enemy scout crossing ahead |
+| ![Top-down sortie](docs/screenshots/top-down-sortie.png) | ![Medal award](docs/screenshots/medal-award.png) |
+| A top-down bombing sortie over the trenches | Mentioned in Despatches, by command of the King |
+
 ## Requirements
 
 - AmigaOS 3.x on a 68040 with FPU (or an AmiCradle instance)
