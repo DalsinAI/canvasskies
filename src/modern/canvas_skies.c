@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "canvas_campaign.h"
+#include "canvas_news.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -159,6 +160,25 @@
 #ifndef CANVAS_PIPER_WAV
 #define CANVAS_PIPER_WAV "assets/canvas-skies/amazing-grace-bagpipes.wav"
 #endif
+/* Period gramophone records for the story, diary and briefing of each year. */
+#ifndef CANVAS_TIPPERARY_WAV
+#define CANVAS_TIPPERARY_WAV "assets/canvas-skies/tipperary-gramophone.wav"
+#endif
+#ifndef CANVAS_HOME_FIRES_WAV
+#define CANVAS_HOME_FIRES_WAV "assets/canvas-skies/home-fires-gramophone.wav"
+#endif
+#ifndef CANVAS_KIT_BAG_WAV
+#define CANVAS_KIT_BAG_WAV "assets/canvas-skies/kit-bag-gramophone.wav"
+#endif
+#ifndef CANVAS_HOLYROOD_WAV
+#define CANVAS_HOLYROOD_WAV "assets/canvas-skies/holyrood-gramophone.wav"
+#endif
+#ifndef CANVAS_VOICE_OF_THE_GUNS_WAV
+#define CANVAS_VOICE_OF_THE_GUNS_WAV "assets/canvas-skies/voice-of-the-guns-gramophone.wav"
+#endif
+#ifndef CANVAS_HOLST_WAV
+#define CANVAS_HOLST_WAV "assets/canvas-skies/holst-second-suite-gramophone.wav"
+#endif
 #ifndef CANVAS_SAVE_PATH
 #define CANVAS_SAVE_PATH "PROGDIR:CanvasSkies.save"
 #endif
@@ -255,7 +275,8 @@ typedef enum {
     SCENE_SORTIE,
     SCENE_DEBRIEF,
     SCENE_EPILOGUE,
-    SCENE_AWARD
+    SCENE_AWARD,
+    SCENE_SCRAPBOOK
 } Scene;
 
 typedef enum {
@@ -265,7 +286,8 @@ typedef enum {
     MUSIC_MOURNING,
     MUSIC_ARMISTICE,
     MUSIC_MESS,
-    MUSIC_PIPER
+    MUSIC_PIPER,
+    MUSIC_RECORD
 } MusicMood;
 
 typedef struct {
@@ -283,7 +305,7 @@ typedef struct {
 #define CHAPTER_COUNT 8
 
 static const Chapter chapters[CHAPTER_COUNT] = {
-    {"23 AUGUST 1914", "EYES ABOVE THE MARNE",
+    {"3 SEPTEMBER 1914", "EYES ABOVE THE MARNE",
      {"THE AEROPLANE IS STILL A NOVELTY.", "YOU AND TOM CARRY ONLY A MAP,",
       "A PENCIL, AND THE ARMY'S DOUBT."},
      {"CROSS THE FRONT AND MARK THE COLUMNS.", "KEEP CLEAR OF RIFLE FIRE.",
@@ -432,6 +454,12 @@ typedef struct {
     uint8_t *piper_data;
     uint32_t piper_len;
     uint32_t piper_pos;
+    /* One period record at a time: the chapter's, loaded when it is
+     * first needed, so a 68040 never holds every record at once. */
+    uint8_t *record_data;
+    uint32_t record_len;
+    uint32_t record_pos;
+    int record_track;
     volatile int scene;
     volatile int shot;
     volatile int blast;
@@ -541,6 +569,9 @@ typedef struct {
     int pending_award, pending_rank;
     int career_counted;
     int story_stage;
+    int scrap_index;
+    int special;           /* MissionSpecial of the sortie being flown */
+    int pudding_delivered; /* Christmas 1914 */
     uint32_t reveal_started;
     uint32_t scene_started;
     float player_x;
@@ -638,6 +669,56 @@ static void apply_story_wingmen(Game *g)
         g->wingman_health[pilot] = 100;
     if (g->chapter > 4 || (g->chapter == 4 && g->mission > 8))
         g->wingman_health[1] = 0;
+}
+
+/* The Royal Air Force was formed on 1 April 1918; before that the pilot
+ * belongs to the Royal Flying Corps. */
+static int is_raf(const Game *g)
+{
+    return g->chapter > 5 || (g->chapter == 5 && g->mission >= 2);
+}
+
+static const char *corps_name(const Game *g)
+{
+    return is_raf(g) ? "ROYAL AIR FORCE" : "ROYAL FLYING CORPS";
+}
+
+static const char *corps_short(const Game *g)
+{
+    return is_raf(g) ? "R.A.F." : "R.F.C.";
+}
+
+/* The summer influenza of 1918 keeps Bluebottle in bed for a while. */
+static int wingman_sick(const Game *g, int pilot)
+{
+    return pilot == 2 && g->chapter == 5 && g->mission >= 8;
+}
+
+/* The day of this sortie: the diary date carried by the latest newspaper
+ * of the chapter, or the chapter's own date before the first one. */
+static const char *mission_date(const Game *g)
+{
+    const char *date = chapters[g->chapter].date;
+    int m;
+    for (m = 0; m <= g->mission; ++m) {
+        int n = news_index_for(g->chapter, m);
+        if (n < 0) continue;
+        if (m == g->mission && news_items[n].diary_date)
+            date = news_items[n].diary_date;
+        else
+            date = news_items[n].date;
+    }
+    return date;
+}
+
+/* Cuttings are pasted into the book once the pilot has reached that day. */
+static int news_unlocked(const Game *g, int index)
+{
+    const NewsItem *n = &news_items[index];
+    if (!g->has_save) return 0;
+    if (g->saved_campaign_complete) return 1;
+    return n->chapter < g->saved_chapter ||
+           (n->chapter == g->saved_chapter && n->mission <= g->saved_mission);
 }
 
 static int load_campaign_save_path(Game *g, const char *path)
@@ -916,9 +997,11 @@ static int save_mission_result(Game *g)
     return ok;
 }
 
+/* The new-campaign commissions, any saved campaign, and the cuttings book
+ * which is always the last plaque. */
 static int campaign_menu_count(const Game *g)
 {
-    return (g->has_save && g->saved_lives > 0) ? 7 : 6;
+    return ((g->has_save && g->saved_lives > 0) ? 7 : 6) + 1;
 }
 
 static float gunner_traverse(const Game *g)
@@ -1696,6 +1779,23 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
                           triangle_wave(a->synth_phase[4]) * 0.055f) * phrase;
                 sample += triangle_wave(a->synth_phase[3]) * 0.105f;
             }
+        } else if (a->music_mood == MUSIC_RECORD &&
+                   a->record_data && a->record_len >= 2) {
+            uint32_t total_frames = a->record_len / 2;
+            uint32_t frame = a->record_pos / 2;
+            uint32_t fade_frames = total_frames > 8192 ? 2048 : total_frames / 4;
+            int16_t *music = (int16_t *)(a->record_data + a->record_pos);
+            float music_sample = (float)music[0] / 32768.0f;
+            if (fade_frames > 0 && frame >= total_frames - fade_frames) {
+                uint32_t intro_frame = frame - (total_frames - fade_frames);
+                int16_t *intro = (int16_t *)(a->record_data + intro_frame * 2);
+                float crossfade = (float)intro_frame / (float)fade_frames;
+                music_sample = music_sample * (1.0f - crossfade) +
+                               (float)intro[0] / 32768.0f * crossfade;
+            }
+            sample = music_sample * 0.50f;
+            a->record_pos += 2;
+            if (a->record_pos + 2 > a->record_len) a->record_pos = 0;
         } else if (a->music_mood == MUSIC_PIPER) {
             if (a->piper_data && a->piper_pos + 2 <= a->piper_len) {
                 int16_t *pipes = (int16_t *)(a->piper_data + a->piper_pos);
@@ -1846,10 +1946,48 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
     }
 }
 
+enum {
+    RECORD_NONE = -1,
+    RECORD_TIPPERARY,
+    RECORD_HOME_FIRES,
+    RECORD_KIT_BAG,
+    RECORD_HOLYROOD,
+    RECORD_VOICE_OF_THE_GUNS,
+    RECORD_HOLST,
+    RECORD_COUNT
+};
+
+static const char *const record_paths[RECORD_COUNT] = {
+    CANVAS_TIPPERARY_WAV, CANVAS_HOME_FIRES_WAV, CANVAS_KIT_BAG_WAV,
+    CANVAS_HOLYROOD_WAV, CANVAS_VOICE_OF_THE_GUNS_WAV, CANVAS_HOLST_WAV
+};
+
+/* 1914 Tipperary, 1915 Keep the Home Fires Burning, 1916 Pack Up Your
+ * Troubles, then Holyrood and The Voice of the Guns through 1917 and 1918;
+ * the Armistice chapter has Holst's Second Suite. */
+static const int chapter_records[CHAPTER_COUNT] = {
+    RECORD_TIPPERARY, RECORD_HOME_FIRES, RECORD_KIT_BAG, RECORD_HOLYROOD,
+    RECORD_VOICE_OF_THE_GUNS, RECORD_HOLYROOD, RECORD_VOICE_OF_THE_GUNS,
+    RECORD_HOLST
+};
+
+static int record_for_scene(const Game *g, Scene scene)
+{
+    if (scene == SCENE_EPILOGUE) return RECORD_HOLST;
+    if (scene == SCENE_STORY || scene == SCENE_BRIEFING)
+        return chapter_records[g->chapter];
+    return RECORD_NONE;
+}
+
 static int music_mood_for_scene(const Game *g, Scene scene)
 {
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
-    if (scene == SCENE_TITLE || scene == SCENE_MENU) return MUSIC_MARCH;
+    int record = record_for_scene(g, scene);
+    if (record != RECORD_NONE && g->audio.record_data &&
+        g->audio.record_track == record)
+        return MUSIC_RECORD;
+    if (scene == SCENE_TITLE || scene == SCENE_MENU ||
+        scene == SCENE_SCRAPBOOK) return MUSIC_MARCH;
     if (scene == SCENE_EPILOGUE) return MUSIC_ARMISTICE;
     if (scene == SCENE_AWARD) return MUSIC_MESS;
     if (scene == SCENE_DEBRIEF)
@@ -1872,11 +2010,43 @@ static int thyne_lost_tonight(const Game *g)
     return g->chapter == 4 && g->mission == 9;
 }
 
+static uint8_t *load_mono_wav(const char *path, uint32_t *len_out);
+
+/* Loads the scene's record if another is in memory.  The file is read
+ * while the previous music keeps playing, then the buffers are swapped
+ * under the audio lock and the old record freed, so a scene change never
+ * leaves a gap in the sound. */
+static void prepare_record(Game *g, Scene scene)
+{
+    int record = record_for_scene(g, scene);
+    uint8_t *data, *old;
+    uint32_t len = 0;
+    if (record == RECORD_NONE || !g->audio.device ||
+        record == g->audio.record_track)
+        return;
+    data = load_mono_wav(record_paths[record], &len);
+    if (!data) {
+        fprintf(stderr, "Gramophone record unavailable; using synth: %s\n",
+                SDL_GetError());
+        return;
+    }
+    SDL_LockAudioDevice(g->audio.device);
+    old = g->audio.record_data;
+    g->audio.record_data = data;
+    g->audio.record_len = len;
+    g->audio.record_pos = 0;
+    g->audio.record_track = record;
+    SDL_UnlockAudioDevice(g->audio.device);
+    if (old) SDL_free(old);
+}
+
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    prepare_record(g, scene);
     if (scene == SCENE_STORY)
-        g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 : 2;
+        g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 :
+                         news_index_for(g->chapter, g->mission) >= 0 ? 3 : 2;
     if (scene == SCENE_STORY || scene == SCENE_AWARD)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
@@ -1968,6 +2138,10 @@ static int terrain_y(float world_x)
 static int current_mission_goal(const Game *g)
 {
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    int special = campaign_missions[g->chapter][g->mission].special;
+    if (special == SPECIAL_AIRSHIP) return 1;
+    if (special == SPECIAL_GOTHA) return 2;
+    if (special == SPECIAL_TRUCE) return 0;
     if (is_perspective_mode(mode)) {
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
@@ -2036,6 +2210,10 @@ static int perspective_spawn_count(const Game *g)
     int count;
     if (!is_perspective_mode(mode)) return 0;
     if (!chapters[g->chapter].armed) return 1;
+    if (campaign_missions[g->chapter][g->mission].special == SPECIAL_AIRSHIP)
+        return 1;
+    if (campaign_missions[g->chapter][g->mission].special == SPECIAL_GOTHA)
+        return 3;
     count = mode == MISSION_GUNNER_3D ? goal + 2 : goal;
     if (count > MAX_ENEMIES) count = MAX_ENEMIES;
     return count;
@@ -2197,6 +2375,37 @@ static void reset_sortie(Game *g)
         g->targets[i].last_shot = 0;
         g->targets[i].next_round = 0;
         g->targets[i].burst_left = 0;
+    }
+    g->special = campaign_missions[g->chapter][g->mission].special;
+    g->pudding_delivered = 0;
+    if (g->special == SPECIAL_TRUCE) {
+        /* Two gatherings in no man's land, then their aerodrome. */
+        for (i = 0; i < MAX_TARGETS; ++i)
+            g->targets[i].type = i < 2 ? 3 : 4;
+        g->bombs_remaining = 1;
+        g->ammunition = 0;
+    } else if (g->special == SPECIAL_AIRSHIP ||
+               g->special == SPECIAL_GOTHA) {
+        int airship = g->special == SPECIAL_AIRSHIP;
+        for (i = 0; i < MAX_ENEMIES; ++i) {
+            Enemy *e = &g->enemies[i];
+            if (!e->active) continue;
+            /* They hold their course for the city and do not dogfight. */
+            e->world_x = airship ? -700.0f : -520.0f + (float)i * 70.0f;
+            e->world_y = airship ? 820.0f : 700.0f + (float)i * 12.0f;
+            e->world_z = airship ? 1300.0f : 900.0f + (float)(i & 1) * 60.0f;
+            e->heading = (float)M_PI * 0.5f;
+            e->speed = airship ? 40.0f : 70.0f;
+            e->throttle = 0.6f;
+            e->hp = airship ? 14 : 7;
+            e->max_hp = e->hp;
+            e->ai_state = AI_FORMATION;
+            flight_state_init(&e->flight, e->heading, 0.0f, 0.0f,
+                              e->speed * 0.44704f, e->throttle);
+        }
+        snprintf(g->notice, sizeof(g->notice), "%s",
+                 airship ? "NIGHT OVER ESSEX" : "OVER THE THAMES");
+        g->notice_until = SDL_GetTicks() + 4000u;
     }
 }
 
@@ -2919,8 +3128,8 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             g->audio.shot = 1500;
         }
     }
-    if (chapters[g->chapter].armed && g->bombs_remaining > 0 &&
-        keys[SDL_SCANCODE_B] &&
+    if ((chapters[g->chapter].armed || g->special == SPECIAL_TRUCE) &&
+        g->bombs_remaining > 0 && keys[SDL_SCANCODE_B] &&
         now - g->last_bomb >= 650u) {
         if (new_bullet(g, g->player_x, g->player_y - 4.0f,
                        0.0f, 42.0f, 0, 1, 1.12f)) {
@@ -2935,8 +3144,10 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
         b->y += b->vy * dt;
         b->life -= dt;
         if (!b->enemy && b->type == 1 && b->life <= 0.0f) {
-            new_ground_explosion(g, b->x, b->y, 2);
-            g->audio.blast = 7000;
+            if (g->special != SPECIAL_TRUCE) {
+                new_ground_explosion(g, b->x, b->y, 2);
+                g->audio.blast = 7000;
+            }
             b->active = 0;
         } else if (b->life <= 0.0f || b->y < -30.0f || b->y > SCREEN_H + 30.0f) {
             b->active = 0;
@@ -2956,7 +3167,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
         float sx, sy;
         top_down_target_position(g, i, &sx, &sy);
         if (sy > 18.0f && sy < SCREEN_H - 12.0f) {
-            if (target->type != 2 &&
+            if (target->type < 2 && g->special != SPECIAL_TRUCE &&
                 now - target->last_shot > 1600u + (uint32_t)(i * 97 % 620)) {
                 aimed_fire(g, sx, sy, target->type ? 185.0f : 235.0f, 0);
                 target->last_shot = now;
@@ -2967,6 +3178,16 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                 if (fabsf(b->x - sx) < (b->type == 1 ? 38.0f : 18.0f) &&
                     fabsf(b->y - sy) < (b->type == 1 ? 38.0f : 20.0f)) {
                     if (b->type == 1 && b->life > 0.30f) continue;
+                    if (target->type == 3) continue;
+                    if (target->type == 4) {
+                        /* Christmas pudding, compliments of the mess. */
+                        if (b->type == 1 && !g->pudding_delivered) {
+                            g->pudding_delivered = 1;
+                            g->score += 1000;
+                            b->active = 0;
+                        }
+                        continue;
+                    }
                     target->active = 0;
                     b->active = 0;
                     ++g->objectives;
@@ -3411,7 +3632,26 @@ static void update_rounds(Game *g, float dt)
                 Vec3 c;
                 if (!enemy->active || enemy->crashing) continue;
                 c = (Vec3){enemy->world_x, enemy->world_y, enemy->world_z};
-                if (segment_sphere_distance(r->p, next, c) < ENEMY_HIT_RADIUS) {
+                if (g->special == SPECIAL_AIRSHIP) {
+                    /* A long hull: test three points along it. */
+                    float hx = sinf(enemy->heading) * 24.0f;
+                    float hz = cosf(enemy->heading) * 24.0f;
+                    int k, struck = 0;
+                    for (k = -1; k <= 1 && !struck; ++k) {
+                        Vec3 at = {c.x + hx * (float)k, c.y, c.z + hz * (float)k};
+                        if (segment_sphere_distance(r->p, next, at) < 11.0f)
+                            struck = 1;
+                    }
+                    if (struck) {
+                        damage_enemy(g, enemy, c, r->owner == 0);
+                        r->active = 0;
+                        break;
+                    }
+                    continue;
+                }
+                if (segment_sphere_distance(r->p, next, c) <
+                    (g->special == SPECIAL_GOTHA ? ENEMY_HIT_RADIUS * 1.6f :
+                                                   ENEMY_HIT_RADIUS)) {
                     damage_enemy(g, enemy, c, r->owner == 0);
                     r->active = 0;
                     break;
@@ -3566,7 +3806,7 @@ static void reset_wingmen(Game *g)
     for (i = 0; i < 3; ++i) {
         Enemy *w = &g->wingmen[i];
         Vec3 at;
-        if (g->wingman_health[i] <= 0) continue;
+        if (g->wingman_health[i] <= 0 || wingman_sick(g, i)) continue;
         at = pose_point(&pose, offset[i][0], offset[i][1], offset[i][2]);
         w->world_x = at.x; w->world_y = at.y; w->world_z = at.z;
         w->heading = g->flight_heading;
@@ -3699,6 +3939,15 @@ static void enemy_think(Game *g, Enemy *enemy, int index, float dt,
     *max_bank = flight_clamp(0.7f + skill * 0.5f, 0.7f, 1.25f);
     *distance_to_player = player_distance;
     enemy->ai_timer -= dt;
+    if (g->special == SPECIAL_AIRSHIP || g->special == SPECIAL_GOTHA) {
+        /* Raiders hold their course for London whatever happens. */
+        *heading = (float)M_PI * 0.5f +
+                   (g->special == SPECIAL_GOTHA ?
+                    sinf(g->scroll * 0.001f + enemy->phase) * 0.06f : 0.0f);
+        *pitch = 0.0f;
+        *max_bank = 0.3f;
+        return;
+    }
     if (enemy->target >= 0 && (enemy->target > 2 ||
         !g->wingmen[enemy->target].active ||
         g->wingmen[enemy->target].ai_state == AI_HOMEWARD))
@@ -3769,6 +4018,17 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
     Vec3 target_v = aircraft_velocity(&g->flight);
     int ace = index == 0 && g->chapter >= 3;
     float distance, chance, cooldown;
+    if (g->special == SPECIAL_AIRSHIP) return;
+    if (g->special == SPECIAL_GOTHA) {
+        /* The rear gunner covers the tail of the bomber. */
+        distance = vec3_length(vec3_sub(target, me));
+        if (now - g->scene_started < 5200u || now < enemy->last_shot ||
+            now - enemy->last_shot < 1400u + (uint32_t)(index * 211 % 500) ||
+            distance > 450.0f || off_nose(enemy, target) < 1.9f) return;
+        enemy_burst(g, enemy, target, target_v, -1,
+                    0.28f * (1.0f - distance / 520.0f));
+        return;
+    }
     if (!chapters[g->chapter].armed || enemy->ai_state != AI_ATTACK ||
         now - g->scene_started < 5200u || now < enemy->last_shot) return;
     if (enemy->target >= 0) {
@@ -4435,7 +4695,9 @@ static void draw_campaign_menu(Game *g)
     for (i = 0; i < count; ++i) {
         const char *label;
         char continued[64];
-        if (has_continue && i == 0) {
+        if (i == count - 1) {
+            label = "THE BOOK OF PRESS CUTTINGS";
+        } else if (has_continue && i == 0) {
             if (g->saved_campaign_complete)
                 snprintf(continued, sizeof(continued),
                          "WAR RECORD COMPLETE - VIEW ARMISTICE");
@@ -4448,8 +4710,8 @@ static void draw_campaign_menu(Game *g)
             int new_index = i - (has_continue ? 1 : 0);
             label = new_campaign_items[new_index];
         }
-        draw_victorian_plaque(g, 128, 112 + i * 31, 384, label,
-                              i == g->menu_selection);
+        draw_victorian_plaque(g, 128, 112 + i * (count > 7 ? 28 : 31), 384,
+                              label, i == g->menu_selection);
     }
     if (g->confirm_overwrite) {
         blend_rect(s, 106, 69, 428, 266, 5, 7, 10, 170);
@@ -4592,7 +4854,10 @@ static void draw_chapter_card(Game *g)
     const Chapter *chapter = &chapters[g->chapter];
     uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
     char year[8];
-    size_t len = strlen(chapter->date);
+    /* The day of the chapter's first sortie, so the card never runs
+     * ahead of the newspaper and diary that follow it. */
+    const char *date = mission_date(g);
+    size_t len = strlen(date);
     int fade;
     rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(10, 8, 8));
     if (g->dogfight_background) {
@@ -4608,7 +4873,7 @@ static void draw_chapter_card(Game *g)
     }
     blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 8, 6, 6, 110);
     blend_rect(s, 0, 110, SCREEN_W, 170, 8, 6, 6, 120);
-    snprintf(year, sizeof(year), "%s", len >= 4 ? chapter->date + len - 4 : "");
+    snprintf(year, sizeof(year), "%s", len >= 4 ? date + len - 4 : "");
     if (elapsed > 500u)
         display_text(g, 320 - 2 * 36, 124, year, 36, 42,
                      PIX_PACK(236, 214, 160));
@@ -4618,8 +4883,8 @@ static void draw_chapter_card(Game *g)
                      PIX_PACK(214, 92, 62));
     }
     if (elapsed > 2000u) {
-        int w = (int)strlen(chapter->date) * 10;
-        typewriter_text(g, 320 - w / 2, 230, chapter->date, 10, 15,
+        int w = (int)strlen(date) * 10;
+        typewriter_text(g, 320 - w / 2, 230, date, 10, 15,
                         PIX_PACK(226, 206, 166));
     }
     if (elapsed > 2800u)
@@ -4665,6 +4930,98 @@ static void draw_loss_card(Game *g)
                         PIX_PACK(200, 180, 140));
 }
 
+/* Grey bars standing in for the columns of small print. */
+static void draw_newsprint(SDL_Surface *s, int x, int y, int w, int lines,
+                           uint32_t seed, uint32_t colour)
+{
+    int i;
+    for (i = 0; i < lines; ++i) {
+        uint32_t h = scene_hash(seed + (uint32_t)i * 2654435761u);
+        int len = i % 7 == 6 ? w / 3 + (int)(h % (uint32_t)(w / 3)) :
+                  w - (int)(h % 14u);
+        rect(s, x, y + i * 6, len, 2, colour);
+    }
+}
+
+/* A front page of the morning paper. */
+static void draw_newspaper(Game *g, int index, const char *footer)
+{
+    SDL_Surface *s = g->screen;
+    const NewsItem *n = &news_items[index];
+    uint32_t ink = PIX_PACK(36, 30, 26);
+    uint32_t red = PIX_PACK(128, 36, 28);
+    uint32_t grey = PIX_PACK(150, 140, 120);
+    uint32_t paper = PIX_PACK(222, 210, 178);
+    int len, w, i;
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
+    rect(s, 36, 20, 580, 372, PIX_PACK(16, 12, 10));
+    rect(s, 30, 14, 580, 372, paper);
+    blend_rect(s, 30, 14, 580, 372, 180, 150, 90, 40);
+    w = (int)strlen(NEWS_MASTHEAD) * 22;
+    display_text(g, 320 - w / 2, 22, NEWS_MASTHEAD, 22, 28, ink);
+    rect(s, 44, 56, 552, 2, ink);
+    typewriter_text(g, 46, 61, "PRICE ONE PENNY", 7, 11, ink);
+    len = (int)strlen(n->date);
+    typewriter_text(g, 594 - len * 7, 61, n->date, 7, 11, ink);
+    rect(s, 44, 75, 552, 1, ink);
+    rect(s, 44, 78, 552, 1, ink);
+    len = (int)strlen(n->headline);
+    if (len * 16 <= 548) {
+        display_text(g, 320 - len * 8, 86, n->headline, 16, 23, red);
+    } else {
+        display_text(g, 320 - len * 6, 90, n->headline, 12, 18, red);
+    }
+    rect(s, 44, 116, 552, 1, ink);
+    for (i = 0; i < 3; ++i)
+        if (n->body[i])
+            typewriter_text(g, 50, 126 + i * 17, n->body[i], 7, 11, ink);
+    /* Three columns of the rest of the day's news. */
+    for (i = 0; i < 3; ++i) {
+        int cx = 50 + i * 184;
+        draw_newsprint(s, cx, 188, 168, 18, (uint32_t)index * 97u + (uint32_t)i,
+                       grey);
+        if (i < 2) rect(s, cx + 176, 184, 1, 112, grey);
+    }
+    rect(s, 44, 300, 552, 1, ink);
+    typewriter_text(g, 50, 306, "IN BRIEF", 7, 11, red);
+    if (n->brief[0]) typewriter_text(g, 50, 324, n->brief[0], 7, 11, ink);
+    if (n->brief[1]) typewriter_text(g, 330, 324, n->brief[1], 7, 11, ink);
+    rect(s, 320, 304, 1, 36, grey);
+    rect(s, 44, 344, 552, 1, ink);
+    if (footer)
+        typewriter_text(g, 320 - (int)strlen(footer) * 7 / 2, 356, footer,
+                        7, 11, red);
+}
+
+static void draw_scrapbook(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    char buf[48];
+    int i, total = 0, place = 0;
+    for (i = 0; i < NEWS_COUNT; ++i)
+        if (news_unlocked(g, i)) {
+            ++total;
+            if (i <= g->scrap_index) ++place;
+        }
+    if (!total) {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
+        rect(s, 140, 150, 360, 90, PIX_PACK(222, 210, 178));
+        display_text(g, 320 - 15 * 6, 168, "NO CUTTINGS YET", 12, 18,
+                     PIX_PACK(128, 36, 28));
+        typewriter_text(g, 320 - 30 * 7 / 2, 200,
+                        "FLY A SORTIE TO BEGIN THE BOOK", 7, 11,
+                        PIX_PACK(36, 30, 26));
+        typewriter_text(g, 320 - 11 * 7 / 2, 220, "ENTER  BACK", 7, 11,
+                        PIX_PACK(36, 30, 26));
+        return;
+    }
+    draw_newspaper(g, g->scrap_index,
+                   "LEFT / RIGHT  TURN THE PAGE    ENTER  BACK");
+    snprintf(buf, sizeof(buf), "CUTTING %d OF %d", place, total);
+    typewriter_text(g, 320 - (int)strlen(buf) * 7 / 2, 372, buf, 7, 11,
+                    PIX_PACK(36, 30, 26));
+}
+
 static void draw_story(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -4676,13 +5033,20 @@ static void draw_story(Game *g)
     int done;
     if (g->story_stage == 0) { draw_chapter_card(g); return; }
     if (g->story_stage == 1) { draw_loss_card(g); return; }
+    if (g->story_stage == 3) {
+        int n = news_index_for(g->chapter, g->mission);
+        if (n >= 0) {
+            draw_newspaper(g, n, "ENTER - READ THE DIARY");
+            return;
+        }
+    }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
     journal_text(g, 112, journal_line_y(0), "FLIGHT LOG", red);
     snprintf(buf, sizeof(buf), "%s NEDDY SEAGOON", rank_short[g->rank & 3]);
     journal_text(g, 112, journal_line_y(2), buf, ink);
-    journal_text(g, 112, journal_line_y(3), "ROYAL FLYING CORPS", ink);
-    journal_text(g, 112, journal_line_y(5), chapter->date, red);
+    journal_text(g, 112, journal_line_y(3), corps_name(g), ink);
+    journal_text(g, 112, journal_line_y(5), mission_date(g), red);
     snprintf(buf, sizeof(buf), "CHAPTER %d / MISSION %d",
              g->chapter + 1, g->mission + 1);
     journal_text(g, 112, journal_line_y(7), buf, ink);
@@ -4698,8 +5062,11 @@ static void draw_story(Game *g)
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
         journal_text(g, 348, journal_line_y(11), "FLYING WITH:", red);
-        snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
-                 allied_pilot_names[2]);
+        if (wingman_sick(g, 2))
+            snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
+        else
+            snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
+                     allied_pilot_names[2]);
         journal_text(g, 348, journal_line_y(12), buf, ink);
         if (g->wingman_health[1] > 0)
             journal_text(g, 348, journal_line_y(13), allied_pilot_names[1], ink);
@@ -4764,8 +5131,8 @@ static void draw_award(Game *g)
     if (index >= 0) draw_medal(s, 140, 150, &decorations[index]);
     {
         char who[48];
-        snprintf(who, sizeof(who), "%s N. SEAGOON, R.F.C.",
-                 rank_short[g->rank & 3]);
+        snprintf(who, sizeof(who), "%s N. SEAGOON, %s",
+                 rank_short[g->rank & 3], corps_short(g));
         typewriter_text(g, 200, 150, who, 7, 11, red);
     }
     if (wrapped_text_limit(g, 200, 172, award_citation(g), 46, 16,
@@ -4793,9 +5160,11 @@ static void draw_squadron_roster(Game *g)
     for (i = 0; i < 3; ++i) {
         y += 15;
         snprintf(buf, sizeof(buf), "%-14s %s", allied_pilot_names[i],
-                 g->wingman_health[i] > 0 ? "FIT" : "LOST");
+                 g->wingman_health[i] <= 0 ? "LOST" :
+                 wingman_sick(g, i) ? "SICK" : "FIT");
         typewriter_text(g, 410, y, buf, 7, 11,
-                        g->wingman_health[i] > 0 ? ink : red);
+                        g->wingman_health[i] > 0 && !wingman_sick(g, i) ?
+                        ink : red);
     }
     y += 15;
     typewriter_text(g, 410, y, "TOM           OBSERVER", 7, 11, ink);
@@ -4819,7 +5188,19 @@ static void draw_briefing(Game *g)
     uint32_t red = rgb(s, 125, 39, 31);
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
-    if (mission->mode == MISSION_TOP_DOWN) {
+    if (mission->special == SPECIAL_TRUCE) {
+        order0 = "FLY THE LINE ON CHRISTMAS DAY.";
+        order1 = "NOBODY IS TO FIRE A SHOT TODAY.";
+        order2 = "THE MESS SENDS A PUDDING TO THEIR FIELD.";
+    } else if (mission->special == SPECIAL_AIRSHIP) {
+        order0 = "NIGHT PATROL OVER ESSEX.";
+        order1 = "FIND THE AIRSHIP IN THE SEARCHLIGHTS.";
+        order2 = "BRING IT DOWN BEFORE IT REACHES LONDON.";
+    } else if (mission->special == SPECIAL_GOTHA) {
+        order0 = "GOTHA BOMBERS ARE OVER THE THAMES.";
+        order1 = "BREAK UP THE FORMATION BEFORE THE CITY.";
+        order2 = "MIND THEIR REAR GUNNERS.";
+    } else if (mission->mode == MISSION_TOP_DOWN) {
         order0 = "FOLLOW THE MARKED MAP GRID.";
         order1 = "OBSERVE OR BOMB THE ASSIGNED SECTOR.";
         order2 = "RETURN ALONE WITH YOUR REPORT.";
@@ -4865,6 +5246,9 @@ static void draw_briefing(Game *g)
                         is_perspective_mode(mission->mode) ?
                         "              RETURN ALIVE" :
                         "B           DROP BOMB", 7, 11, ink);
+    } else if (mission->special == SPECIAL_TRUCE) {
+        typewriter_text(g, 73, 237, "B           DROP THE PUDDING", 7, 11, ink);
+        typewriter_text(g, 73, 253, "NO GUNS ON CHRISTMAS DAY", 7, 11, red);
     } else {
         typewriter_text(g, 73, 237, "NO ARMAMENT FITTED", 7, 11, red);
         typewriter_text(g, 73, 253, "OBSERVE AND RETURN", 7, 11, ink);
@@ -5270,6 +5654,37 @@ static void draw_top_target(Game *g, int x, int y, Target *target)
     uint32_t earth = rgb(s, 74, 58, 39);
     uint32_t iron = rgb(s, 47, 48, 42);
     uint32_t sand = rgb(s, 139, 112, 73);
+    if (target->type == 3) {
+        /* Men of both armies out between the wire, and a football. */
+        float t = (float)SDL_GetTicks() * 0.0016f + (float)x;
+        int k;
+        for (k = 0; k < 14; ++k) {
+            uint32_t h = scene_hash((uint32_t)(k * 7919 + x));
+            int dx = (int)(h % 90u) - 45, dy = (int)((h >> 8) % 40u) - 20;
+            uint32_t coat = (k & 1) ? rgb(s, 120, 104, 66) : rgb(s, 104, 110, 100);
+            dx += (int)(sinf(t * 0.7f + (float)k) * 3.0f);
+            circle(s, x + dx, y + dy, 3, coat);
+            circle(s, x + dx, y + dy - 1, 1, rgb(s, 214, 180, 150));
+        }
+        circle(s, x + (int)(sinf(t) * 26.0f), y + (int)(cosf(t * 1.3f) * 9.0f),
+               2, rgb(s, 236, 230, 214));
+        return;
+    }
+    if (target->type == 4) {
+        /* The enemy aerodrome: two sheds and their machines. */
+        rect(s, x - 46, y - 30, 40, 20, rgb(s, 96, 74, 50));
+        rect(s, x + 6, y - 30, 40, 20, rgb(s, 96, 74, 50));
+        rect(s, x - 44, y - 28, 36, 3, rgb(s, 130, 104, 72));
+        rect(s, x + 8, y - 28, 36, 3, rgb(s, 130, 104, 72));
+        draw_top_plane(s, x - 30, y + 18, 1);
+        draw_top_plane(s, x + 32, y + 22, 1);
+        if (g->pudding_delivered) {
+            circle(s, x, y + 2, 6, rgb(s, 70, 40, 24));
+            circle(s, x, y - 1, 3, rgb(s, 236, 232, 220));
+            circle(s, x + 1, y - 3, 1, rgb(s, 170, 30, 30));
+        }
+        return;
+    }
     if (target->type == 2) {
         /* Moving road convoy, seen from directly above. */
         rect(s, x - 19, y - 8, 38, 16, rgb(s, 38, 36, 29));
@@ -5342,6 +5757,8 @@ static void draw_top_down_sortie(Game *g)
             line(s, 0, sy + 6, SCREEN_W, sy + 24, trench);
         }
     }
+    if (g->special == SPECIAL_TRUCE)
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 232, 234, 238, 70);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         float fx, fy;
         int tx, ty;
@@ -5381,13 +5798,21 @@ static void draw_top_down_sortie(Game *g)
     }
     snprintf(buf, sizeof(buf), "SCORE %05d", g->score);
     draw_field_sign(g, 8, 8, 112, buf);
-    snprintf(buf, sizeof(buf), "TARGETS %d/%d", g->objectives,
-             current_mission_goal(g));
-    draw_field_sign(g, 8, 39, 112, buf);
-    snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
-    draw_field_sign(g, 264, 8, 108, buf);
-    snprintf(buf, sizeof(buf), "BOMBS %02d", g->bombs_remaining);
-    draw_field_sign(g, 264, 39, 108, buf);
+    if (g->special == SPECIAL_TRUCE) {
+        draw_field_sign(g, 8, 39, 112, "CHRISTMAS");
+        draw_field_sign(g, 232, 8, 172,
+                        g->pudding_delivered ? "PUDDING DELIVERED" :
+                        g->bombs_remaining ? "PUDDING ABOARD" :
+                                             "PUDDING MISSED");
+    } else {
+        snprintf(buf, sizeof(buf), "TARGETS %d/%d", g->objectives,
+                 current_mission_goal(g));
+        draw_field_sign(g, 8, 39, 112, buf);
+        snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
+        draw_field_sign(g, 264, 8, 108, buf);
+        snprintf(buf, sizeof(buf), "BOMBS %02d", g->bombs_remaining);
+        draw_field_sign(g, 264, 39, 108, buf);
+    }
     snprintf(buf, sizeof(buf), "FUEL %02d", (int)g->fuel);
     draw_field_sign(g, 526, 8, 106, buf);
     snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
@@ -6656,16 +7081,80 @@ static void build_aircraft_mesh(AircraftMesh *m, int allied)
     m->parent_for_new = -1;
 }
 
-static const AircraftMesh *aircraft_mesh(int allied)
+/* A raiding airship: an eight-sided hull, four fins and a gondola. */
+static void build_airship_mesh(AircraftMesh *m)
 {
-    static AircraftMesh meshes[2];
-    static int built[2];
-    allied = allied ? 1 : 0;
-    if (!built[allied]) {
-        build_aircraft_mesh(&meshes[allied], allied);
-        built[allied] = 1;
+    static const float ring_z[5] = {30.0f, 20.0f, 0.0f, -20.0f, -30.0f};
+    static const float ring_r[5] = {2.5f, 7.0f, 8.0f, 6.5f, 1.8f};
+    int ring[5][8], q[8], r, k;
+    memset(m, 0, sizeof(*m));
+    m->parent_for_new = -1;
+    for (r = 0; r < 5; ++r)
+        for (k = 0; k < 8; ++k) {
+            /* Clockwise seen from the bow, like the scout fuselage, so
+             * the outer faces are the front faces. */
+            float a = -(float)k * (float)M_PI / 4.0f;
+            ring[r][k] = mesh_vertex(m, cosf(a) * ring_r[r],
+                                     sinf(a) * ring_r[r], ring_z[r]);
+        }
+    for (r = 0; r < 4; ++r)
+        for (k = 0; k < 8; ++k) {
+            int n = (k + 1) & 7;
+            q[0] = ring[r][k]; q[1] = ring[r][n];
+            q[2] = ring[r + 1][n]; q[3] = ring[r + 1][k];
+            mesh_face(m, 4, q, (k == 1 || k == 2) ? MAT_BODY_DARK : MAT_BODY,
+                      0, 0, 0.0f);
+        }
+    for (k = 0; k < 8; ++k) q[k] = ring[0][7 - k];
+    mesh_face(m, 8, q, MAT_METAL, 0, 0, 0.0f);
+    for (k = 0; k < 8; ++k) q[k] = ring[4][k];
+    mesh_face(m, 8, q, MAT_BODY, 0, 0, 0.0f);
+    /* Cruciform tail fins. */
+    for (k = 0; k < 4; ++k) {
+        float ax = k == 0 ? 1.0f : k == 2 ? -1.0f : 0.0f;
+        float ay = k == 1 ? 1.0f : k == 3 ? -1.0f : 0.0f;
+        q[0] = mesh_vertex(m, ax * 3.0f, ay * 3.0f, -29.0f);
+        q[1] = mesh_vertex(m, ax * 6.0f, ay * 6.0f, -18.0f);
+        q[2] = mesh_vertex(m, ax * 10.0f, ay * 10.0f, -24.0f);
+        q[3] = mesh_vertex(m, ax * 10.0f, ay * 10.0f, -30.0f);
+        mesh_face(m, 4, q, MAT_TAIL, MAT_TAIL,
+                  FACE_TWO_SIDED | FACE_OUTLINE, 0.0f);
     }
-    return &meshes[allied];
+    /* The control gondola slung under the bow. */
+    mesh_panel_y(m, -1.2f, 1.2f, -9.2f, 8.0f, 14.0f, MAT_METAL, MAT_METAL,
+                 FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 0);
+    m->parent_for_new = -1;
+}
+
+/* Meshes: 0 enemy scout, 1 allied scout, 2 airship, 3 Gotha bomber. */
+static const AircraftMesh *aircraft_mesh(int kind)
+{
+    static AircraftMesh meshes[4];
+    static int built[4];
+    if (kind < 0 || kind > 3) kind = 0;
+    if (!built[kind]) {
+        if (kind == 2) {
+            build_airship_mesh(&meshes[2]);
+        } else {
+            int i;
+            build_aircraft_mesh(&meshes[kind], kind == 1);
+            /* The Gotha is the same rigging drawn half as large again. */
+            if (kind == 3)
+                for (i = 0; i < meshes[3].verts; ++i) {
+                    meshes[3].v[i][0] *= 1.6f;
+                    meshes[3].v[i][1] *= 1.4f;
+                    meshes[3].v[i][2] *= 1.4f;
+                }
+        }
+        built[kind] = 1;
+    }
+    return &meshes[kind];
+}
+
+static int enemy_mesh_kind(const Game *g)
+{
+    return g->special == SPECIAL_AIRSHIP ? 2 :
+           g->special == SPECIAL_GOTHA ? 3 : 0;
 }
 
 static Vec3 sun_direction(void)
@@ -6718,7 +7207,8 @@ static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
                               int smoking)
 {
     SDL_Surface *s = g->screen;
-    const AircraftMesh *m = aircraft_mesh(allied);
+    int kind = allied ? 1 : enemy_mesh_kind(g);
+    const AircraftMesh *m = aircraft_mesh(kind);
     Vec3 world[MESH_MAX_VERTS];
     Projected3D screen[MESH_MAX_VERTS];
     SortedFace order[MESH_MAX_FACES];
@@ -6736,7 +7226,16 @@ static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
     for (i = 0; i < MAT_COUNT; ++i)
         base[i] = PIX_PACK(livery->rgb[i][0], livery->rgb[i][1],
                            livery->rgb[i][2]);
-    if (centre.depth > 640.0f) {
+    if (kind == 2 && centre.depth > 2400.0f) {
+        Projected3D bow = project_world_point(g, pose_point(pose, 0.0f, 0.0f, 30.0f));
+        Projected3D stern = project_world_point(g, pose_point(pose, 0.0f, 0.0f, -30.0f));
+        if (bow.visible && stern.visible) {
+            line(s, bow.x, bow.y, stern.x, stern.y, base[MAT_BODY]);
+            line(s, bow.x, bow.y + 1, stern.x, stern.y + 1, base[MAT_BODY]);
+        }
+        return 1;
+    }
+    if (kind != 2 && centre.depth > (kind == 3 ? 1000.0f : 640.0f)) {
         draw_aircraft_far(g, pose, centre,
                           pix_mix(base[MAT_BODY], g->world_haze, haze));
         return 1;
@@ -7096,8 +7595,15 @@ static void show_notice(Game *g, const char *text)
     g->notice_until = SDL_GetTicks() + 1800u;
 }
 
+static const AircraftLivery airship_livery = {
+    {{150, 150, 140}, {120, 120, 112}, {130, 128, 118}, {90, 90, 84},
+     {150, 150, 140}, {70, 68, 62}, {236, 232, 220}, {20, 18, 18},
+     {176, 40, 30}, {40, 60, 120}}
+};
+
 static const AircraftLivery *enemy_livery(const Game *g, int index)
 {
+    if (g->special == SPECIAL_AIRSHIP) return &airship_livery;
     if (index == 0 && g->chapter >= 3) return &enemy_liveries[3];
     return &enemy_liveries[(index + g->mission) % 3];
 }
@@ -7112,6 +7618,28 @@ static void draw_dogfight_simulator(Game *g)
     uint32_t now = SDL_GetTicks();
     draw_simulator_terrain(g);
     draw_simulator_clouds(g);
+    if (g->special == SPECIAL_AIRSHIP) {
+        /* Night over Essex: the world goes dark and the searchlights
+         * reach up for the raider. */
+        static const int beam_x[3] = {90, 330, 560};
+        Projected3D ship = project_world_point(g, (Vec3){
+            g->enemies[0].world_x, g->enemies[0].world_y,
+            g->enemies[0].world_z});
+        int caught = g->enemies[0].active && ship.visible &&
+                     ship.x > -200 && ship.x < SCREEN_W + 200 &&
+                     ship.y > -200 && ship.y < SCREEN_H;
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 6, 8, 22, 190);
+        for (i = 0; i < 3; ++i) {
+            float sweep = (float)now * 0.0004f + (float)i * 2.1f;
+            int tx = caught ? ship.x + (i - 1) * 6 :
+                     320 + (int)(sinf(sweep) * 300.0f);
+            int ty = caught ? ship.y : 20 + (int)(cosf(sweep * 0.7f) * 20.0f);
+            for (j = -2; j <= 2; ++j)
+                line(s, beam_x[i] + j, SCREEN_H, tx + j * 3, ty,
+                     rgb(s, 120 + 20 * (2 - abs(j)), 120 + 20 * (2 - abs(j)),
+                         96 + 16 * (2 - abs(j))));
+        }
+    }
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
         Projected3D p = project_world_point(g, (Vec3){g->enemies[i].world_x,
             g->enemies[i].world_y, g->enemies[i].world_z});
@@ -7557,7 +8085,7 @@ static int draw_field_hospital(Game *g)
     rect(s, 20, 17, 292, 157, rgb(s, 225, 213, 180));
     rect(s, 24, 21, 284, 149, rgb(s, 236, 226, 198));
     line(s, 31, 63, 300, 63, rgb(s, 95, 75, 53));
-    display_text(g, 54, 29, "ROYAL FLYING CORPS", 12, 18,
+    display_text(g, is_raf(g) ? 72 : 54, 29, corps_name(g), 12, 18,
                  rgb(s, 72, 54, 38));
     typewriter_text(g, 49, 51, "HEAD OFFICE - MEDICAL MEMORANDUM",
                     7, 11, ink);
@@ -7596,7 +8124,8 @@ static int draw_fatal_memorial(Game *g)
     typewriter_text(g, 299, 217, "2ND LT", 7, 11, inscription);
     typewriter_text(g, 303, 241, "NEDDY", 7, 11, inscription);
     typewriter_text(g, 296, 254, "SEAGOON", 7, 11, inscription);
-    typewriter_text(g, 310, 276, "RFC", 7, 11, inscription);
+    typewriter_text(g, 310, 276, is_raf(g) ? "RAF" : "RFC", 7, 11,
+                    inscription);
     typewriter_text(g, 293, 300, "LEST WE", 7, 11, inscription);
     typewriter_text(g, 296, 313, "FORGET", 7, 11, inscription);
 
@@ -7611,6 +8140,55 @@ static int draw_fatal_memorial(Game *g)
         blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 0, 0, 0,
                    (uint8_t)fade);
     return 1;
+}
+
+/* The paper's account of the sortie, in the careful voice of the censor. */
+static void late_edition_text(const Game *g, char *out, size_t size)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    if (g->special == SPECIAL_TRUCE) {
+        snprintf(out, size, g->pudding_delivered ?
+            "NOT A SHOT WAS FIRED ALONG THE LINE ON CHRISTMAS DAY. AN AIRMAN "
+            "OF THE R.F.C. DROPPED A PLUM PUDDING ON THE ENEMY'S AERODROME." :
+            "NOT A SHOT WAS FIRED ALONG THE LINE ON CHRISTMAS DAY. MEN OF BOTH "
+            "SIDES MET BETWEEN THE TRENCHES.");
+    } else if (g->fatal_sortie) {
+        snprintf(out, size, "ONE OF OUR MACHINES DID NOT RETURN.");
+    } else if (!g->success) {
+        snprintf(out, size, "THERE WAS LITTLE ACTIVITY IN THE AIR, OWING "
+                 "TO THE WEATHER.");
+    } else if (g->special == SPECIAL_AIRSHIP) {
+        snprintf(out, size, "AN ENEMY AIRSHIP WAS BROUGHT DOWN IN FLAMES IN "
+                 "ESSEX LAST NIGHT. CROWDS CHEERED THE AIRMEN.");
+    } else if (g->special == SPECIAL_GOTHA) {
+        snprintf(out, size, "DAYLIGHT RAIDERS OVER LONDON. A SCHOOL IN POPLAR "
+                 "WAS HIT. OUR AIRMEN BROUGHT DOWN %d OF THE BOMBERS.",
+                 g->kills);
+    } else if (mode == MISSION_DOGFIGHT_3D) {
+        snprintf(out, size, "IN AIR FIGHTING YESTERDAY %d HOSTILE MACHINES "
+                 "WERE BROUGHT DOWN. ALL OURS RETURNED.", g->kills);
+    } else if (mode == MISSION_GUNNER_3D) {
+        snprintf(out, size, "A TWO-SEATER OF THE %s DROVE OFF REPEATED "
+                 "ATTACKS AND COMPLETED ITS WORK.", corps_short(g));
+    } else {
+        snprintf(out, size, "OUR AIRMEN CARRIED OUT MUCH USEFUL WORK BEHIND "
+                 "THE ENEMY'S LINES.");
+    }
+}
+
+static void draw_late_edition(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    char words[200];
+    late_edition_text(g, words, sizeof(words));
+    rect(s, 410, 62, 196, 172, PIX_PACK(30, 22, 16));
+    rect(s, 406, 58, 196, 172, PIX_PACK(222, 210, 178));
+    circle(s, 504, 64, 3, PIX_PACK(150, 40, 30));
+    typewriter_text(g, 416, 72, "LATE EDITION", 7, 11, PIX_PACK(128, 36, 28));
+    typewriter_text(g, 416, 86, NEWS_MASTHEAD, 7, 11, PIX_PACK(36, 30, 26));
+    rect(s, 414, 100, 180, 1, PIX_PACK(36, 30, 26));
+    wrapped_text_limit(g, 416, 106, words, 25, 15, 1000, 1,
+                       PIX_PACK(36, 30, 26));
 }
 
 static void draw_debrief(Game *g)
@@ -7641,6 +8219,7 @@ static void draw_debrief(Game *g)
     typewriter_text(g, 74, 157, buf, 7, 11, ink);
     snprintf(buf, sizeof(buf), "AIRFRAME REMAINING          %d", g->health);
     typewriter_text(g, 74, 178, buf, 7, 11, ink);
+    draw_late_edition(g);
     display_text(g, 73, 226,
          g->success ? "THE MESS WILL HEAR." :
          g->fatal_sortie ? "A LONE PIPER PLAYS." :
@@ -7684,7 +8263,45 @@ static void draw_epilogue(Game *g)
     typewriter_text(g, 73, 179, "THE EMPTY CHAIRS REMAIN.", 7, 11, ink);
     typewriter_text(g, 73, 221, "TOM RINGS THE FIELD BELL.", 7, 11, red);
     typewriter_text(g, 73, 242, "YOU TURN FOR HOME.", 7, 11, red);
+    typewriter_text(g, 73, 284, "IN SHREWSBURY, AS THE BELLS RANG, A TELEGRAM", 7, 11, ink);
+    typewriter_text(g, 73, 300, "REACHED THE PARENTS OF WILFRED OWEN.", 7, 11, ink);
+    typewriter_text(g, 73, 316, "HE HAD BEEN KILLED A WEEK BEFORE.", 7, 11, ink);
     typewriter_text(g, 73, 348, "ENTER  RETURN TO TITLE", 7, 11, ink);
+}
+
+/* A WAV as mono 16-bit 11 kHz, the mixer's own rate. */
+static uint8_t *load_mono_wav(const char *path, uint32_t *len_out)
+{
+    SDL_AudioSpec spec;
+    SDL_AudioCVT cvt;
+    uint8_t *data = NULL;
+    uint32_t len = 0;
+    int result;
+    if (!SDL_LoadWAV(path, &spec, &data, &len)) return NULL;
+    result = SDL_BuildAudioCVT(&cvt, spec.format, spec.channels, spec.freq,
+                               AUDIO_S16SYS, 1, 11025);
+    if (result < 0) {
+        SDL_FreeWAV(data);
+        return NULL;
+    }
+    if (!cvt.needed) {
+        *len_out = len;
+        return data;
+    }
+    cvt.len = (int)len;
+    cvt.buf = (uint8_t *)SDL_malloc((size_t)len * cvt.len_mult);
+    if (!cvt.buf) {
+        SDL_FreeWAV(data);
+        return NULL;
+    }
+    memcpy(cvt.buf, data, len);
+    SDL_FreeWAV(data);
+    if (SDL_ConvertAudio(&cvt) != 0) {
+        SDL_free(cvt.buf);
+        return NULL;
+    }
+    *len_out = (uint32_t)cvt.len_cvt;
+    return cvt.buf;
 }
 
 static int init_audio(Game *g)
@@ -7792,6 +8409,7 @@ static int init_audio(Game *g)
     want.callback = audio_callback;
     want.userdata = &g->audio;
     g->audio.noise = 0x19171917u;
+    g->audio.record_track = RECORD_NONE;
     g->audio.device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
     if (!g->audio.device) {
         fprintf(stderr, "Canvas Skies audio disabled: %s\n", SDL_GetError());
@@ -8111,6 +8729,7 @@ static void handle_event(Game *g, SDL_Event *ev)
             g->confirm_overwrite = 0;
             g->redraw_static = 1;
         } else if (g->scene == SCENE_TITLE) g->running = 0;
+        else if (g->scene == SCENE_SCRAPBOOK) set_scene(g, SCENE_MENU);
         else set_scene(g, SCENE_TITLE);
         break;
     case SDLK_UP:
@@ -8141,6 +8760,15 @@ static void handle_event(Game *g, SDL_Event *ev)
             static const int start_chapter[6] = {0, 0, 1, 2, 3, 5};
             int pilot;
             int has_continue = g->has_save && g->saved_lives > 0;
+            if (g->menu_selection == campaign_menu_count(g) - 1) {
+                int i;
+                g->confirm_overwrite = 0;
+                g->scrap_index = 0;
+                for (i = 0; i < NEWS_COUNT; ++i)
+                    if (news_unlocked(g, i)) { g->scrap_index = i; break; }
+                set_scene(g, SCENE_SCRAPBOOK);
+                break;
+            }
             if (has_continue && g->menu_selection == 0) {
                 g->chapter = g->saved_chapter;
                 g->mission = g->saved_mission;
@@ -8208,14 +8836,30 @@ static void handle_event(Game *g, SDL_Event *ev)
         } else if (g->scene == SCENE_STORY) {
             if (g->story_stage == 2 && !story_reveal_done(g)) {
                 g->reveal_started = SDL_GetTicks() - 60000u;
-            } else if (g->story_stage < 2) {
-                g->story_stage = (g->story_stage == 0 &&
-                                  thyne_lost_tonight(g)) ? 1 : 2;
+            } else if (g->story_stage != 2) {
+                if (g->story_stage == 0 && thyne_lost_tonight(g))
+                    g->story_stage = 1;
+                else if (g->story_stage < 2 &&
+                         news_index_for(g->chapter, g->mission) >= 0)
+                    g->story_stage = 3;
+                else
+                    g->story_stage = 2;
                 g->reveal_started = SDL_GetTicks();
             } else {
                 set_scene(g, SCENE_BRIEFING);
             }
         } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);
+        else if (g->scene == SCENE_SCRAPBOOK) set_scene(g, SCENE_MENU);
+        break;
+    case SDLK_LEFT:
+    case SDLK_RIGHT:
+        if (g->scene == SCENE_SCRAPBOOK) {
+            int step = ev->key.keysym.sym == SDLK_LEFT ? -1 : 1;
+            int i;
+            for (i = g->scrap_index + step; i >= 0 && i < NEWS_COUNT; i += step)
+                if (news_unlocked(g, i)) { g->scrap_index = i; break; }
+            g->redraw_static = 1;
+        }
         break;
     default:
         break;
@@ -8235,6 +8879,20 @@ int main(int argc, char **argv)
         g.mission = 4;
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && (strcmp(argv[1], "TRUCE") == 0 ||
+                            strcmp(argv[1], "AIRSHIP") == 0 ||
+                            strcmp(argv[1], "GOTHA") == 0)) {
+        /* The three special sorties of the war-news chapters. */
+        g.chapter = argv[1][0] == 'T' ? 0 : argv[1][0] == 'A' ? 2 : 3;
+        g.mission = argv[1][0] == 'T' ? 11 : 10;
+        reset_sortie(&g);
+        g.qa_hold = argv[1][0] != 'T';
+        set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "NEWS") == 0) {
+        /* The front page before the first day of the Somme. */
+        g.chapter = 2;
+        g.mission = 4;
+        set_scene(&g, SCENE_STORY);
     } else if (argc > 1 && strcmp(argv[1], "TOPDOWN") == 0) {
         g.chapter = 2;
         g.mission = 1;
@@ -8365,6 +9023,7 @@ int main(int argc, char **argv)
             case SCENE_DEBRIEF: draw_debrief(&g); break;
             case SCENE_EPILOGUE: draw_epilogue(&g); break;
             case SCENE_AWARD: draw_award(&g); break;
+            case SCENE_SCRAPBOOK: draw_scrapbook(&g); break;
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
@@ -8415,6 +9074,7 @@ int main(int argc, char **argv)
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
+    if (g.audio.record_data) SDL_free(g.audio.record_data);
     if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);

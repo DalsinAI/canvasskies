@@ -8,10 +8,19 @@ typedef enum {
     MISSION_GUNNER_3D
 } MissionMode;
 
+/* A few sorties step outside the usual pattern for one day of the war. */
+typedef enum {
+    SPECIAL_NONE,
+    SPECIAL_TRUCE,   /* Christmas 1914: nobody fires, one pudding to drop */
+    SPECIAL_AIRSHIP, /* Home Defence at night against a raiding airship */
+    SPECIAL_GOTHA    /* Daylight bombers over the Thames */
+} MissionSpecial;
+
 typedef struct {
     MissionMode mode;
     const char *title;
     const char *log;
+    int special;
 } CampaignMission;
 
 #define MISSIONS_PER_CHAPTER 12
@@ -22,6 +31,9 @@ static const char *allied_pilot_names[3] = {
 
 /* Neddy Seagoon's continuous first-person campaign. The modes rotate
  * four times per chapter so no period of the war belongs to one game style. */
+/* Most missions are ordinary: their special is left as SPECIAL_NONE. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
     {
         {MISSION_SIDE, "A FIELD IN FRANCE", "I LANDED IN A COW FIELD. TOM CALLED IT OUR AERODROME."},
@@ -34,8 +46,8 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_SIDE, "RAIN OVER MEAUX", "THE ENGINE COUGHED ALL THE WAY HOME. ALFIE NEVER COMPLAINED."},
         {MISSION_GUNNER_3D, "A FACE IN THE WIND", "FOR ONE MOMENT I SAW THE OTHER PILOT'S EYES."},
         {MISSION_TOP_DOWN, "TURN OF THE ARMIES", "THE ROADS BENT NORTH. THE RETREAT HAD BECOME A PURSUIT."},
-        {MISSION_SIDE, "ORDERS AT DUSK", "I DELIVERED THE ORDER AFTER DARK BY FOLLOWING CHURCH SPIRES."},
-        {MISSION_DOGFIGHT_3D, "EYES ABOVE THE MARNE", "TOM SAID THE AEROPLANE HAD EARNED ITS PLACE IN THE WAR."}
+        {MISSION_DOGFIGHT_3D, "EYES ABOVE THE MARNE", "TOM SAID THE AEROPLANE HAD EARNED ITS PLACE IN THE WAR."},
+        {MISSION_TOP_DOWN, "THE SILENT FRONT", "NOBODY FIRED ALL DAY. BELOW US MEN KICKED A BALL WHERE THE WIRE HAD BEEN.", SPECIAL_TRUCE}
     },
     {
         {MISSION_SIDE, "WINTER PHOTOGRAPHS", "THE CAMERA FROZE, SO TOM DREW THE TRENCHES BY HAND."},
@@ -62,7 +74,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_SIDE, "SUPPLIES AT POZIERES", "WE DROPPED AMMUNITION INTO A VILLAGE MADE OF BRICK DUST."},
         {MISSION_GUNNER_3D, "THE EMPTY SEAT", "TOM'S REPLACEMENT SAT QUIETLY WHERE TOM HAD BEEN WOUNDED."},
         {MISSION_TOP_DOWN, "THE NEW TRENCH", "BY MORNING BOTH ARMIES HAD DUG NEW LINES INTO THE MAP."},
-        {MISSION_SIDE, "RAIN AND CHALK", "CHALK MUD COVERED THE LOWER WINGS AND THE WHEELS WOULD NOT TURN."},
+        {MISSION_DOGFIGHT_3D, "HOME DEFENCE", "THEY SENT US HOME TO HUNT THE AIRSHIPS. ESSEX WATCHED THE SKY BURN.", SPECIAL_AIRSHIP},
         {MISSION_DOGFIGHT_3D, "OVER THE SOMME", "WE WON A MILE BELOW AND LOST HALF THE SQUADRON ABOVE."}
     },
     {
@@ -76,8 +88,8 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_SIDE, "TOM RETURNS", "TOM CLIMBED BACK INTO THE REAR COCKPIT WITH A STIFF LEFT ARM."},
         {MISSION_GUNNER_3D, "CAPTAIN MERCER", "THE PROMOTION CAME WITH A DESK I REFUSED TO USE."},
         {MISSION_TOP_DOWN, "EMPTY CHAIRS", "I WROTE FOUR LETTERS HOME BEFORE BREAKFAST."},
-        {MISSION_SIDE, "THE RAIL CUTTING", "OUR LAST BOMB CLOSED THE LINE BEFORE THE OFFENSIVE."},
-        {MISSION_DOGFIGHT_3D, "BLOODY APRIL", "APRIL ENDED. FEW OF THE FACES FROM MARCH REMAINED."}
+        {MISSION_DOGFIGHT_3D, "THE GOTHAS", "BIG GREY BOMBERS CROSSED THE THAMES IN DAYLIGHT. LONDON WILL NOT FORGET.", SPECIAL_GOTHA},
+        {MISSION_DOGFIGHT_3D, "BLOODY APRIL", "SPRING ENDED. FEW OF THE FACES FROM MARCH REMAINED."}
     },
     {
         {MISSION_SIDE, "TANKS IN THE MIST", "IRON SHAPES MOVED BELOW US TOWARD CAMBRAI."},
@@ -136,6 +148,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_DOGFIGHT_3D, "THE ELEVENTH HOUR", "AT ELEVEN THE EARTH WENT QUIET. I TURNED FOR HOME."}
     }
 };
+#pragma GCC diagnostic pop
 
 static const char *mission_mode_name(MissionMode mode)
 {

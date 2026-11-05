@@ -120,3 +120,49 @@ turning every noun into period slang.
 - Do not erase routine, failed sorties, weather cancellations and repairs; they
   are what make the exceptional missions credible.
 
+
+## The morning paper
+
+Before many sorties the player reads a front page of *The Western Courier*, an
+invented paper, and after each debrief a short "late edition" clipping. Every
+cutting is collected in the Book of Press Cuttings on the officers' menu.
+
+- Every headline and line of copy is written for this game. The events are real
+  and dated; the wording is not taken from any newspaper of the period.
+- The paper is deliberately cheerful and vague, as the censored press was. The
+  diary on the next page tells the pilot's version. The first day of the Somme
+  is the clearest example: "THE DAY GOES WELL FOR ENGLAND."
+- The Christmas truce of 1914 has its own sortie, "THE SILENT FRONT". Nobody
+  fires, men of both armies gather in no man's land, and the mess sends a plum
+  pudding to the enemy aerodrome. A British airman's pudding drop over the
+  German field at Lille was reported in newspapers at the end of December 1914.
+- Two sorties bring the raids home: a night Home Defence patrol against an
+  airship over Essex (September 1916, after the Cuffley airship fell) and a
+  daylight interception of the Gotha bombers over the Thames (June 1917).
+- From 1 April 1918 the pilot belongs to the Royal Air Force rather than the
+  Royal Flying Corps, and the summer influenza of 1918 keeps one wingman in bed.
+- The epilogue records only the fact that Wilfred Owen's parents received the
+  telegram of his death as the Armistice bells rang. None of his poetry is used.
+
+## Period gramophone records
+
+The story, diary and briefing scenes play a period record matched to the
+chapter's year; the epilogue plays Holst. Each comes from the collection
+*British Military Music 1912-1927* (gramophone transfers, MP3, album tag
+"Gramophone Marches 1912-1927"; archive SHA-256
+`4d6c90419073d317d9445c2db8a0f04beea7057b77607ad368a095495465f4dc`). The
+compositions and these recordings are in the public domain.
+
+For the Amiga build each MP3 was decoded to mono, signed 16-bit PCM at
+11.025 kHz. The needle run-in and run-out were cut where the music begins
+and ends, with a 0.3 s fade-in and a 1.5 s fade-out at the loop point. The
+surface noise is kept.
+
+| Game file | Title | Composer | Performer (tag) | Chapters | Source MP3 SHA-256 |
+|---|---|---|---|---|---|
+| `tipperary-gramophone.wav` | It's a Long, Long Way to Tipperary | Jack Judge and Harry Williams, 1912 | Prince's Band (1914) | 1914 | `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6` |
+| `home-fires-gramophone.wav` | Keep the Home Fires Burning | Ivor Novello, words Lena Guilbert Ford, 1914 | Frederick Wheeler (1915) | 1915 | `b9acb6e5db8df31bf1dbf53bfee201658e27a26e7be99e852e7235b92e846a3a` |
+| `kit-bag-gramophone.wav` | Pack Up Your Troubles in Your Old Kit-Bag | Felix Powell, words George Asaf, 1915 | Knickerbocker Quartet (1916) | 1916 | `6d91a03eea8ea284da7b3bf55581919c043a11a2ea80866d42524bed2ad6a285` |
+| `holyrood-gramophone.wav` | Holyrood | Kenneth J. Alford, 1912 | Band of the Welsh Guards | April 1917, March 1918 | `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f` |
+| `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` |
+| `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` |
