@@ -8250,74 +8250,161 @@ static void erase_painted_needle(SDL_Surface *s, const CockpitDial *d)
         }
 }
 
+/* The wing cellule seen from the cockpit, built in the airframe's own
+ * axes (x forward, y right, z down, metres from the pilot's eye) and
+ * projected with the world camera (centre 320,190, focal 330), so it is
+ * fixed to the machine and banks with it.  Its size follows the painting:
+ * the painted lower-wing roots in the corners put the lower wing about
+ * 2.7 m ahead and 1 m below the eye.  The upper wing is staggered ahead
+ * of the lower one; each side has a front and a rear interplane strut at
+ * the same span station, standing square between the two wings, with
+ * incidence wires crossing between them.  Short cabane struts carry the
+ * centre section over the cowling either side of the guns, and the flying
+ * and landing wires cross in the plane of each bay. */
+typedef struct { float x, y, z; } CellPoint;
+#define CELL_UP_TE 2.2f
+#define CELL_UP_LE 3.6f
+#define CELL_UP_Z (-0.62f)
+#define CELL_UP_SPAN 4.2f
+#define CELL_LO_TE 1.85f
+#define CELL_LO_LE 3.2f
+#define CELL_LO_Z 1.0f
+#define CELL_LO_ROOT 0.42f
+#define CELL_DIHEDRAL 0.0524f      /* three degrees */
+#define CELL_STRUT_Y 1.95f
+#define CELL_FRONT_SPAR 0.25f
+#define CELL_REAR_SPAR 0.70f
+#define CELL_CABANE_Y 0.36f
+
+static void cell_project(float x, float y, float z, int *sx, int *sy)
+{
+    *sx = 320 + (int)floorf(y * 330.0f / x + 0.5f);
+    *sy = 190 + (int)floorf(z * 330.0f / x + 0.5f);
+}
+
+static float cell_lower_z(float y)
+{
+    return CELL_LO_Z - fabsf(y) * CELL_DIHEDRAL;
+}
+
+static float cell_chord(float le, float te, float frac)
+{
+    return le - (le - te) * frac;
+}
+
+static void cell_quad(SDL_Surface *s, float x0, float y0, float z0,
+                      float x1, float y1, float z1, float x2, float y2,
+                      float z2, float x3, float y3, float z3, pix_t c)
+{
+    int ax, ay, bx, by, cx, cy, dx, dy;
+    cell_project(x0, y0, z0, &ax, &ay);
+    cell_project(x1, y1, z1, &bx, &by);
+    cell_project(x2, y2, z2, &cx, &cy);
+    cell_project(x3, y3, z3, &dx, &dy);
+    fill_quad(s, ax, ay, bx, by, cx, cy, dx, dy, c);
+}
+
+static void cell_line(SDL_Surface *s, float x0, float y0, float z0,
+                      float x1, float y1, float z1, pix_t c)
+{
+    int ax, ay, bx, by;
+    cell_project(x0, y0, z0, &ax, &ay);
+    cell_project(x1, y1, z1, &bx, &by);
+    line(s, ax, ay, bx, by, c);
+}
+
+static void cell_strut(SDL_Surface *s, float x0, float y0, float z0,
+                       float x1, float y1, float z1, float width)
+{
+    int ax, ay, bx, by;
+    cell_project(x0, y0, z0, &ax, &ay);
+    cell_project(x1, y1, z1, &bx, &by);
+    draw_strut(s, ax, ay, bx, by, (int)(width * 330.0f / x0 + 0.5f),
+               (int)(width * 330.0f / x1 + 0.5f));
+}
+
+static void draw_cockpit_cellule(SDL_Surface *c)
+{
+    pix_t wire = PIX_PACK(52, 48, 44), landing = PIX_PACK(66, 60, 54);
+    int side, k;
+    for (side = -1; side <= 1; side += 2) {
+        float sy = (float)side;
+        float strut_y = sy * CELL_STRUT_Y;
+        float root = sy * CELL_LO_ROOT, tip = sy * CELL_UP_SPAN * 0.95f;
+        /* Lower wing, upper surface: the far part shows beyond the painted
+         * roots, its leading edge catching the light. */
+        cell_quad(c, CELL_LO_TE, root, cell_lower_z(root),
+                  CELL_LO_LE, root, cell_lower_z(root),
+                  CELL_LO_LE, tip, cell_lower_z(tip),
+                  CELL_LO_TE, tip, cell_lower_z(tip), PIX_PACK(150, 128, 92));
+        cell_line(c, CELL_LO_LE, root, cell_lower_z(root),
+                  CELL_LO_LE, tip, cell_lower_z(tip), PIX_PACK(206, 178, 132));
+        /* Upper wing, underside: doped linen in its own shade, ribs
+         * running fore and aft, the leading edge lit. */
+        cell_quad(c, CELL_UP_TE, 0.0f, CELL_UP_Z, CELL_UP_LE, 0.0f, CELL_UP_Z,
+                  CELL_UP_LE, sy * CELL_UP_SPAN, CELL_UP_Z,
+                  CELL_UP_TE, sy * CELL_UP_SPAN, CELL_UP_Z,
+                  PIX_PACK(122, 102, 82));
+        for (k = 1; k <= 16; ++k) {
+            float ry = sy * CELL_UP_SPAN * (float)k / 17.0f;
+            cell_line(c, CELL_UP_TE, ry, CELL_UP_Z, CELL_UP_LE, ry, CELL_UP_Z,
+                      PIX_PACK(146, 124, 98));
+        }
+        cell_line(c, CELL_UP_LE, 0.0f, CELL_UP_Z, CELL_UP_LE,
+                  sy * CELL_UP_SPAN, CELL_UP_Z, PIX_PACK(214, 182, 136));
+        cell_line(c, CELL_UP_TE, 0.0f, CELL_UP_Z, CELL_UP_TE,
+                  sy * CELL_UP_SPAN, CELL_UP_Z, PIX_PACK(70, 58, 48));
+        /* Flying wires climb from the lower wing root to the top of the
+         * interplane struts; landing wires fall from the centre section
+         * to their feet.  One of each on the front and the rear spar. */
+        for (k = 0; k < 2; ++k) {
+            float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
+            float ux = cell_chord(CELL_UP_LE, CELL_UP_TE, frac);
+            float lx = cell_chord(CELL_LO_LE, CELL_LO_TE, frac);
+            cell_line(c, lx, root, cell_lower_z(root), ux, strut_y, CELL_UP_Z,
+                      wire);
+            cell_line(c, ux, sy * CELL_CABANE_Y, CELL_UP_Z, lx, strut_y,
+                      cell_lower_z(strut_y), landing);
+        }
+        /* Incidence wires cross between the front and rear struts. */
+        cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
+                  strut_y, CELL_UP_Z,
+                  cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_REAR_SPAR),
+                  strut_y, cell_lower_z(strut_y), wire);
+        cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
+                  strut_y, CELL_UP_Z,
+                  cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_FRONT_SPAR),
+                  strut_y, cell_lower_z(strut_y), wire);
+        /* Interplane struts, rear first so the front one stands over it. */
+        for (k = 1; k >= 0; --k) {
+            float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
+            cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, frac), strut_y,
+                       CELL_UP_Z, cell_chord(CELL_LO_LE, CELL_LO_TE, frac),
+                       strut_y, cell_lower_z(strut_y), 0.05f);
+        }
+        /* Cabane struts from the centre section down to the upper
+         * longerons; the painted cowling hides their feet. */
+        cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
+                   sy * CELL_CABANE_Y, CELL_UP_Z, 2.35f, sy * 0.34f, 0.32f,
+                   0.04f);
+        cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
+                   sy * CELL_CABANE_Y, CELL_UP_Z, 1.75f, sy * 0.34f, 0.32f,
+                   0.04f);
+    }
+}
+
 static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
 {
     SDL_Surface *c;
     pix_t key = PIX_PACK(255, 0, 255);
-    int y, i;
+    int i;
     if (!painting) return NULL;
     c = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H,
                                        CANVAS_SCREEN_BITS,
                                        CANVAS_SCREEN_FORMAT);
     if (!c) return NULL;
     SDL_FillRect(c, NULL, key);
-    /* Underside of the upper wing: doped linen in its own shadow, warming
-     * toward the leading edge where the low sun catches it. */
-    for (y = 0; y < 46; ++y) {
-        int t = y * 32 / 45;
-        pix_t shade = pix_mix(PIX_PACK(96, 80, 70), PIX_PACK(178, 150, 118), t);
-        pix_t *row = PIX_ROW(c, y);
-        int x;
-        for (x = 0; x < SCREEN_W; ++x) row[x] = shade;
-    }
-    for (y = 41; y < 47; ++y) {
-        pix_t *row = PIX_ROW(c, y);
-        int x;
-        pix_t rim = y < 44 ? PIX_PACK(214, 178, 132) : PIX_PACK(120, 92, 70);
-        for (x = 0; x < SCREEN_W; ++x) row[x] = rim;
-    }
-    /* Ribs run fore and aft, so they converge on the vanishing point. */
-    for (i = -12; i <= 12; ++i) {
-        float span = (float)i * 0.35f;
-        int top_x = 320 + (int)(span * 305.0f);
-        int bottom_x = 320 + (int)(span * 236.0f);
-        line(c, top_x, 0, bottom_x, 41, PIX_PACK(186, 160, 126));
-        line(c, top_x + 1, 0, bottom_x + 1, 41, PIX_PACK(84, 70, 60));
-    }
-    /* A small cut-out over the pilot's head shows the sky through it. */
-    for (y = 0; y < 30; ++y) {
-        int half = (int)(64.0f * sqrtf(1.0f - (float)(y * y) / 900.0f));
-        pix_t *row = PIX_ROW(c, y);
-        int x;
-        for (x = 320 - half; x < 320 + half; ++x) row[x] = key;
-        if (320 - half - 1 >= 0) row[320 - half - 1] = PIX_PACK(70, 54, 44);
-        if (320 + half < SCREEN_W) row[320 + half] = PIX_PACK(70, 54, 44);
-    }
-    /* The rigging, fixed to the airframe so it banks with it.  Each joint
-     * is a point the painting already shows: the interplane struts stand
-     * on the lower wing's fittings at (85, 311) and (555, 311), the cabane
-     * struts on the longeron posts beside the cockpit at (209, 286) and
-     * (431, 286); all four meet the underside of the top wing at y = 46.
-     * The flying wires climb from the cabane feet to the interplane tops;
-     * the landing wires fall from the centre section to the interplane
-     * feet.  The painting is laid over all of it, so every foot vanishes
-     * into the fitting it stands on. */
-    line(c, 211, 284, 44, 48, PIX_PACK(58, 54, 50));
-    line(c, 429, 284, 596, 48, PIX_PACK(58, 54, 50));
-    line(c, 236, 48, 87, 309, PIX_PACK(66, 60, 54));
-    line(c, 404, 48, 553, 309, PIX_PACK(66, 60, 54));
-    draw_strut(c, 40, 46, 85, 313, 12, 8);
-    draw_strut(c, 600, 46, 555, 313, 12, 8);
-    draw_strut(c, 238, 46, 209, 288, 9, 7);
-    draw_strut(c, 402, 46, 431, 288, 9, 7);
-    /* Iron fittings where the struts meet the top wing. */
-    {
-        static const int top_x[4] = {40, 600, 238, 402};
-        for (i = 0; i < 4; ++i) {
-            rect(c, top_x[i] - 8, 44, 16, 4, PIX_PACK(56, 48, 40));
-            rect(c, top_x[i] - 7, 44, 14, 1, PIX_PACK(150, 128, 96));
-        }
-    }
+    draw_cockpit_cellule(c);
     SDL_BlitSurface(painting, NULL, c, NULL);
     for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
     SDL_SetColorKey(c, SDL_TRUE, key);
