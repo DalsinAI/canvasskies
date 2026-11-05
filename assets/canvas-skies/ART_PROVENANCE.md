@@ -34,3 +34,15 @@ AMBULANCE; the protected red cross emblem is deliberately not drawn.
 paintings by `ports/amigaos3/make_single_gun_cockpit.py`, and
 `journal.bmp` is the existing journal painting with its ruled lines lifted
 off by `ports/amigaos3/make_journal_page.py`.
+
+The side-on and top-down sprites for the 1914 two-seater, the 1918 scout,
+the enemy's 1915 monoplane and 1918 biplane (`aircraft-player-twoseat.bmp`,
+`aircraft-player-late.bmp`, `aircraft-enemy-mono.bmp`,
+`aircraft-enemy-late.bmp`, `topdown-player-twoseat.bmp`,
+`topdown-player-late.bmp`) are original designs painted the same way by
+`ports/amigaos3/make_machine_sprites.py`. They are not copies of any
+surviving aircraft's drawings.
+
+`side-civilians.bmp` (the side-on farmhouse, church and refugee cart, whole
+and wrecked) is painted the same way by
+`ports/amigaos3/make_side_civilians.py`.

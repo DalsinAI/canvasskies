@@ -19,6 +19,8 @@
 #include "canvas_news.h"
 #include "canvas_fonts.h"
 #include "canvas_topdown_sprites.h"
+#include "canvas_machine_sprites.h"
+#include "canvas_side_civilians.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -135,6 +137,9 @@
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
 #endif
+#ifndef CANVAS_SIDE_CIVILIANS_BMP
+#define CANVAS_SIDE_CIVILIANS_BMP "assets/canvas-skies/side-civilians.bmp"
+#endif
 #ifndef CANVAS_TOPDOWN_TARGETS_BMP
 #define CANVAS_TOPDOWN_TARGETS_BMP "assets/canvas-skies/topdown-targets.bmp"
 #endif
@@ -143,6 +148,24 @@
 #endif
 #ifndef CANVAS_FONTS_BMP
 #define CANVAS_FONTS_BMP "assets/canvas-skies/fonts.bmp"
+#endif
+#ifndef CANVAS_PLAYER_TWOSEAT_BMP
+#define CANVAS_PLAYER_TWOSEAT_BMP "assets/canvas-skies/aircraft-player-twoseat.bmp"
+#endif
+#ifndef CANVAS_PLAYER_LATE_BMP
+#define CANVAS_PLAYER_LATE_BMP "assets/canvas-skies/aircraft-player-late.bmp"
+#endif
+#ifndef CANVAS_ENEMY_MONO_BMP
+#define CANVAS_ENEMY_MONO_BMP "assets/canvas-skies/aircraft-enemy-mono.bmp"
+#endif
+#ifndef CANVAS_ENEMY_LATE_BMP
+#define CANVAS_ENEMY_LATE_BMP "assets/canvas-skies/aircraft-enemy-late.bmp"
+#endif
+#ifndef CANVAS_TOPDOWN_TWOSEAT_BMP
+#define CANVAS_TOPDOWN_TWOSEAT_BMP "assets/canvas-skies/topdown-player-twoseat.bmp"
+#endif
+#ifndef CANVAS_TOPDOWN_LATE_BMP
+#define CANVAS_TOPDOWN_LATE_BMP "assets/canvas-skies/topdown-player-late.bmp"
 #endif
 #ifndef CANVAS_PLAYER_SPRITES_BMP
 #define CANVAS_PLAYER_SPRITES_BMP "assets/canvas-skies/aircraft-player.bmp"
@@ -386,7 +409,64 @@ typedef struct {
     float accumulator;
     float alpha, beta, speed;
     int stalled;
+    float power, agility;   /* the machine's engine and handling, 1 = Camel */
 } FlightState;
+
+/* ---- The machines, year by year ---------------------------------------
+ *
+ * Our side flies a two-seat reconnaissance machine in 1914, a single-seat
+ * scout with one synchronised Vickers from 1915, a twin-gun scout from the
+ * Cambrai chapter and a faster late-war scout in 1918.  The enemy flies a
+ * monoplane in 1915, a streamlined biplane scout through 1916 and 1917
+ * and a square-winged biplane in 1918.  The shapes are our own; the
+ * numbers follow the period: power and agility scale the flight models,
+ * toughness divides the damage taken. */
+typedef struct {
+    const char *name;          /* as the squadron calls it */
+    const char *arrival;       /* the diary on the day they arrive */
+    float span, lower_span, chord, gap, stagger;
+    int monoplane, two_seat;
+    float power, agility, toughness;
+    int guns, fire_ms;
+} MachineType;
+
+static const MachineType our_machines[4] = {
+    {"THE TWO-SEATER", NULL, 11.2f, 10.4f, 1.7f, 1.9f, 0.3f, 0, 1,
+     0.82f, 0.78f, 1.25f, 0, 0},
+    {"THE SCOUT", "New scouts at the aircraft park: one Vickers each, "
+     "firing through the propeller. We are fighting pilots now.",
+     8.2f, 7.6f, 1.5f, 1.5f, 0.35f, 0, 0, 0.92f, 1.05f, 0.95f, 1, 150},
+    {"THE TWIN-GUN SCOUT", "The new machines came up today: twin guns "
+     "and a temper. Tom says it turns like a cat on a hot stove.",
+     8.5f, 8.5f, 1.45f, 1.5f, 0.45f, 0, 0, 1.0f, 1.2f, 1.0f, 2, 160},
+    {"THE LATE SCOUT", "Fresh machines from England, faster than "
+     "anything we have flown. They do not forgive a clumsy hand.",
+     8.1f, 8.1f, 1.55f, 1.6f, 0.4f, 0, 0, 1.18f, 1.08f, 1.15f, 2, 140}
+};
+
+static const MachineType their_machines[3] = {
+    {"THE FOKKER MONOPLANE", "Their monoplane has a gun that fires "
+     "through the propeller. Nobody here can explain it.",
+     9.5f, 0.0f, 1.8f, 0.0f, 0.0f, 1, 0, 0.85f, 1.0f, 0.85f, 1, 0},
+    {"THE ALBATROS", "Their new scouts are sleek as fish, and carry two "
+     "guns. April will be hard.",
+     9.0f, 8.6f, 1.6f, 1.5f, 0.3f, 0, 0, 1.0f, 1.0f, 1.0f, 2, 0},
+    {"THE NEW FOKKER", "A square-winged Fokker has come to their front. "
+     "It climbs as if the air were thicker for it.",
+     8.9f, 7.0f, 1.6f, 1.7f, 0.5f, 0, 0, 1.12f, 1.12f, 1.1f, 2, 0}
+};
+
+static int mesh_chapter;   /* the chapter whose machines the meshes show */
+
+static int our_machine_index(int chapter)
+{
+    return chapter == 0 ? 0 : chapter < 4 ? 1 : chapter < 5 ? 2 : 3;
+}
+
+static int their_machine_index(int chapter)
+{
+    return chapter <= 1 ? 0 : chapter < 5 ? 1 : 2;
+}
 
 typedef struct {
     float x, y, phase;
@@ -412,6 +492,8 @@ typedef struct {
     uint32_t last_shot;
     uint32_t next_round;
     int burst_left;
+    int civilian;       /* side-on: 0, or the SC_ sprite of a civilian place */
+    int wrecked;
 } Target;
 
 /* ---- Top-down missions built from segments --------------------------------
@@ -562,9 +644,14 @@ typedef struct {
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
     SDL_Surface *topdown_targets;   /* the painted mission targets */
+    SDL_Surface *side_civilians;    /* farms, a church, carts, side-on */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
+    /* Other years' machines: our two-seater and late scout, their
+     * monoplane and late biplane (side-on), and our two from above. */
+    SDL_Surface *machine_sprites[4];
+    SDL_Surface *topdown_machines[2];
     SDL_Surface *cockpit_composite;
     SDL_Surface *dawn_backdrop;
     SDL_Surface *cockpit_composite_unarmed;
@@ -2003,7 +2090,7 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
                               int columns, uint32_t color)
 {
     int max_w = columns * 8;   /* the width the old fixed cells gave */
-    char line_buf[64], cased[96];
+    char line_buf[128], cased[160];
     int line_len = 0;
     const char *p = hand_case(str, cased, (int)sizeof(cased));
     while (*p) {
@@ -2017,9 +2104,10 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
         if (word_len > (int)sizeof(line_buf) - 2)
             word_len = (int)sizeof(line_buf) - 2;
         if (line_len &&
-            font_width_n(FONT_HAND, line_buf, line_len) +
-            font_width_n(FONT_HAND, " ", 1) +
-            font_width_n(FONT_HAND, word, word_len) > max_w) {
+            (line_len + 1 + word_len > (int)sizeof(line_buf) - 1 ||
+             font_width_n(FONT_HAND, line_buf, line_len) +
+             font_width_n(FONT_HAND, " ", 1) +
+             font_width_n(FONT_HAND, word, word_len) > max_w)) {
             line_buf[line_len] = '\0';
             journal_text(g, x, y, line_buf, color);
             y += JOURNAL_LINE_STEP;
@@ -2593,9 +2681,25 @@ static void draw_vector_plane(SDL_Surface *s, int x, int y, int enemy)
     circle(s, x + 18, y, 2, canvas);
 }
 
+/* Which painted atlas shows this year's machine: 0..3 index the newer
+ * machine_sprites, -1 means the original Sopwith or Albatros. */
+static int machine_atlas(int enemy)
+{
+    if (enemy) {
+        int t = their_machine_index(mesh_chapter);
+        return t == 0 ? 2 : t == 2 ? 3 : -1;
+    } else {
+        int t = our_machine_index(mesh_chapter);
+        return t == 0 ? 0 : t == 3 ? 1 : -1;
+    }
+}
+
 static void draw_plane(Game *g, int x, int y, int enemy, int pitch_frame)
 {
-    SDL_Surface *atlas = enemy ? g->enemy_sprites : g->player_sprites;
+    int which = machine_atlas(enemy);
+    SDL_Surface *atlas = which >= 0 && g->machine_sprites[which] ?
+                         g->machine_sprites[which] :
+                         enemy ? g->enemy_sprites : g->player_sprites;
     SDL_Surface *dst = g->screen;
     int dx, dy;
     const int source_w = 96, source_h = 48;
@@ -2645,8 +2749,13 @@ static void side_muzzle_at(int x, int y, int enemy, int frame,
                            float *mx, float *my, float *nose)
 {
     frame = side_pitch_frame(frame);
-    *mx = (float)(x - 36) + (float)side_muzzle[enemy][frame][0] * 0.75f;
-    *my = (float)(y - 18) + (float)side_muzzle[enemy][frame][1] * 0.75f;
+    {
+        int which = machine_atlas(enemy);
+        const unsigned char *at = which >= 0 ? machine_muzzle[which][frame] :
+                                  side_muzzle[enemy][frame];
+        *mx = (float)(x - 36) + (float)at[0] * 0.75f;
+        *my = (float)(y - 18) + (float)at[1] * 0.75f;
+    }
     *nose = (float)(enemy ? frame - 2 : 2 - frame) * SIDE_PITCH_STEP;
 }
 
@@ -2704,6 +2813,9 @@ static int player_machine_gun_damage(const Game *g)
     int enemy_hits = 3 + g->chapter / 2;
     int player_hits = enemy_hits * PLAYER_DURABILITY_MULTIPLIER;
     int damage = player_hits > 0 ? 100 / player_hits : 4;
+    /* A stouter machine takes the same rounds with less harm. */
+    damage = (int)((float)damage /
+                   our_machines[our_machine_index(g->chapter)].toughness + 0.5f);
     /* Integer damage must never disappear.  Rounding down gives Neddy at
      * least eight enemy-airframe lifetimes rather than quietly undercutting
      * the promise in later chapters. */
@@ -2765,6 +2877,25 @@ static int perspective_spawn_count(const Game *g)
     return count;
 }
 
+/* Every other side-on sortie from 1915 crosses a village whose people are
+ * still at home; the briefing names it. */
+static const char *const side_village_names[CHAPTER_COUNT] = {
+    NULL, "LA BASSEE", "MARTINPUICH", "MONCHY", "FLESQUIERES", "ALBERT",
+    "VILLERS-BRETONNEUX", NULL
+};
+
+static int side_village_today(const Game *g)
+{
+    int m, k = 0;
+    if (!side_village_names[g->chapter] ||
+        campaign_missions[g->chapter][g->mission].mode != MISSION_SIDE ||
+        campaign_missions[g->chapter][g->mission].special != SPECIAL_NONE)
+        return 0;
+    for (m = 0; m < g->mission; ++m)
+        if (campaign_missions[g->chapter][m].mode == MISSION_SIDE) ++k;
+    return k & 1;
+}
+
 static void reset_sortie(Game *g)
 {
     int i;
@@ -2811,8 +2942,11 @@ static void reset_sortie(Game *g)
     g->flight_vy = 0.0f;
     g->flight_vz = 43.81f;
     g->flight_throttle = 0.68f;
+    mesh_chapter = g->chapter;
     flight_state_init(&g->flight, 0.0f, 0.0f, 0.0f, 43.81f,
                       g->flight_throttle);
+    g->flight.power = our_machines[our_machine_index(g->chapter)].power;
+    g->flight.agility = our_machines[our_machine_index(g->chapter)].agility;
     g->flight_alpha = 0.0f;
     g->flight_stalled = 0;
     g->flight_doomed = 0;
@@ -2892,6 +3026,10 @@ static void reset_sortie(Game *g)
                           g->enemies[i].pitch, g->enemies[i].bank,
                           g->enemies[i].speed * 0.44704f,
                           g->enemies[i].throttle);
+        g->enemies[i].flight.power =
+            their_machines[their_machine_index(g->chapter)].power;
+        g->enemies[i].flight.agility =
+            their_machines[their_machine_index(g->chapter)].agility;
         /* Even the earliest aircraft must first show visible battle damage.
          * Later years add durability, but nothing goes straight from pristine
          * to a crash on the first round. */
@@ -2928,6 +3066,21 @@ static void reset_sortie(Game *g)
         g->targets[i].last_shot = 0;
         g->targets[i].next_round = 0;
         g->targets[i].burst_left = 0;
+        g->targets[i].civilian = 0;
+        g->targets[i].wrecked = 0;
+    }
+    if (mode == MISSION_SIDE && side_village_today(g)) {
+        /* A village still lived in, among the gun pits: a farm, the
+         * church and a cart on the road, placed between the targets. */
+        static const int places[3] = {SC_FARM, SC_CHURCH, SC_CART};
+        int k, n = chapter->target_count;
+        for (k = 0; k < 3 && n + k < MAX_TARGETS; ++k) {
+            Target *t = &g->targets[n + k];
+            t->active = 1;
+            t->type = 0;
+            t->civilian = places[k];
+            t->world_x = 800.0f + (float)k * 960.0f;   /* between the guns */
+        }
     }
     g->special = campaign_missions[g->chapter][g->mission].special;
     g->sortie_offences = 0;
@@ -3269,6 +3422,7 @@ static void flight_state_init(FlightState *f, float heading, float pitch,
 {
     memset(f, 0, sizeof(*f));
     f->u = speed;
+    f->power = f->agility = 1.0f;
     f->throttle = throttle;
     f->speed = speed;
     flight_quaternion_from_euler(f, bank, pitch, heading);
@@ -3336,16 +3490,18 @@ static void ww1_flight_step(FlightState *f, Vec3 *position, float dt,
     cy = -0.72f * beta + 0.16f * f->rudder;
 
     roll_c = -0.075f * beta - 0.19f * phat +
-             0.009f * f->aileron * effectiveness + 0.012f * f->rudder;
+             0.009f * f->aileron * effectiveness * f->agility +
+             0.012f * f->rudder;
     pitch_c = -0.58f * alpha - 5.8f * qhat +
-              0.095f * f->elevator * effectiveness;
+              0.095f * f->elevator * effectiveness * f->agility;
     yaw_c = 0.115f * beta - 0.24f * rhat +
             0.065f * f->rudder - 0.018f * f->aileron * effectiveness;
 
     lift = dynamic_pressure * wing_area * cl;
     drag = dynamic_pressure * wing_area * cd;
     side = dynamic_pressure * wing_area * cy;
-    fx = f->throttle * 2050.0f - drag * cosf(alpha) + lift * sinf(alpha);
+    fx = f->throttle * 2050.0f * f->power - drag * cosf(alpha) +
+         lift * sinf(alpha);
     fy = side;
     fz = -drag * sinf(alpha) - lift * cosf(alpha);
     roll_m = dynamic_pressure * wing_area * span * roll_c;
@@ -3464,7 +3620,7 @@ static void arcade_flight_step(FlightState *f, Vec3 *position, float dt,
         f->qw /= norm; f->qx /= norm; f->qy /= norm; f->qz /= norm;
     }
     /* Speed: throttle sets the level speed, gravity trades it with height. */
-    target_speed = 30.0f + f->throttle * 30.0f;
+    target_speed = (30.0f + f->throttle * 30.0f) * (0.6f + 0.4f * f->power);
     accel = (target_speed - speed) * 0.32f - 9.81f * sinf(pitch);
     speed += accel * dt;
     if (speed < 14.0f) speed = 14.0f;
@@ -3489,7 +3645,8 @@ static void arcade_flight_advance(FlightState *f, Vec3 *position,
     if (frame_dt > 0.10f) frame_dt = 0.10f;
     f->accumulator += frame_dt;
     while (f->accumulator >= step && iterations < 5) {
-        arcade_flight_step(f, position, step, aileron, elevator, agility);
+        arcade_flight_step(f, position, step, aileron, elevator,
+                           agility * f->agility);
         f->accumulator -= step;
         ++iterations;
     }
@@ -4147,8 +4304,12 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             fake[SDL_SCANCODE_SPACE] = 1;
         keys = fake;
     }
-    if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 175.0f * dt;
-    if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 175.0f * dt;
+    if (keys[SDL_SCANCODE_LEFT])
+        g->player_x -= 175.0f *
+            our_machines[our_machine_index(g->chapter)].agility * dt;
+    if (keys[SDL_SCANCODE_RIGHT])
+        g->player_x += 175.0f *
+            our_machines[our_machine_index(g->chapter)].agility * dt;
     if (keys[SDL_SCANCODE_UP]) g->player_y -= 150.0f * dt;
     if (keys[SDL_SCANCODE_DOWN]) g->player_y += 150.0f * dt;
     if (g->player_x < 34.0f) g->player_x = 34.0f;
@@ -4630,13 +4791,12 @@ static void burst_of_debris(Game *g, Vec3 at, Vec3 carry, int fabric)
 
 /* Two synchronised guns either side of the sight, converging on the ring
  * sight line 150 m out. */
-/* The pilot's forward guns: none in 1914, one synchronised Vickers from
- * 1915 until the twin-gun Camels of the Cambrai chapter (late 1917). */
-#define TWIN_GUN_CHAPTER 4
+/* The pilot's forward guns, as the year's machine carries them: none in
+ * 1914, one synchronised Vickers from 1915, two from the Cambrai chapter. */
 static int pilot_gun_count(const Game *g)
 {
     if (!mission_armed(g)) return 0;
-    return g->chapter >= TWIN_GUN_CHAPTER ? 2 : 1;
+    return our_machines[our_machine_index(g->chapter)].guns;
 }
 
 static void fire_player_guns(Game *g)
@@ -4941,6 +5101,8 @@ static void reset_wingmen(Game *g)
         w->speed = 98.0f;
         w->throttle = 0.7f;
         flight_state_init(&w->flight, w->heading, 0.0f, 0.0f, 43.8f, 0.7f);
+        w->flight.power = our_machines[our_machine_index(g->chapter)].power;
+        w->flight.agility = our_machines[our_machine_index(g->chapter)].agility;
         w->hp = 3;
         w->max_hp = 3;
         w->active = 1;
@@ -5335,7 +5497,9 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     if (!g->flight_doomed && keys[SDL_SCANCODE_SPACE] &&
         mission_armed(g) && !g->guns_jammed &&
-        g->ammunition > 0 && now - g->last_shot >= 160u) {
+        g->ammunition > 0 &&
+        now - g->last_shot >=
+            (uint32_t)our_machines[our_machine_index(g->chapter)].fire_ms) {
         g->last_shot = now;
         --g->ammunition;
         g->audio.shot = 1500;
@@ -5578,18 +5742,24 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         update_gunner_3d_sortie(g, dt, keys);
         return;
     }
-    if (keys[SDL_SCANCODE_X]) g->airspeed += 42.0f * dt;
-    if (keys[SDL_SCANCODE_Z]) g->airspeed -= 42.0f * dt;
-    if (g->airspeed < 62.0f) g->airspeed = 62.0f;
-    if (g->airspeed > 142.0f) g->airspeed = 142.0f;
-    if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 155.0f * dt;
-    if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 155.0f * dt;
+    {
+        /* The year's machine sets the top speed and how hard it pulls. */
+        const MachineType *ours = &our_machines[our_machine_index(g->chapter)];
+        if (keys[SDL_SCANCODE_X]) g->airspeed += 42.0f * dt;
+        if (keys[SDL_SCANCODE_Z]) g->airspeed -= 42.0f * dt;
+        if (g->airspeed < 62.0f) g->airspeed = 62.0f;
+        if (g->airspeed > 142.0f * ours->power) g->airspeed = 142.0f * ours->power;
+        if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 155.0f * ours->agility * dt;
+        if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 155.0f * ours->agility * dt;
+    }
     if (g->player_x < 44.0f) g->player_x = 44.0f;
     if (g->player_x > 590.0f) g->player_x = 590.0f;
     if (keys[SDL_SCANCODE_UP])
-        g->player_vy -= 245.0f * dt;
+        g->player_vy -= 245.0f *
+            our_machines[our_machine_index(g->chapter)].agility * dt;
     if (keys[SDL_SCANCODE_DOWN])
-        g->player_vy += 245.0f * dt;
+        g->player_vy += 245.0f *
+            our_machines[our_machine_index(g->chapter)].agility * dt;
     g->player_vy *= powf(0.10f, dt);
     if (g->player_vy < -120.0f) g->player_vy = -120.0f;
     if (g->player_vy > 120.0f) g->player_vy = 120.0f;
@@ -5647,7 +5817,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
                 new_explosion(g, b->x, b->y, 1);
                 if (distance < 82.0f && now - g->last_damage > 260u) {
                     int damage = distance < 42.0f ? 16 : 9;
-                    g->health -= damage;
+                    if (!g->qa_hold || g->health > 30) g->health -= damage;
                     g->last_damage = now;
                     new_explosion(g, g->player_x - 4.0f, g->player_y, 0);
                 }
@@ -5661,7 +5831,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         if (b->active && b->enemy && b->type != 2 &&
             fabsf(b->x - g->player_x) < 25.0f &&
             fabsf(b->y - g->player_y) < 14.0f && now - g->last_damage > 260u) {
-            g->health -= b->type == 2 ? 8 : 3;
+            if (!g->qa_hold || g->health > 30) g->health -= b->type == 2 ? 8 : 3;
             g->last_damage = now;
             b->active = 0;
             new_explosion(g, g->player_x - 2.0f, g->player_y, 0);
@@ -5731,6 +5901,29 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         float sx = g->targets[i].world_x - g->scroll;
         int ty = terrain_y(g->targets[i].world_x) - 12;
         Target *target = &g->targets[i];
+        if (target->civilian) {
+            /* People's homes: struck by a bomb or a burst, they burn, and
+             * the offence is entered against the pilot. */
+            const short *r = side_civilian_rect[target->civilian];
+            float half = (float)r[2] * 0.5f;
+            if (target->wrecked) continue;
+            for (j = 0; j < MAX_BULLETS; ++j) if (g->bullets[j].active) {
+                Bullet *b = &g->bullets[j];
+                if (b->enemy || b->missed) continue;
+                if ((b->type == 0 && fabsf(b->x - sx) < half &&
+                     b->y > (float)(ty + 12 - r[3]) && b->y < (float)ty + 12.0f) ||
+                    (b->type == 1 && fabsf(b->x - sx) < half + 8.0f &&
+                     b->y > (float)(ty + 12 - r[3]))) {
+                    b->active = 0;
+                    target->wrecked = 1;
+                    new_ground_explosion(g, sx, (float)ty, 3);
+                    g->audio.blast = 7000;
+                    td_offence(g, CIV_CIVILIAN);
+                    break;
+                }
+            }
+            continue;
+        }
         if (sx > 20.0f && sx < SCREEN_W - 10.0f) {
             if (target->type) {
                 if (now - target->last_shot > 2850u + (uint32_t)(i * 83 % 520)) {
@@ -6017,9 +6210,10 @@ static int wrapped_text_limit(Game *g, int x, int y, const char *str,
         if (word_len > (int)sizeof(line_buf) - 2)
             word_len = (int)sizeof(line_buf) - 2;
         if (line_len &&
-            font_width_n(font, line_buf, line_len) +
-            font_width_n(font, " ", 1) +
-            font_width_n(font, word, word_len) > max_w) {
+            (line_len + 1 + word_len > (int)sizeof(line_buf) - 1 ||
+             font_width_n(font, line_buf, line_len) +
+             font_width_n(font, " ", 1) +
+             font_width_n(font, word, word_len) > max_w)) {
             line_buf[line_len] = '\0';
             if (typewriter) typewriter_text(g, x, y, line_buf, 7, 11, color);
             else journal_text(g, x, y, line_buf, color);
@@ -6426,6 +6620,84 @@ static void draw_mess(Game *g)
 }
 
 
+/* ---- New machines -------------------------------------------------------
+ *
+ * The first morning of a chapter whose machines differ from the last
+ * chapter's: the new type stands at the aerodrome, from the aircraft park
+ * for us or in the intelligence summary for theirs, with the diary's line. */
+static int new_machines_today(const Game *g)
+{
+    if (g->mission != 0 || g->chapter == 0) return 0;
+    return our_machine_index(g->chapter) != our_machine_index(g->chapter - 1) ||
+           their_machine_index(g->chapter) != their_machine_index(g->chapter - 1);
+}
+
+static void draw_machine_card(Game *g, int x, int y, int enemy,
+                              const MachineType *t, const char *heading)
+{
+    SDL_Surface *s = g->screen;
+    int which = machine_atlas(enemy);
+    SDL_Surface *atlas = which >= 0 && g->machine_sprites[which] ?
+                         g->machine_sprites[which] :
+                         enemy ? g->enemy_sprites : g->player_sprites;
+    pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(128, 36, 28);
+    char buf[48];
+    rect(s, x + 5, y + 5, 268, 250, PIX_PACK(14, 10, 8));
+    rect(s, x, y, 268, 250, PIX_PACK(222, 210, 178));
+    blend_rect(s, x, y, 268, 250, 180, 150, 90, 40);
+    typewriter_text(g, x + 12, y + 10, heading, 7, 11, red);
+    rect(s, x + 10, y + 26, 248, 1, ink);
+    if (atlas) {
+        /* The level frame, two and a half times size, magenta left out. */
+        int dx, dy;
+        if (SDL_MUSTLOCK(atlas)) SDL_LockSurface(atlas);
+        for (dy = 0; dy < 120; ++dy)
+            for (dx = 0; dx < 240; ++dx) {
+                uint8_t r, gr, b;
+                uint32_t p = surface_pixel(atlas, 2 * 96 + dx * 2 / 5, dy * 2 / 5);
+                unpack_rgb(atlas->format, p, &r, &gr, &b);
+                if (r > 180 && b > 180 && gr < 130) continue;
+                pixel(s, x + 14 + dx, y + 34 + dy, rgb(s, r, gr, b));
+            }
+        if (SDL_MUSTLOCK(atlas)) SDL_UnlockSurface(atlas);
+    }
+    display_text(g, x + 12, y + 160, t->name, 12, 18, ink);
+    snprintf(buf, sizeof(buf), "%s  %s", t->monoplane ? "MONOPLANE" :
+             t->two_seat ? "TWO-SEATER" : "SINGLE-SEAT SCOUT",
+             t->guns == 0 ? "NO GUN" : t->guns == 1 ? "ONE GUN" : "TWO GUNS");
+    typewriter_text(g, x + 12, y + 186, buf, 7, 11, ink);
+    snprintf(buf, sizeof(buf), "SPEED %s   TURN %s",
+             t->power >= 1.1f ? "FAST" : t->power >= 0.9f ? "GOOD" : "SLOW",
+             t->agility >= 1.15f ? "QUICK" : t->agility >= 1.0f ? "FAIR" :
+             "STEADY");
+    typewriter_text(g, x + 12, y + 204, buf, 7, 11, ink);
+}
+
+static void draw_new_machines(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    const MachineType *ours = &our_machines[our_machine_index(g->chapter)];
+    const MachineType *theirs = &their_machines[their_machine_index(g->chapter)];
+    int ours_new = our_machine_index(g->chapter) !=
+                   our_machine_index(g->chapter - 1);
+    const char *line = ours_new ? ours->arrival : theirs->arrival;
+    mesh_chapter = g->chapter;   /* the cards show this chapter's machines */
+    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(20, 31, 48));
+    if (g->title) SDL_BlitSurface(g->title, NULL, s, NULL);
+    blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 10, 8, 6, 120);
+    if (ours_new)
+        draw_machine_card(g, 30, 30, 0, ours, "FROM THE AIRCRAFT PARK");
+    if (their_machine_index(g->chapter) != their_machine_index(g->chapter - 1))
+        draw_machine_card(g, ours_new ? 342 : 186, 30, 1, theirs,
+                          "INTELLIGENCE SUMMARY");
+    if (line) {
+        blend_rect(s, 20, 296, 600, 70, 222, 210, 178, 220);
+        journal_paragraph(g, 34, 304, line, 70, PIX_PACK(47, 37, 27));
+    }
+    typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 378, "ENTER",
+                    7, 11, PIX_PACK(226, 206, 166));
+}
+
 static void draw_story(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -6446,6 +6718,7 @@ static void draw_story(Game *g)
         g->reveal_started = SDL_GetTicks() - 600000u;
     }
     if (g->story_stage == 0) { draw_chapter_card(g); return; }
+    if (g->story_stage == 4) { draw_new_machines(g); return; }
     if (g->story_stage == 1) { draw_loss_card(g); return; }
     if (g->story_stage == 3) {
         int n = news_index_for(g->chapter, g->mission);
@@ -6659,6 +6932,13 @@ static void draw_briefing(Game *g)
         order0 = mix->orders[0] ? mix->orders[0] : chapter->orders[0];
         order1 = mix->orders[1] ? mix->orders[1] : chapter->orders[1];
         order2 = mix->orders[2] ? mix->orders[2] : chapter->orders[2];
+    } else if (side_village_today(g)) {
+        static char warning[64];
+        snprintf(warning, sizeof(warning), "%s IS STILL OCCUPIED: TAKE CARE.",
+                 side_village_names[g->chapter]);
+        order0 = chapter->orders[0];
+        order1 = chapter->orders[1];
+        order2 = warning;
     } else {
         order0 = chapter->orders[0];
         order1 = chapter->orders[1];
@@ -7304,12 +7584,21 @@ static void draw_top_down_sortie(Game *g)
     if (g->health < 80)
         draw_aircraft_smoke(g, (int)g->player_x, (int)g->player_y,
                             g->health, 1, 0x544f5044u);
-    if (g->topdown_player) {
-        SDL_Rect dst = {(int)g->player_x - g->topdown_player->w / 2,
-                        (int)g->player_y - g->topdown_player->h / 2, 0, 0};
-        SDL_BlitSurface(g->topdown_player, NULL, s, &dst);
-    } else {
-        draw_top_plane(s, (int)g->player_x, (int)g->player_y, 0);
+    {
+        int t = our_machine_index(g->chapter);
+        SDL_Surface *plane = t == 0 && g->topdown_machines[0] ?
+                             g->topdown_machines[0] :
+                             t == 3 && g->topdown_machines[1] ?
+                             g->topdown_machines[1] : g->topdown_player;
+        SDL_Rect dst;
+        if (plane) {
+            dst.x = (int)g->player_x - plane->w / 2;
+            dst.y = (int)g->player_y - plane->h / 2;
+            dst.w = dst.h = 0;
+            SDL_BlitSurface(plane, NULL, s, &dst);
+        } else {
+            draw_top_plane(s, (int)g->player_x, (int)g->player_y, 0);
+        }
     }
     snprintf(buf, sizeof(buf), "SCORE %05d", g->score);
     draw_field_sign(g, 8, 8, 112, buf);
@@ -8556,18 +8845,34 @@ static void mesh_strut(AircraftMesh *m, float x0, float y0, float z0,
     }
 }
 
-static void build_aircraft_mesh(AircraftMesh *m, int allied)
+/* Model units are half a metre: the machine's span in metres is its half
+ * span in units. */
+static void build_aircraft_mesh(AircraftMesh *m, int allied,
+                                const MachineType *t)
 {
     int q[4];
     int nose[4], mid[4], tail[4];
     int k;
+    float half = t->span, low_half = t->lower_span;
+    float chord = t->chord * 2.0f, gap = t->gap * 1.55f;
+    float up_y = t->monoplane ? 0.35f : gap * 0.58f;
+    float low_y = -gap * 0.42f;
+    float up_le = 1.8f + t->stagger * 2.0f, low_le = 1.75f;
+    float strut_x = half * 0.64f;
+    float length = t->two_seat ? 1.15f : 1.0f;
     memset(m, 0, sizeof(*m));
     m->parent_for_new = -1;
     /* Upper and lower wings: one panel each, both sides painted. */
-    mesh_panel_y(m, -8.7f, 8.7f, 1.35f, -1.25f, 1.8f, MAT_WING_TOP,
+    mesh_panel_y(m, -half, half, up_y, up_le - chord, up_le, MAT_WING_TOP,
                  MAT_WING_UNDER, FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 1);
-    mesh_panel_y(m, -7.8f, 7.8f, -0.95f, -1.05f, 1.75f, MAT_WING_TOP,
-                 MAT_WING_UNDER, FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 1);
+    if (!t->monoplane)
+        mesh_panel_y(m, -low_half, low_half, low_y, low_le - chord * 0.95f,
+                     low_le, MAT_WING_TOP, MAT_WING_UNDER,
+                     FACE_TWO_SIDED | FACE_OUTLINE, 0.0f, 1);
+    else
+        /* Keep the face numbering: an empty-sized stand-in for face 1. */
+        mesh_panel_y(m, -0.01f, 0.01f, 0.3f, 0.0f, 0.01f, MAT_WING_UNDER,
+                     MAT_WING_UNDER, FACE_TWO_SIDED, 0.0f, 1);
     /* Tailplane and fin. */
     q[0] = mesh_vertex(m, -2.9f, 0.15f, -6.75f);
     q[3] = mesh_vertex(m, 2.9f, 0.15f, -6.75f);
@@ -8589,10 +8894,10 @@ static void build_aircraft_mesh(AircraftMesh *m, int allied)
     mid[1] = mesh_vertex(m, 0.78f, 0.7f, -0.6f);
     mid[2] = mesh_vertex(m, 0.62f, -0.78f, -0.6f);
     mid[3] = mesh_vertex(m, -0.62f, -0.78f, -0.6f);
-    tail[0] = mesh_vertex(m, -0.14f, 0.34f, -6.9f);
-    tail[1] = mesh_vertex(m, 0.14f, 0.34f, -6.9f);
-    tail[2] = mesh_vertex(m, 0.1f, -0.06f, -6.9f);
-    tail[3] = mesh_vertex(m, -0.1f, -0.06f, -6.9f);
+    tail[0] = mesh_vertex(m, -0.14f, 0.34f, -6.9f * length);
+    tail[1] = mesh_vertex(m, 0.14f, 0.34f, -6.9f * length);
+    tail[2] = mesh_vertex(m, 0.1f, -0.06f, -6.9f * length);
+    tail[3] = mesh_vertex(m, -0.1f, -0.06f, -6.9f * length);
     for (k = 0; k < 4; ++k) {
         int n = (k + 1) & 3;
         int material = k == 2 ? MAT_BODY_DARK : MAT_BODY;
@@ -8607,37 +8912,67 @@ static void build_aircraft_mesh(AircraftMesh *m, int allied)
     mesh_face(m, 4, q, MAT_BODY, 0, 0, 0.0f);
     /* Markings on the wing tips, drawn straight after the wing they sit
      * on (faces 0 and 1) so depth sorting can never hide them. */
-    if (allied) {
-        m->parent_for_new = 0;
-        mesh_disc(m, 1, -6.4f, 1.37f, 0.3f, 1.05f, MAT_MARK_BLUE, -0.02f, 1);
-        mesh_disc(m, 1, -6.4f, 1.38f, 0.3f, 0.68f, MAT_MARK_LIGHT, -0.04f, 1);
-        mesh_disc(m, 1, -6.4f, 1.39f, 0.3f, 0.34f, MAT_MARK_RED, -0.06f, 1);
-        mesh_disc(m, 1, 6.4f, 1.37f, 0.3f, 1.05f, MAT_MARK_BLUE, -0.02f, 1);
-        mesh_disc(m, 1, 6.4f, 1.38f, 0.3f, 0.68f, MAT_MARK_LIGHT, -0.04f, 1);
-        mesh_disc(m, 1, 6.4f, 1.39f, 0.3f, 0.34f, MAT_MARK_RED, -0.06f, 1);
-        m->parent_for_new = 1;
-        mesh_disc(m, 1, -5.6f, -0.97f, 0.35f, 0.95f, MAT_MARK_BLUE, -0.02f, 0);
-        mesh_disc(m, 1, -5.6f, -0.98f, 0.35f, 0.6f, MAT_MARK_LIGHT, -0.04f, 0);
-        mesh_disc(m, 1, -5.6f, -0.99f, 0.35f, 0.3f, MAT_MARK_RED, -0.06f, 0);
-        mesh_disc(m, 1, 5.6f, -0.97f, 0.35f, 0.95f, MAT_MARK_BLUE, -0.02f, 0);
-        mesh_disc(m, 1, 5.6f, -0.98f, 0.35f, 0.6f, MAT_MARK_LIGHT, -0.04f, 0);
-        mesh_disc(m, 1, 5.6f, -0.99f, 0.35f, 0.3f, MAT_MARK_RED, -0.06f, 0);
-    } else {
-        m->parent_for_new = 0;
-        mesh_cross_y(m, -6.6f, 1.37f, 0.28f, 0.8f, 1);
-        mesh_cross_y(m, 6.6f, 1.37f, 0.28f, 0.8f, 1);
-        m->parent_for_new = 1;
-        mesh_cross_y(m, -5.8f, -0.97f, 0.35f, 0.72f, 0);
-        mesh_cross_y(m, 5.8f, -0.97f, 0.35f, 0.72f, 0);
+    {
+        float mz = up_le - chord * 0.5f;            /* mid-chord */
+        float tip = half * 0.74f, low_tip = low_half * 0.72f;
+        if (allied) {
+            m->parent_for_new = 0;
+            for (k = -1; k <= 1; k += 2) {
+                mesh_disc(m, 1, (float)k * tip, up_y + 0.02f, mz, 1.05f,
+                          MAT_MARK_BLUE, -0.02f, 1);
+                mesh_disc(m, 1, (float)k * tip, up_y + 0.03f, mz, 0.68f,
+                          MAT_MARK_LIGHT, -0.04f, 1);
+                mesh_disc(m, 1, (float)k * tip, up_y + 0.04f, mz, 0.34f,
+                          MAT_MARK_RED, -0.06f, 1);
+            }
+            if (!t->monoplane) {
+                m->parent_for_new = 1;
+                for (k = -1; k <= 1; k += 2) {
+                    mesh_disc(m, 1, (float)k * low_tip, low_y - 0.02f, mz,
+                              0.95f, MAT_MARK_BLUE, -0.02f, 0);
+                    mesh_disc(m, 1, (float)k * low_tip, low_y - 0.03f, mz,
+                              0.6f, MAT_MARK_LIGHT, -0.04f, 0);
+                    mesh_disc(m, 1, (float)k * low_tip, low_y - 0.04f, mz,
+                              0.3f, MAT_MARK_RED, -0.06f, 0);
+                }
+            }
+        } else {
+            m->parent_for_new = 0;
+            mesh_cross_y(m, -tip, up_y + 0.02f, mz, 0.8f, 1);
+            mesh_cross_y(m, tip, up_y + 0.02f, mz, 0.8f, 1);
+            if (!t->monoplane) {
+                m->parent_for_new = 1;
+                mesh_cross_y(m, -low_tip, low_y - 0.02f, mz, 0.72f, 0);
+                mesh_cross_y(m, low_tip, low_y - 0.02f, mz, 0.72f, 0);
+            }
+        }
     }
     m->parent_for_new = -1;
+    if (t->monoplane) {
+        /* A shoulder-wing monoplane: a pylon above the cockpit and the
+         * wires that brace the wing to it and to the undercarriage. */
+        mesh_strut(m, 0.0f, up_y, 0.6f, 0.0f, 1.9f, 0.6f, 0.1f);
+        mesh_strut(m, -strut_x, up_y, 0.6f, 0.0f, 1.9f, 0.6f, 0.04f);
+        mesh_strut(m, strut_x, up_y, 0.6f, 0.0f, 1.9f, 0.6f, 0.04f);
+        mesh_strut(m, -strut_x, up_y, 0.6f, 0.0f, -1.6f, 0.9f, 0.04f);
+        mesh_strut(m, strut_x, up_y, 0.6f, 0.0f, -1.6f, 0.9f, 0.04f);
+        return;
+    }
     /* Interplane struts outboard, cabane struts over the fuselage. */
-    mesh_strut(m, -5.6f, 1.35f, 0.9f, -5.1f, -0.95f, 0.9f, 0.16f);
-    mesh_strut(m, 5.6f, 1.35f, 0.9f, 5.1f, -0.95f, 0.9f, 0.16f);
-    mesh_strut(m, -5.6f, 1.35f, -0.4f, -5.1f, -0.95f, -0.4f, 0.16f);
-    mesh_strut(m, 5.6f, 1.35f, -0.4f, 5.1f, -0.95f, -0.4f, 0.16f);
-    mesh_strut(m, -0.7f, 1.35f, 1.2f, -0.6f, 0.7f, 1.6f, 0.12f);
-    mesh_strut(m, 0.7f, 1.35f, 1.2f, 0.6f, 0.7f, 1.6f, 0.12f);
+    {
+        float fs = up_le - chord * 0.3f, rs = up_le - chord * 0.75f;
+        float st = t->stagger * 2.0f;
+        mesh_strut(m, -strut_x, up_y, fs, -strut_x * 0.95f, low_y, fs - st,
+                   0.16f);
+        mesh_strut(m, strut_x, up_y, fs, strut_x * 0.95f, low_y, fs - st,
+                   0.16f);
+        mesh_strut(m, -strut_x, up_y, rs, -strut_x * 0.95f, low_y, rs - st,
+                   0.16f);
+        mesh_strut(m, strut_x, up_y, rs, strut_x * 0.95f, low_y, rs - st,
+                   0.16f);
+        mesh_strut(m, -0.7f, up_y, fs, -0.6f, 0.7f, fs + 0.4f, 0.12f);
+        mesh_strut(m, 0.7f, up_y, fs, 0.6f, 0.7f, fs + 0.4f, 0.12f);
+    }
 }
 
 /* A raiding airship: an eight-sided hull, four fins and a gondola. */
@@ -8685,18 +9020,24 @@ static void build_airship_mesh(AircraftMesh *m)
     m->parent_for_new = -1;
 }
 
-/* Meshes: 0 enemy scout, 1 allied scout, 2 airship, 3 Gotha bomber. */
+/* Meshes: 0 enemy scout, 1 allied scout, 2 airship, 3 Gotha bomber.  The
+ * scouts are the machines of the chapter being flown (mesh_chapter), and
+ * are rebuilt when it changes. */
 static const AircraftMesh *aircraft_mesh(int kind)
 {
     static AircraftMesh meshes[4];
     static int built[4];
     if (kind < 0 || kind > 3) kind = 0;
-    if (!built[kind]) {
+    if (built[kind] != mesh_chapter + 1) {
         if (kind == 2) {
             build_airship_mesh(&meshes[2]);
         } else {
             int i;
-            build_aircraft_mesh(&meshes[kind], kind == 1);
+            const MachineType *t = kind == 1 ?
+                &our_machines[our_machine_index(mesh_chapter)] : kind == 3 ?
+                &their_machines[1] :
+                &their_machines[their_machine_index(mesh_chapter)];
+            build_aircraft_mesh(&meshes[kind], kind == 1, t);
             /* The Gotha is the same rigging drawn half as large again. */
             if (kind == 3)
                 for (i = 0; i < meshes[3].verts; ++i) {
@@ -8705,7 +9046,7 @@ static const AircraftMesh *aircraft_mesh(int kind)
                     meshes[3].v[i][2] *= 1.4f;
                 }
         }
-        built[kind] = 1;
+        built[kind] = mesh_chapter + 1;
     }
     return &meshes[kind];
 }
@@ -9794,9 +10135,22 @@ static void draw_sortie(Game *g)
                        FOREGROUND_PARALLAX, 235, 390, 0x4e454152u);
     for (i = 0; i < MAX_TARGETS; ++i) if (g->targets[i].active) {
         int sx = (int)(g->targets[i].world_x - g->scroll);
-        if (sx > -20 && sx < SCREEN_W + 20) {
+        if (sx > -60 && sx < SCREEN_W + 60) {
             int ty = terrain_y(g->targets[i].world_x) - 12;
-            draw_ground_gun(g, sx, ty, &g->targets[i]);
+            if (g->targets[i].civilian) {
+                int sprite = g->targets[i].civilian + g->targets[i].wrecked;
+                const short *r = side_civilian_rect[sprite];
+                SDL_Rect src = {r[0], r[1], r[2], r[3]};
+                SDL_Rect dst = {sx - r[2] / 2, ty + 14 - r[3], r[2], r[3]};
+                if (g->side_civilians)
+                    SDL_BlitSurface(g->side_civilians, &src, s, &dst);
+                if (g->targets[i].wrecked)
+                    blend_circle(s, sx + (int)(SDL_GetTicks() / 60u % 12u),
+                                 ty - r[3] / 2 - (int)(SDL_GetTicks() / 60u % 12u),
+                                 10, 40, 38, 36, 110);
+            } else {
+                draw_ground_gun(g, sx, ty, &g->targets[i]);
+            }
         }
     }
     for (i = 0; i < MAX_ENEMIES; ++i) if (g->enemies[i].active) {
@@ -10442,6 +10796,7 @@ static int game_init(Game *g)
     g->explosion_atlas = SDL_LoadBMP(CANVAS_EXPLOSION_ATLAS_BMP);
     g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
     g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
+    g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -10451,10 +10806,11 @@ static int game_init(Game *g)
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
-            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets
+            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
+            &g->side_civilians
         };
         int i;
-        for (i = 0; i < 16; ++i) if (*convert[i]) {
+        for (i = 0; i < 17; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -10473,9 +10829,9 @@ static int game_init(Game *g)
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas,
                                 g->cockpit_revolver, g->rear_carbine,
-                                g->topdown_targets};
+                                g->topdown_targets, g->side_civilians};
         int i;
-        for (i = 0; i < 14; ++i) if (keyed[i])
+        for (i = 0; i < 15; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -10493,6 +10849,29 @@ static int game_init(Game *g)
         fprintf(stderr, "The font atlas is unavailable\n");
     g->player_sprites = SDL_LoadBMP(CANVAS_PLAYER_SPRITES_BMP);
     g->enemy_sprites = SDL_LoadBMP(CANVAS_ENEMY_SPRITES_BMP);
+    {
+        static const char *const side[4] = {
+            CANVAS_PLAYER_TWOSEAT_BMP, CANVAS_PLAYER_LATE_BMP,
+            CANVAS_ENEMY_MONO_BMP, CANVAS_ENEMY_LATE_BMP
+        };
+        static const char *const top[2] = {
+            CANVAS_TOPDOWN_TWOSEAT_BMP, CANVAS_TOPDOWN_LATE_BMP
+        };
+        int k;
+        for (k = 0; k < 4; ++k) g->machine_sprites[k] = SDL_LoadBMP(side[k]);
+        for (k = 0; k < 2; ++k) {
+            g->topdown_machines[k] = SDL_LoadBMP(top[k]);
+            if (g->topdown_machines[k]) {
+                SDL_Surface *c = SDL_ConvertSurface(g->topdown_machines[k],
+                                                    g->screen->format, 0);
+                if (c) {
+                    SDL_FreeSurface(g->topdown_machines[k]);
+                    g->topdown_machines[k] = c;
+                }
+                prepare_magenta_key(g->topdown_machines[k]);
+            }
+        }
+    }
     if (!g->player_sprites || !g->enemy_sprites)
         fprintf(stderr, "Aircraft sprite atlas unavailable; using vector fallback\n");
     {
@@ -10500,7 +10879,9 @@ static int game_init(Game *g)
          * Holding them in the screen's format lets the renderer read
          * them directly instead of decoding 24-bit BMP pixels through SDL. */
         SDL_Surface **atlases[] = {
-            &g->player_sprites, &g->enemy_sprites
+            &g->player_sprites, &g->enemy_sprites,
+            &g->machine_sprites[0], &g->machine_sprites[1],
+            &g->machine_sprites[2], &g->machine_sprites[3]
         };
         int i;
         for (i = 0; i < (int)(sizeof(atlases) / sizeof(atlases[0])); ++i)
@@ -10932,7 +11313,14 @@ static void handle_event(Game *g, SDL_Event *ev)
             if (g->story_stage == 2 && !story_reveal_done(g)) {
                 g->reveal_started = SDL_GetTicks() - 60000u;
             } else if (g->story_stage != 2) {
-                if (g->story_stage == 0 && thyne_lost_tonight(g))
+                if (g->story_stage == 0 && new_machines_today(g))
+                    g->story_stage = 4;
+                else if (g->story_stage <= 0 || g->story_stage == 4) {
+                    if (thyne_lost_tonight(g)) g->story_stage = 1;
+                    else if (news_index_for(g->chapter, g->mission) >= 0)
+                        g->story_stage = 3;
+                    else g->story_stage = 2;
+                } else if (g->story_stage == 0 && thyne_lost_tonight(g))
                     g->story_stage = 1;
                 else if (g->story_stage < 2 &&
                          news_index_for(g->chapter, g->mission) >= 0)
@@ -10971,7 +11359,8 @@ int main(int argc, char **argv)
         static const char *const qa_modes[] = {
             "AIRSHIP", "CHAPTER_SUCCESS", "COURTMARTIAL", "DEATH", "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
-            "GUNNER", "HOSPITAL", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN", "TOPMIX",
+            "GUNNER", "HOSPITAL", "MACHINES", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN",
+            "TOPMIX",
             "TRACERS",
             "TRUCE",
             "UNARMED",
@@ -10987,6 +11376,20 @@ int main(int argc, char **argv)
     if (argc > 1 && strcmp(argv[1], "SIDE") == 0) {
         g.chapter = 2;
         g.mission = 4;
+        /* SIDE n: the first side-on sortie of chapter n instead. */
+        if (argc > 2 && argv[2][0] >= '0' && argv[2][0] <= '7') {
+            int m;
+            g.chapter = argv[2][0] - '0';
+            /* SIDE n VILLAGE: the first of them with a village to spare. */
+            for (m = 0; m < MISSIONS_PER_CHAPTER; ++m) {
+                g.mission = m;
+                if (campaign_missions[g.chapter][m].mode == MISSION_SIDE &&
+                    campaign_missions[g.chapter][m].special == SPECIAL_NONE &&
+                    (argc < 4 || side_village_today(&g)))
+                    break;
+            }
+            g.qa_hold = argc > 3;
+        }
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && (strcmp(argv[1], "TRUCE") == 0 ||
@@ -11027,6 +11430,13 @@ int main(int argc, char **argv)
         g.career_counted = 1;
         g.conduct_pending = 0;
         set_scene(&g, g.offences >= 3 ? SCENE_COURT_MARTIAL : SCENE_CONDUCT);
+    } else if (argc > 2 && strcmp(argv[1], "MACHINES") == 0) {
+        /* MACHINES n: chapter n's first morning, with its new machines. */
+        g.chapter = atoi(argv[2]) % CHAPTER_COUNT;
+        g.mission = 0;
+        mesh_chapter = g.chapter;
+        set_scene(&g, SCENE_STORY);
+        g.story_stage = 4;
     } else if (argc > 1 && strcmp(argv[1], "DIARY") == 0) {
         g.qa_diary_all = 1;
         set_scene(&g, SCENE_STORY);
@@ -11241,6 +11651,13 @@ int main(int argc, char **argv)
     if (g.fonts) SDL_FreeSurface(g.fonts);
     if (g.player_sprites) SDL_FreeSurface(g.player_sprites);
     if (g.enemy_sprites) SDL_FreeSurface(g.enemy_sprites);
+    {
+        int k;
+        for (k = 0; k < 4; ++k)
+            if (g.machine_sprites[k]) SDL_FreeSurface(g.machine_sprites[k]);
+        for (k = 0; k < 2; ++k)
+            if (g.topdown_machines[k]) SDL_FreeSurface(g.topdown_machines[k]);
+    }
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
@@ -11253,6 +11670,7 @@ int main(int argc, char **argv)
     if (g.cockpit_revolver) SDL_FreeSurface(g.cockpit_revolver);
     if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
     if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
+    if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);

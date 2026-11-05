@@ -94,10 +94,11 @@ class Canvas:
             np.array(colour, np.float32) * m[..., None]
         self.alpha = np.maximum(self.alpha, np.clip(m * 2.0, 0, 1))
 
-    def image(self):
+    def image(self, size=None):
+        """The painting filtered down to its size, or to 'size' if given."""
         rgb = Image.fromarray(np.clip(self.rgb, 0, 255).astype(np.uint8))
         alpha = Image.fromarray((self.alpha * 255).astype(np.uint8))
-        size = (self.w // SS, self.h // SS)
+        size = size or (self.w // SS, self.h // SS)
         rgb = rgb.resize(size, Image.LANCZOS)
         alpha = alpha.resize(size, Image.LANCZOS)
         out = Image.new("RGB", size, KEY)
