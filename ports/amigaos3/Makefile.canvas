@@ -38,6 +38,8 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_PILOT_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_UNARMED_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit-unarmed.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_SINGLE_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit-single.bmp\" \
+	-DCANVAS_COCKPIT_REVOLVER_BMP=\"PROGDIR:assets/canvas-skies/cockpit-revolver.bmp\" \
+	-DCANVAS_REAR_CARBINE_BMP=\"PROGDIR:assets/canvas-skies/rear-carbine.bmp\" \
 	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_GUNNER_RING_BMP=\"PROGDIR:assets/canvas-skies/gunner-ring-empty-v2.bmp\" \
 	-DCANVAS_GUNNER_AIRFRAME_BMP=\"PROGDIR:assets/canvas-skies/gunner-airframe-tail.bmp\" \

@@ -107,6 +107,12 @@
 #ifndef CANVAS_PILOT_COCKPIT_BMP
 #define CANVAS_PILOT_COCKPIT_BMP "assets/canvas-skies/pilot-cockpit.bmp"
 #endif
+#ifndef CANVAS_COCKPIT_REVOLVER_BMP
+#define CANVAS_COCKPIT_REVOLVER_BMP "assets/canvas-skies/cockpit-revolver.bmp"
+#endif
+#ifndef CANVAS_REAR_CARBINE_BMP
+#define CANVAS_REAR_CARBINE_BMP "assets/canvas-skies/rear-carbine.bmp"
+#endif
 #ifndef CANVAS_PILOT_COCKPIT_SINGLE_BMP
 #define CANVAS_PILOT_COCKPIT_SINGLE_BMP "assets/canvas-skies/pilot-cockpit-single.bmp"
 #endif
@@ -501,6 +507,8 @@ typedef struct {
     SDL_Surface *pilot_cockpit;
     SDL_Surface *pilot_cockpit_unarmed; /* 1914: no guns, no ring sight */
     SDL_Surface *pilot_cockpit_single;  /* 1915 to spring 1917: one Vickers */
+    SDL_Surface *cockpit_revolver;      /* 1914: two frames, rest and kick */
+    SDL_Surface *rear_carbine;          /* 1914: nine aims from the rear seat */
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
@@ -8458,13 +8466,21 @@ static int cellule_sample(float px, float py, float *r, float *gr, float *b)
         rib = fabsf(y) / (CELL_UP_SPAN / 17.0f);
         rib -= floorf(rib);
         tape = rib < 0.07f || rib > 0.93f ? 1.0f : 0.0f;
-        light = 0.55f + 0.45f * (1.0f - chord);      /* glancing near the LE */
-        fade = fabsf(y) / CELL_UP_SPAN;
-        *r = 120.0f + light * 46.0f + tape * 26.0f - fade * 18.0f;
-        *gr = 92.0f + light * 32.0f + tape * 18.0f - fade * 10.0f;
-        *b = 66.0f + light * 22.0f + tape * 10.0f;
-        if (chord > 0.96f) { *r += 40.0f; *gr += 32.0f; *b += 22.0f; }
-        if (y > 0.0f) { *r *= 0.86f; *gr *= 0.9f; *b *= 0.96f; }
+        /* PC10 khaki-green in the low sun: the same warm khaki as the
+         * painted roots beside the cockpit, darkening toward the tips and
+         * on the shadowed right, with doped-linen grain. */
+        light = 0.6f + 0.4f * (1.0f - chord);        /* glancing near the LE */
+        fade = (fabsf(y) - CELL_LO_ROOT) / (CELL_UP_SPAN - CELL_LO_ROOT);
+        {
+            uint32_t h = scene_hash((uint32_t)(px * 7.0f) * 7919u ^
+                                    (uint32_t)(py * 5.0f) * 104729u);
+            float grain = (float)(h & 15u) - 7.5f;
+            *r = 92.0f + light * 40.0f + tape * 18.0f - fade * 30.0f + grain;
+            *gr = 80.0f + light * 26.0f + tape * 14.0f - fade * 20.0f + grain;
+            *b = 48.0f + light * 14.0f + tape * 8.0f - fade * 6.0f + grain * 0.6f;
+        }
+        if (chord > 0.96f) { *r += 30.0f; *gr += 24.0f; *b += 14.0f; }
+        if (y > 0.0f) { *r *= 0.78f; *gr *= 0.86f; *b *= 1.02f; }
         return 1;
     }
     return 0;
@@ -8536,7 +8552,7 @@ static void draw_cockpit_cellule(SDL_Surface *c)
         for (k = 0; k < 2; ++k) {
             float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
             float ux = cell_chord(CELL_UP_LE, CELL_UP_TE, frac);
-            float lx = cell_chord(CELL_LO_LE, CELL_LO_TE, frac);
+            float lx = ux;          /* the strut's foot, square below */
             cell_line(c, lx, root, cell_lower_z(root), ux, strut_y, CELL_UP_Z,
                       wire);
             cell_line(c, ux, sy * CELL_CABANE_Y, CELL_UP_Z, lx, strut_y,
@@ -8545,27 +8561,29 @@ static void draw_cockpit_cellule(SDL_Surface *c)
         /* Incidence wires cross between the front and rear struts. */
         cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
                   strut_y, CELL_UP_Z,
-                  cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_REAR_SPAR),
+                  cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
                   strut_y, cell_lower_z(strut_y), wire);
         cell_line(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
                   strut_y, CELL_UP_Z,
-                  cell_chord(CELL_LO_LE, CELL_LO_TE, CELL_FRONT_SPAR),
+                  cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
                   strut_y, cell_lower_z(strut_y), wire);
         /* Interplane struts, rear first so the front one stands over it. */
         for (k = 1; k >= 0; --k) {
+            /* Square to the wings: top and foot at the same depth, so the
+             * strut stands upright in the view. */
             float frac = k ? CELL_REAR_SPAR : CELL_FRONT_SPAR;
-            cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, frac), strut_y,
-                       CELL_UP_Z, cell_chord(CELL_LO_LE, CELL_LO_TE, frac),
-                       strut_y, cell_lower_z(strut_y), 0.05f);
+            float sx = cell_chord(CELL_UP_LE, CELL_UP_TE, frac);
+            cell_strut(c, sx, strut_y, CELL_UP_Z, sx, strut_y,
+                       cell_lower_z(strut_y), 0.05f);
         }
         /* Cabane struts from the centre section down to the upper
          * longerons; the painted cowling hides their feet. */
-        cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_FRONT_SPAR),
-                   sy * CELL_CABANE_Y, CELL_UP_Z, 2.35f, sy * 0.34f, 0.32f,
-                   0.04f);
-        cell_strut(c, cell_chord(CELL_UP_LE, CELL_UP_TE, CELL_REAR_SPAR),
-                   sy * CELL_CABANE_Y, CELL_UP_Z, 1.75f, sy * 0.34f, 0.32f,
-                   0.04f);
+        for (k = 0; k < 2; ++k) {
+            float cx = cell_chord(CELL_UP_LE, CELL_UP_TE,
+                                  k ? CELL_REAR_SPAR : CELL_FRONT_SPAR);
+            cell_strut(c, cx, sy * CELL_CABANE_Y, CELL_UP_Z,
+                       cx, sy * CELL_CABANE_Y, 0.32f, 0.04f);
+        }
     }
 }
 
@@ -8623,9 +8641,9 @@ static void draw_needle(SDL_Surface *s, const CockpitDial *d, int ox, int oy,
     circle(s, cx, cy, 2, PIX_PACK(166, 126, 60));
 }
 
-/* 1914's weapons, held: shaded shapes in the cockpit painting's palette.
- * They kick up when fired and settle back as the bolt is worked or the
- * next round comes up. */
+/* 1914's weapons, held: painted on the host (make_personal_arms.py).  They
+ * kick up when fired and settle as the bolt is worked or the next round
+ * comes round. */
 static float personal_kick(const Game *g)
 {
     uint32_t since = SDL_GetTicks() - g->last_shot;
@@ -8634,58 +8652,27 @@ static float personal_kick(const Game *g)
 
 static void draw_revolver_in_hand(Game *g)
 {
-    SDL_Surface *s = g->screen;
-    int k = (int)(personal_kick(g) * 14.0f);
-    int x = 470, y = 318 - k;
-    pix_t steel = PIX_PACK(46, 46, 50), lit = PIX_PACK(122, 124, 130);
-    pix_t glove = PIX_PACK(92, 62, 38), glove_lit = PIX_PACK(150, 106, 66);
-    /* Sleeve and gauntlet coming up from below the coaming. */
-    fill_quad(s, x + 40, 400, x + 92, 400, x + 46, y + 38, x + 16, y + 44,
-              PIX_PACK(70, 66, 48));
-    circle(s, x + 22, y + 32, 17, glove);
-    circle(s, x + 18, y + 26, 9, glove_lit);
-    /* The grip, the cylinder and a barrel pointing ahead past the nose. */
-    fill_quad(s, x + 12, y + 30, x + 22, y + 30, x + 18, y + 8, x + 8, y + 10,
-              PIX_PACK(84, 52, 30));
-    rect(s, x - 2, y, 22, 12, steel);
-    rect(s, x, y + 2, 16, 3, lit);
-    fill_quad(s, x - 44, y - 12, x - 40, y - 16, x + 2, y + 2, x - 2, y + 6,
-              steel);
-    line(s, x - 43, y - 14, x, y + 3, lit);
-    if (personal_kick(g) > 0.7f)
-        blend_circle(s, x - 48, y - 16, 10, 255, 220, 140, 210);
+    SDL_Rect src = {0, 0, 220, 170}, dst = {420, 230, 220, 170};
+    if (!g->cockpit_revolver) return;
+    if (personal_kick(g) > 0.55f) src.x = 220;
+    SDL_BlitSurface(g->cockpit_revolver, &src, g->screen, &dst);
 }
 
 static void draw_carbine_in_hand(Game *g)
 {
-    SDL_Surface *s = g->screen;
-    int k = (int)(personal_kick(g) * 10.0f);
-    int ax = (int)g->player_x, ay = (int)g->player_y;
-    int bx = 330, by = 400 + k;
-    float dx = (float)(ax - bx), dy = (float)(ay - by);
-    float len = sqrtf(dx * dx + dy * dy), ux, uy;
-    int mx, my, sx, sy;
-    if (len < 1.0f) len = 1.0f;
-    ux = dx / len;
-    uy = dy / len;
-    /* The muzzle a little short of the sight line, the butt off-screen. */
-    mx = bx + (int)(ux * 190.0f);
-    my = by + (int)(uy * 190.0f);
-    sx = bx + (int)(ux * 70.0f);
-    sy = by + (int)(uy * 70.0f);
-    fill_quad(s, bx - 16, by, bx + 16, by, sx + 6, sy, sx - 6, sy,
-              PIX_PACK(96, 60, 34));                   /* the stock */
-    line(s, bx - 14, by, sx - 5, sy, PIX_PACK(148, 98, 58));
-    fill_quad(s, sx - 4, sy, sx + 4, sy, mx + 2, my, mx - 2, my,
-              PIX_PACK(52, 50, 50));                   /* barrel and fore-end */
-    line(s, sx - 3, sy, mx - 1, my, PIX_PACK(130, 128, 126));
-    rect(s, sx + (int)(ux * 18.0f) + 3, sy + (int)(uy * 18.0f) - 2, 8, 3,
-         PIX_PACK(70, 68, 66));                        /* the bolt handle */
-    circle(s, sx + (int)(ux * 40.0f), sy + (int)(uy * 40.0f), 9,
-           PIX_PACK(92, 62, 38));                      /* the left hand */
-    if (personal_kick(g) > 0.7f)
-        blend_circle(s, mx + (int)(ux * 6.0f), my + (int)(uy * 6.0f), 9,
-                     255, 220, 140, 210);
+    /* The butt rests low in the middle of the rear seat; the frame whose
+     * angle is nearest the crosshair is shown. */
+    float deg = atan2f(g->player_x - 330.0f, 400.0f - g->player_y) *
+                180.0f / (float)M_PI;
+    int frame = (int)floorf((deg + 48.0f) / 12.0f + 0.5f);
+    SDL_Rect src, dst;
+    if (!g->rear_carbine) return;
+    if (frame < 0) frame = 0;
+    if (frame > 8) frame = 8;
+    src.x = frame * 200; src.y = 0; src.w = 200; src.h = 260;
+    dst.x = 230; dst.y = 140 + (int)(personal_kick(g) * 10.0f);
+    dst.w = 200; dst.h = 260;
+    SDL_BlitSurface(g->rear_carbine, &src, g->screen, &dst);
 }
 
 static void draw_living_cockpit(Game *g)
@@ -9810,6 +9797,8 @@ static int game_init(Game *g)
     g->pilot_cockpit = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_BMP);
     g->pilot_cockpit_unarmed = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_UNARMED_BMP);
     g->pilot_cockpit_single = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_SINGLE_BMP);
+    g->cockpit_revolver = SDL_LoadBMP(CANVAS_COCKPIT_REVOLVER_BMP);
+    g->rear_carbine = SDL_LoadBMP(CANVAS_REAR_CARBINE_BMP);
     g->gunner_cockpit = SDL_LoadBMP(CANVAS_GUNNER_COCKPIT_BMP);
     g->gunner_ring = SDL_LoadBMP(CANVAS_GUNNER_RING_BMP);
     g->gunner_airframe = SDL_LoadBMP(CANVAS_GUNNER_AIRFRAME_BMP);
@@ -9824,10 +9813,11 @@ static int game_init(Game *g)
             &g->pilot_cockpit_single, &g->gunner_cockpit,
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
-            &g->explosion_atlas, &g->topdown_explosion_atlas
+            &g->explosion_atlas, &g->topdown_explosion_atlas,
+            &g->cockpit_revolver, &g->rear_carbine
         };
         int i;
-        for (i = 0; i < 13; ++i) if (*convert[i]) {
+        for (i = 0; i < 15; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -9844,9 +9834,10 @@ static int game_init(Game *g)
                                 g->gunner_ring, g->gunner_airframe,
                                 g->gunner_moving_guns,
                                 g->explosion_atlas,
-                                g->topdown_explosion_atlas};
+                                g->topdown_explosion_atlas,
+                                g->cockpit_revolver, g->rear_carbine};
         int i;
-        for (i = 0; i < 11; ++i) if (keyed[i])
+        for (i = 0; i < 13; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
@@ -10405,6 +10396,8 @@ int main(int argc, char **argv)
     if (g.cockpit_composite_unarmed) SDL_FreeSurface(g.cockpit_composite_unarmed);
     if (g.cockpit_composite_single) SDL_FreeSurface(g.cockpit_composite_single);
     if (g.pilot_cockpit_single) SDL_FreeSurface(g.pilot_cockpit_single);
+    if (g.cockpit_revolver) SDL_FreeSurface(g.cockpit_revolver);
+    if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
