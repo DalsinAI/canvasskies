@@ -319,7 +319,7 @@ static const Chapter chapters[CHAPTER_COUNT] = {
      {"MACHINE GUNS HAVE ENTERED THE SKY.", "THE FOKKER PATROLS HUNT OUR CORPS,",
       "AND EVERY CROSSING IS CONTESTED."},
      {"ESCORT THE OBSERVATION ROUTE.", "DRIVE OFF THE ENEMY PATROL.",
-      "RETURN TO THE WESTERN FIELD."}, 0, 0, 3, 1, 3800.0f},
+      "RETURN TO THE WESTERN FIELD."}, 2, 4, 3, 1, 3800.0f},
     {"1 JULY 1916", "OVER THE SOMME",
      {"THE GUNS HAVE ERASED THE HORIZON.", "THE INFANTRY WAITS BELOW THE CLOUDS,",
       "BLIND WITHOUT YOUR REPORT."},
@@ -349,7 +349,7 @@ static const Chapter chapters[CHAPTER_COUNT] = {
      {"THE MESSAGE SAYS THE GUNS STOP AT ELEVEN.", "UNTIL THEN, YOU FLY ONE LAST PATROL.",
       "NO ONE WANTS TO BE THE FINAL NAME."},
      {"CROSS THE QUIETENING FRONT.", "DO NOT FIRE UNLESS FIRED UPON.",
-      "BE HOME WHEN THE BELLS BEGIN."}, 0, 0, 10, 1, 3600.0f}
+      "BE HOME WHEN THE BELLS BEGIN."}, 1, 3, 10, 1, 3600.0f}
 };
 
 typedef struct {
@@ -358,6 +358,7 @@ typedef struct {
     int enemy;
     int type;
     int active;
+    int missed;  /* an enemy round that went wide of the rear seat */
 } Bullet;
 
 typedef struct {
@@ -664,6 +665,38 @@ static int mission_armed(const Game *g)
 {
     return chapters[g->chapter].armed &&
            campaign_missions[g->chapter][g->mission].special != SPECIAL_TRUCE;
+}
+
+/* The last days of the war: "do not fire unless fired upon".  Apart from
+ * "No Easy Truce", the Armistice chapter's air patrols meet an enemy who
+ * waves and turns away.  The guns are fitted but nobody fights, and
+ * flying the patrol out is the task, as in unarmed 1914. */
+static int armistice_quiet(const Game *g)
+{
+    return g->chapter == CHAPTER_COUNT - 1 && g->mission != 2 &&
+           is_perspective_mode(campaign_missions[g->chapter][g->mission].mode);
+}
+
+/* Tom is wounded from "The Empty Seat" (1916) until "Tom Returns"
+ * (1917); a stand-in flies the two-seater meanwhile. */
+static int tom_wounded(const Game *g)
+{
+    return (g->chapter == 2 && g->mission >= 8) ||
+           (g->chapter == 3 && g->mission < 7);
+}
+
+/* The first wingman wounded and sent home today, or -1. */
+static int wingman_hit(const Game *g)
+{
+    int i;
+    for (i = 0; i < 3; ++i) if (g->wingman_hit_today[i]) return i;
+    return -1;
+}
+
+/* Whether the enemy in the sky means to fight. */
+static int enemies_hostile(const Game *g)
+{
+    return mission_armed(g) && !armistice_quiet(g);
 }
 
 /* Wingmen follow the written story rather than a damage simulation.
@@ -2296,6 +2329,7 @@ static int current_mission_goal(const Game *g)
     if (special == SPECIAL_AIRSHIP) return 1;
     if (special == SPECIAL_GOTHA) return 2;
     if (special == SPECIAL_TRUCE) return 0;
+    if (armistice_quiet(g)) return 0;
     if (is_perspective_mode(mode)) {
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
@@ -2363,7 +2397,7 @@ static int perspective_spawn_count(const Game *g)
     int goal = current_mission_goal(g);
     int count;
     if (!is_perspective_mode(mode)) return 0;
-    if (!mission_armed(g)) return 1;
+    if (!enemies_hostile(g)) return 1;
     if (campaign_missions[g->chapter][g->mission].special == SPECIAL_AIRSHIP)
         return 1;
     if (campaign_missions[g->chapter][g->mission].special == SPECIAL_GOTHA)
@@ -2578,7 +2612,7 @@ static Bullet *new_bullet(Game *g, float x, float y, float vx, float vy,
         Bullet *b = &g->bullets[i];
         if (!b->active) {
             b->x = x; b->y = y; b->vx = vx; b->vy = vy;
-            b->enemy = enemy; b->type = type;
+            b->enemy = enemy; b->type = type; b->missed = 0;
             b->life = life; b->initial_life = life;
             b->active = 1;
             return b;
@@ -3538,10 +3572,16 @@ static void update_perspective_sortie(Game *g, float dt,
         b->y += b->vy * dt;
         b->life -= dt;
         if (b->life <= 0.0f) b->active = 0;
-        if (b->active && b->enemy &&
+        if (b->active && b->enemy && !b->missed &&
             fabsf(b->x - 320.0f) < 28.0f &&
             fabsf(b->y - 190.0f) < 28.0f &&
             now - g->last_damage > 520u) {
+            /* Not every round in a burst finds the machine: about one in
+             * two goes wide and flies on past. */
+            if (scene_hash((uint32_t)i * 2654435761u ^ now) % 100u >= 55u) {
+                b->missed = 1;
+                continue;
+            }
             if (gunner) {
                 BulletHole *hole = &g->bullet_holes[g->next_bullet_hole];
                 uint32_t scatter = scene_hash(now ^
@@ -3604,7 +3644,7 @@ static void update_perspective_sortie(Game *g, float dt,
             }
         }
         if (enemy->crashing) continue;
-        if (mission_armed(g) &&
+        if (enemies_hostile(g) &&
             depth < 1250.0f && depth > 140.0f &&
             now >= enemy->last_shot &&
             now - enemy->last_shot >
@@ -4228,7 +4268,7 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
                     0.28f * (1.0f - distance / 520.0f));
         return;
     }
-    if (!mission_armed(g) || enemy->ai_state != AI_ATTACK ||
+    if (!enemies_hostile(g) || enemy->ai_state != AI_ATTACK ||
         now - g->scene_started < 5200u || now < enemy->last_shot) return;
     if (enemy->target >= 0) {
         Enemy *w = &g->wingmen[enemy->target];
@@ -4582,7 +4622,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     if (!g->qa_hold && active > 0 && g->fuel <= 0.0f && !g->flight_doomed) {
         finish_alternate_sortie(g);
-    } else if (!g->qa_hold && !mission_armed(g) && active > 0 &&
+    } else if (!g->qa_hold && !enemies_hostile(g) && active > 0 &&
                !g->flight_doomed && !g->flight_crashed &&
                g->scroll > chapters[g->chapter].distance) {
         /* 1914: nobody is armed.  Shadowing the other machine for the
@@ -4639,7 +4679,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         g->player_vy = -8.0f;
     }
     g->scroll += g->airspeed * dt;
-    g->fuel -= dt * 1.15f;
+    g->fuel -= dt * 1.05f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = fabsf(g->player_vy) / 120.0f;
     g->audio.other_engine = 0.0f;
@@ -5299,9 +5339,15 @@ static void draw_dawn(Game *g)
              mission_date(g));
     typewriter_text(g, 40, 262, buf, 10, 15, PIX_PACK(232, 210, 160));
     for (i = 0; i < 3; ++i)
-        if (elapsed > 700u + (uint32_t)i * 1500u)
-            typewriter_text(g, 40, 290 + i * 18, dawn_lines[g->chapter][i],
+        if (elapsed > 700u + (uint32_t)i * 1500u) {
+            const char *words = dawn_lines[g->chapter][i];
+            /* Gridpipe Thyne is lost late in 1917; before that, Tom is
+             * only quiet. */
+            if (g->chapter == 4 && i == 2 && g->mission <= 8)
+                words = "TOM CHECKS EVERY WIRE TWICE AND SAYS NOTHING.";
+            typewriter_text(g, 40, 290 + i * 18, words,
                             7, 11, PIX_PACK(214, 200, 168));
+        }
     /* The third cough catches. */
     if (elapsed > 4300u)
         display_text(g, 470, 254, "CONTACT", 16, 23, PIX_PACK(214, 92, 62));
@@ -5332,19 +5378,24 @@ static void draw_mess(Game *g)
         "WE SING EVERY SONG WE KNOW, AND THEN THE RUDE ONES."
     };
     int i, x;
-    if (g->kills > 0)
-        snprintf(first, sizeof(first), "BLUEBOTTLE CHALKS %d MORE ON THE BOARD.",
-                 g->kills);
+    if (wingman_hit(g) >= 0)
+        snprintf(first, sizeof(first), "%s IS IN THE SICK BAY TONIGHT.",
+                 allied_pilot_names[wingman_hit(g)]);
+    else if (g->kills > 0)
+        snprintf(first, sizeof(first), "%s CHALKS %d MORE ON THE BOARD.",
+                 wingman_sick(g, 2) ? "ECCLES" : "BLUEBOTTLE", g->kills);
     else if (mission->special == SPECIAL_TRUCE)
         snprintf(first, sizeof(first), "A CHRISTMAS TOAST TO THE MEN ACROSS THE WIRE.");
     else if (!mission_armed(g))
         snprintf(first, sizeof(first), "TOM'S PHOTOGRAPHS GO UP ON THE WALL.");
     else
-        snprintf(first, sizeof(first), "EVERYONE CAME HOME. THAT IS ENOUGH.");
+        snprintf(first, sizeof(first), "WE DRINK TO THE DAY AND DO NOT COUNT THE CHAIRS.");
     lines[0] = "THE MESS, THAT EVENING.";
     lines[1] = first;
-    lines[2] = toasts[pick & 3u];
-    lines[3] = close_lines[(pick >> 4) % 3u];
+    /* Bluebottle's speech waits until he is out of the sick bay. */
+    lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u : (pick & 3u)];
+    lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
+                                     close_lines[(pick >> 4) % 3u];
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
     /* Lamplight and the gramophone horn. */
     blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
@@ -5440,7 +5491,8 @@ static void draw_story(Game *g)
     } else if (mission->mode == MISSION_GUNNER_3D) {
         journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
         journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
-                     "TOM AT THE CONTROLS", ink);
+                     tom_wounded(g) ? "A STAND-IN AT THE CONTROLS" :
+                                      "TOM AT THE CONTROLS", ink);
         journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 18),
                      mission_armed(g) ? "LEWIS GUN READY" : "NO GUN ABOARD", ink);
     }
@@ -5578,8 +5630,10 @@ static void draw_briefing(Game *g)
         order1 = "ENGAGE THE ENEMY SQUADRON.";
         order2 = "BRING YOUR WINGMEN HOME.";
     } else if (mission->mode == MISSION_GUNNER_3D) {
-        order0 = "TOM WILL HOLD THE RECONNAISSANCE COURSE.";
-        order1 = "DEFEND THE REAR QUARTER WITH THE LEWIS GUN.";
+        order0 = tom_wounded(g) ? "TOM'S STAND-IN WILL HOLD THE COURSE." :
+                                  "TOM WILL HOLD THE RECONNAISSANCE COURSE.";
+        order1 = mission_armed(g) ? "DEFEND THE REAR QUARTER WITH THE LEWIS GUN." :
+                                    "WATCH THE REAR QUARTER. THERE IS NO GUN.";
         order2 = "KEEP THE TWO-SEATER IN THE AIR.";
     } else {
         order0 = chapter->orders[0];
@@ -8016,7 +8070,8 @@ static void draw_cockpit_plate(Game *g)
         snprintf(buf, sizeof(buf), "AMMO %03d  DOWNED %d/%d",
                  g->ammunition, g->kills, perspective_enemy_total(g));
     else
-        snprintf(buf, sizeof(buf), "UNARMED PATROL");
+        snprintf(buf, sizeof(buf), mission_armed(g) ? "HOLD YOUR FIRE" :
+                                                      "UNARMED PATROL");
     typewriter_text(g, 14, 59, buf, 7, 11, PIX_PACK(239, 215, 155));
     rect(s, 14, 76, 164, 8, PIX_PACK(40, 30, 24));
     rect(s, 15, 77, 162 * health / 100, 6,
@@ -8281,7 +8336,8 @@ static void draw_dogfight_3d_sortie(Game *g)
         snprintf(buf, sizeof(buf), "DOWNED %d/%d",
                  g->kills, perspective_enemy_total(g));
     else
-        snprintf(buf, sizeof(buf), "UNARMED PATROL");
+        snprintf(buf, sizeof(buf), mission_armed(g) ? "HOLD YOUR FIRE" :
+                                                      "UNARMED PATROL");
     draw_field_sign(g, 8, 342, 130, buf);
     if (mission_armed(g))
         snprintf(buf, sizeof(buf), "AMMO %03d", g->ammunition);
@@ -8536,8 +8592,12 @@ static int draw_field_hospital(Game *g)
                  rgb(s, 72, 54, 38));
     typewriter_text(g, 49, 51, "HEAD OFFICE - MEDICAL MEMORANDUM",
                     7, 11, ink);
-    typewriter_text(g, 31, 73, "LT. N. SEAGOON WAS EXCEEDINGLY LUCKY.",
-                    7, 11, ink);
+    {
+        char memo[64];
+        snprintf(memo, sizeof(memo), "%s SEAGOON WAS EXCEEDINGLY LUCKY.",
+                 rank_short[g->rank & 3]);
+        typewriter_text(g, 31, 73, memo, 7, 11, ink);
+    }
     typewriter_text(g, 39, 90, "THE MACHINE IS FINISHED. HE IS NOT.",
                     7, 11, ink);
     snprintf(buf, sizeof(buf), "LIVES REMAINING: %d", g->lives);
@@ -8568,7 +8628,12 @@ static int draw_fatal_memorial(Game *g)
 
     /* Lettering is rendered by the game's native small typewriter face so
      * the photographic asset can remain clean and localisation-safe. */
-    typewriter_text(g, 299, 217, "2ND LT", 7, 11, inscription);
+    {
+        static const char *const carved[4] = {"2ND LT", "LT", "CAPT", "MAJOR"};
+        const char *rank = carved[g->rank & 3];
+        typewriter_text(g, 320 - (int)strlen(rank) * 7 / 2, 217, rank, 7, 11,
+                        inscription);
+    }
     typewriter_text(g, 303, 241, "NEDDY", 7, 11, inscription);
     typewriter_text(g, 296, 254, "SEAGOON", 7, 11, inscription);
     typewriter_text(g, 310, 276, is_raf(g) ? "RAF" : "RFC", 7, 11,
@@ -8601,6 +8666,12 @@ static void late_edition_text(const Game *g, char *out, size_t size)
             "SIDES MET BETWEEN THE TRENCHES.");
     } else if (g->fatal_sortie) {
         snprintf(out, size, "ONE OF OUR MACHINES DID NOT RETURN.");
+    } else if (g->raider_through) {
+        snprintf(out, size, g->special == SPECIAL_AIRSHIP ?
+            "AN ENEMY AIRSHIP CROSSED THE COAST LAST NIGHT AND DROPPED BOMBS. "
+            "OUR AIRMEN WERE UNABLE TO OVERTAKE IT." :
+            "ENEMY AEROPLANES REACHED LONDON IN DAYLIGHT. CASUALTIES ARE "
+            "REPORTED IN THE EAST END.");
     } else if (!g->success) {
         snprintf(out, size, "THERE WAS LITTLE ACTIVITY IN THE AIR, OWING "
                  "TO THE WEATHER.");
@@ -8612,7 +8683,10 @@ static void late_edition_text(const Game *g, char *out, size_t size)
                  "WAS HIT. OUR AIRMEN BROUGHT DOWN %d OF THE BOMBERS.",
                  g->kills);
     } else if (mode == MISSION_DOGFIGHT_3D) {
-        snprintf(out, size, "IN AIR FIGHTING YESTERDAY %d HOSTILE MACHINES "
+        snprintf(out, size, wingman_hit(g) >= 0 ?
+                 "IN AIR FIGHTING YESTERDAY %d HOSTILE MACHINES WERE BROUGHT "
+                 "DOWN. ONE OF OURS WAS DAMAGED BUT REACHED OUR LINES." :
+                 "IN AIR FIGHTING YESTERDAY %d HOSTILE MACHINES "
                  "WERE BROUGHT DOWN. ALL OURS RETURNED.", g->kills);
     } else if (mode == MISSION_GUNNER_3D) {
         snprintf(out, size, "A TWO-SEATER OF THE %s DROVE OFF REPEATED "
@@ -9282,7 +9356,9 @@ static void handle_event(Game *g, SDL_Event *ev)
                     break;
                 }
             }
-            if (g->success && !g->mess_done) {
+            /* The evening Thyne is lost has its own card; no party. */
+            if (g->success && !g->mess_done &&
+                !(g->chapter == 4 && g->mission == 8)) {
                 g->mess_done = 1;
                 set_scene(g, SCENE_MESS);
                 break;
