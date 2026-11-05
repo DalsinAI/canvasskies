@@ -61,29 +61,26 @@ def bundle(img):
 
 
 def string(img):
-    """Coarse string tied twice round the bundle: it shows where the stack
-    reaches beyond the top copy, crossing to a knot with loose ends."""
+    """Coarse string tied round the bundle and over the top copy's margins,
+    crossed and knotted at its lower right corner, the ends trailing onto
+    the table."""
     c = Canvas(640, 400, light=(-0.4, -0.9))
-    twine = (186, 160, 112)
+    twine, shade = (196, 170, 120), (120, 96, 62)
     x0, y0, x1, y1 = TOP
-    mid_x, mid_y = 340, 214
-    c.line((x1 - 2, mid_y + 2), (x1 + 24, mid_y + 4), twine, 3.2)  # right
-    c.line((mid_x + 2, y1 - 2), (mid_x + 6, y1 + 16), twine, 3.2)  # bottom
-    c.line((mid_x - 2, y0 + 2), (mid_x + 1, y0 - 6), twine, 2.4)   # top
-    # The knot at the lower right corner, ends trailing on the table.
-    c.part([(x1 + 10, y1 - 2), (x1 + 22, y1 + 8)], (150, 124, 84),
-           shape="ellipse", gloss=0.25, round_=1.0)
-    c.line((x1 + 18, y1 + 6), (x1 + 36, y1 + 4), twine, 2.0)
-    c.line((x1 + 14, y1 + 7), (x1 + 28, y1 + 18), twine, 2.0)
-    c.line((x1 + 14, y1 + 2), (x1 + 20, mid_y + 4), twine, 2.2)
-    c.line((x1 + 14, y1 + 2), (mid_x + 6, y1 + 12), twine, 2.2)
+    cx, cy = x1 - 12, y1 - 7                         # the crossing
+    for (a, b) in (((cx, y0 - 4), (cx, y1 + 16)),    # round the bundle, upright
+                   ((x0 - 4, cy), (x1 + 24, cy))):   # and across
+        c.line((a[0] + 1, a[1] + 1.5), (b[0] + 1, b[1] + 1.5), shade, 3.6)
+        c.line(a, b, twine, 3.0)
+    c.part([(cx - 6, cy - 5), (cx + 6, cy + 5)], (170, 142, 96),
+           shape="ellipse", gloss=0.3, round_=1.0)  # the knot
+    c.line((cx + 4, cy + 3), (cx + 26, cy + 14), twine, 2.6)   # loose ends
+    c.line((cx + 2, cy + 4), (cx + 12, cy + 24), twine, 2.6)
     layer = c.image()
-    mask = Image.eval(layer.convert("RGB"), lambda v: v)
     key = np.all(np.asarray(layer) == (255, 0, 255), axis=2)
     out = np.asarray(img).copy()
     lay = np.asarray(layer)
     out[~key] = lay[~key]
-    del mask
     return Image.fromarray(out)
 
 

@@ -6551,8 +6551,8 @@ static void draw_newspaper(Game *g, int index, const char *footer)
     }
     rect(s, 52, 131, 536, 1, ink);
     for (i = 1; i < 5; ++i)                             /* column rules */
-        if (i == 3) rect(s, colx[i] - gap / 2 - 1, 268, 1, 104, grey);
-        else rect(s, colx[i] - gap / 2 - 1, 136, 1, 236, grey);
+        if (i == 3) rect(s, colx[i] - gap / 2 - 1, 268, 1, 96, grey);
+        else rect(s, colx[i] - gap / 2 - 1, 136, 1, 228, grey);
     /* Columns 1 and 2: the day's story, then a filler item. */
     lead[0] = '\0';
     for (i = 0; i < 3 && n->body[i]; ++i) {
@@ -6560,12 +6560,12 @@ static void draw_newspaper(Game *g, int index, const char *footer)
         strncat(lead, " ", sizeof(lead) - strlen(lead) - 1);
     }
     news_case(lead, buf, (int)sizeof(buf));
-    y = news_column(g, FONT_NEWS_SMALL, colx[0], 146, col_w, 11, 370, buf, ink);
+    y = news_column(g, FONT_NEWS_SMALL, colx[0], 146, col_w, 11, 362, buf, ink);
     y += 6;
     font_text(g, FONT_NEWS_DECK, colx[0], y, news_filler[index % 6][0], ink);
-    news_column(g, FONT_NEWS_SMALL, colx[0], y + 13, col_w, 11, 370,
+    news_column(g, FONT_NEWS_SMALL, colx[0], y + 13, col_w, 11, 362,
                 news_filler[index % 6][1], ink);
-    y = news_column(g, FONT_NEWS_SMALL, colx[1], 146, col_w, 11, 370,
+    y = news_column(g, FONT_NEWS_SMALL, colx[1], 146, col_w, 11, 362,
                     news_filler[(index + 1) % 6][1], ink);
     /* Columns 3 and 4: the screened photograph (painted in), its caption,
      * and more news. */
@@ -6573,10 +6573,10 @@ static void draw_newspaper(Game *g, int index, const char *footer)
               "Our airmen: a machine at the hangars.") / 2, 252,
               "Our airmen: a machine at the hangars.", ink);
     font_text(g, FONT_NEWS_DECK, colx[2], 280, news_filler[(index + 2) % 6][0], ink);
-    news_column(g, FONT_NEWS_SMALL, colx[2], 293, col_w, 11, 370,
+    news_column(g, FONT_NEWS_SMALL, colx[2], 293, col_w, 11, 362,
                 news_filler[(index + 2) % 6][1], ink);
     font_text(g, FONT_NEWS_DECK, colx[3], 280, news_filler[(index + 3) % 6][0], ink);
-    news_column(g, FONT_NEWS_SMALL, colx[3], 293, col_w, 11, 370,
+    news_column(g, FONT_NEWS_SMALL, colx[3], 293, col_w, 11, 362,
                 news_filler[(index + 3) % 6][1], ink);
     /* Column 5: the notices, boxed and centred, as the small display
      * advertisements were set. */
@@ -6599,11 +6599,9 @@ static void draw_newspaper(Game *g, int index, const char *footer)
                   y + 45, ad[2], ink);
         y += h + 10;
     }
-    if (footer) {
-        blend_rect(s, 0, 380, SCREEN_W, 20, 10, 8, 6, 170);
-        typewriter_text(g, 320 - typewriter_width(footer, 11) / 2, 384, footer,
-                        7, 11, PIX_PACK(226, 206, 166));
-    }
+    if (footer)          /* in the foot margin, clear of the string */
+        typewriter_text(g, 300 - typewriter_width(footer, 11) / 2, 374, footer,
+                        7, 11, PIX_PACK(128, 36, 28));
 }
 
 static void draw_scrapbook(Game *g)
