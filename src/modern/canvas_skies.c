@@ -6500,7 +6500,7 @@ static const char *const news_filler[][2] = {
 
 static const char *const news_notices[][3] = {
     {"WAR SAVINGS", "Certificates 15s. 6d.", "at any Post Office."},
-    {"SEND HIM A PARCEL", "Cake, tobacco, socks.", "From 2s. 6d."},
+    {"PARCELS", "Cake, tobacco, socks", "for him: from 2s. 6d."},
     {"TRENCH COATS", "Proofed, 3 guineas.", "Outfitters, Strand."}
 };
 
