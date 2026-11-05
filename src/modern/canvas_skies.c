@@ -581,6 +581,8 @@ typedef struct {
     int scrap_index;
     int special;           /* MissionSpecial of the sortie being flown */
     int pudding_delivered; /* Christmas 1914 */
+    int raider_through;    /* the airship or Gothas reached London */
+    uint32_t wreck_started; /* side, top-down and rear-seat crash hold */
     uint32_t reveal_started;
     uint32_t scene_started;
     float player_x;
@@ -963,12 +965,15 @@ static void count_sortie_in_record(Game *g)
     g->skill_gunnery = grow_skill(g->skill_gunnery, 0.006f + 0.018f * g->kills);
     g->skill_engine = grow_skill(g->skill_engine, 0.015f);
     g->pending_award = 0;
-    for (i = 0; i < 5; ++i)
+    /* A pilot who goes down shows no decoration card that evening, so the
+     * decoration waits for the next sortie he comes home from. */
+    for (i = 0; i < 5 && !g->fatal_sortie; ++i)
         if (!(g->awards & (1u << i)) && g->victories >= decorations[i].victories) {
             g->awards |= 1u << i;
             g->pending_award |= 1 << i;
         }
     rank = earned_rank(g);
+    if (g->fatal_sortie) rank = g->rank;
     g->pending_rank = rank > g->rank;
     if (rank > g->rank) g->rank = rank;
     if (g->fatal_sortie) {
@@ -983,7 +988,7 @@ static int save_mission_result(Game *g)
     int active_chapter = g->chapter;
     int active_mission = g->mission;
     int active_complete = g->campaign_complete;
-    int ok;
+    int ok, game_over;
     if (g->fatal_sortie && !g->life_lost_this_sortie) {
         if (g->lives > 0) --g->lives;
         g->life_lost_this_sortie = 1;
@@ -1005,8 +1010,17 @@ static int save_mission_result(Game *g)
             g->campaign_complete = 1;
         }
     }
+    game_over = !g->success && g->fatal_sortie && g->lives <= 0;
+    if (game_over) {
+        /* The last life lost: the war goes on from the start of this
+         * chapter with three lives, and the pilot's record is kept, so one
+         * bad spell costs a chapter rather than the whole career. */
+        g->mission = 0;
+        g->lives = 3;
+    }
     apply_story_wingmen(g);
     ok = save_campaign(g);
+    if (game_over) g->lives = 0;   /* tonight still ends at the memorial */
     g->chapter = active_chapter;
     g->mission = active_mission;
     g->campaign_complete = active_complete;
@@ -1249,7 +1263,36 @@ static void pixel(SDL_Surface *s, int x, int y, uint32_t c)
 
 static void line(SDL_Surface *s, int x0, int y0, int x1, int y1, uint32_t c)
 {
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    int dx, sx;
+    /* Clip to the surface first (Liang-Barsky): a point just in front of
+     * the camera can project hundreds of thousands of pixels away, and
+     * stepping all of them one pixel at a time stalls the frame. */
+    if (x0 < 0 || x0 >= s->w || y0 < 0 || y0 >= s->h ||
+        x1 < 0 || x1 >= s->w || y1 < 0 || y1 >= s->h) {
+        float fx0 = (float)x0, fy0 = (float)y0;
+        float ddx = (float)(x1 - x0), ddy = (float)(y1 - y0);
+        float t0 = 0.0f, t1 = 1.0f;
+        float p[4], q[4];
+        int k;
+        p[0] = -ddx; q[0] = fx0;
+        p[1] = ddx;  q[1] = (float)(s->w - 1) - fx0;
+        p[2] = -ddy; q[2] = fy0;
+        p[3] = ddy;  q[3] = (float)(s->h - 1) - fy0;
+        for (k = 0; k < 4; ++k) {
+            if (p[k] == 0.0f) {
+                if (q[k] < 0.0f) return;
+            } else {
+                float r = q[k] / p[k];
+                if (p[k] < 0.0f) { if (r > t1) return; if (r > t0) t0 = r; }
+                else { if (r < t0) return; if (r < t1) t1 = r; }
+            }
+        }
+        x1 = (int)(fx0 + ddx * t1 + 0.5f);
+        y1 = (int)(fy0 + ddy * t1 + 0.5f);
+        x0 = (int)(fx0 + ddx * t0 + 0.5f);
+        y0 = (int)(fy0 + ddy * t0 + 0.5f);
+    }
+    dx = abs(x1 - x0); sx = x0 < x1 ? 1 : -1;
     int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     int err = dx + dy;
     for (;;) {
@@ -2047,7 +2090,9 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         if (sample < -1.0f) sample = -1.0f;
         out[i * 2] = (int16_t)(sample * 18000.0f);
         out[i * 2 + 1] = out[i * 2];
-        ++a->sample_clock;
+        /* Wrapped every 20 minutes so the effects clock never runs past
+         * float precision (2^24 samples) and starts to sound stepped. */
+        if (++a->sample_clock >= 11025u * 1200u) a->sample_clock = 0;
         ++a->cue_clock;
     }
 }
@@ -2149,6 +2194,8 @@ static void prepare_record(Game *g, Scene scene)
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    /* A test entry's safety net never follows the player into a campaign. */
+    if (scene == SCENE_TITLE) g->qa_hold = 0;
     prepare_record(g, scene);
     if (scene == SCENE_STORY)
         g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 :
@@ -2490,6 +2537,8 @@ static void reset_sortie(Game *g)
     }
     g->special = campaign_missions[g->chapter][g->mission].special;
     g->pudding_delivered = 0;
+    g->raider_through = 0;
+    g->wreck_started = 0;
     if (g->special == SPECIAL_TRUCE) {
         /* Two gatherings in no man's land, then their aerodrome. */
         for (i = 0; i < MAX_TARGETS; ++i)
@@ -3188,15 +3237,48 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
     return 1;
 }
 
+/* London is about this far east of the patrol line. */
+#define RAIDER_THROUGH_X 2200.0f
+
+static int enemies_falling(const Game *g)
+{
+    int i;
+    for (i = 0; i < MAX_ENEMIES; ++i)
+        if (g->enemies[i].active && g->enemies[i].crashing) return 1;
+    return 0;
+}
+
+/* Side-on, top-down and rear-seat deaths: hold on the burning wreck for a
+ * moment before the debrief, instead of cutting straight to the hospital.
+ * Returns 1 while the hold lasts. */
+static int hold_for_wreck(Game *g, float x, float y)
+{
+    uint32_t now = SDL_GetTicks();
+    if (!g->wreck_started) {
+        g->wreck_started = now ? now : 1u;
+        new_explosion(g, x, y, 2);
+        g->audio.blast = 7000;
+        g->audio.hit_player = 1;
+        g->shake = 1.0f;
+        return 1;
+    }
+    return now - g->wreck_started < 2200u;
+}
+
 static void finish_alternate_sortie(Game *g)
 {
+    /* A sortie that ends in a crash is never also a success: shooting
+     * away your own tail after the goal used to win the mission and cost
+     * a life at once. */
+    if (g->health <= 0 || g->tail_integrity <= 0) g->fatal_sortie = 1;
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
         g->success = g->kills >= current_mission_goal(g) &&
-                     g->health > 0 && g->fuel > 0;
+                     g->health > 0 && g->fuel > 0 && !g->fatal_sortie;
     else
         g->success = g->objectives >= current_mission_goal(g) &&
-                     g->health > 0 && g->fuel > 0;
-    if (g->health <= 0 || g->tail_integrity <= 0) g->fatal_sortie = 1;
+                     g->health > 0 && g->fuel > 0 && !g->fatal_sortie;
+    if (g->special == SPECIAL_TRUCE && !g->pudding_delivered) g->success = 0;
+    if (g->raider_through) g->success = 0;
     set_scene(g, SCENE_DEBRIEF);
 }
 
@@ -3313,8 +3395,11 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
         }
     }
     if (g->scroll > chapters[g->chapter].distance ||
-        g->fuel <= 0.0f || g->health <= 0)
+        g->fuel <= 0.0f || g->health <= 0) {
+        if (g->health <= 0 && hold_for_wreck(g, g->player_x, g->player_y))
+            return;
         finish_alternate_sortie(g);
+    }
 }
 
 static void update_perspective_sortie(Game *g, float dt,
@@ -3543,7 +3628,7 @@ static void update_perspective_sortie(Game *g, float dt,
         }
     }
     if (gunner && g->tail_integrity <= 0) {
-        finish_alternate_sortie(g);
+        if (!hold_for_wreck(g, 320.0f, 300.0f)) finish_alternate_sortie(g);
     } else if (g->qa_hold && active_enemies == 0 && crashing_enemies == 0 &&
                g->scroll > 520.0f) {
         float view_x = g->player_x;
@@ -3562,8 +3647,10 @@ static void update_perspective_sortie(Game *g, float dt,
         (current_mission_goal(g) > 0 && g->kills >= current_mission_goal(g) &&
          crashing_enemies == 0) ||
         g->scroll > chapters[g->chapter].distance ||
-        g->fuel <= 0.0f || g->health <= 0))
-        finish_alternate_sortie(g);
+        g->fuel <= 0.0f || g->health <= 0)) {
+        if (!(g->health <= 0 && hold_for_wreck(g, 320.0f, 300.0f)))
+            finish_alternate_sortie(g);
+    }
 }
 
 /* ---- Air combat ---------------------------------------------------------
@@ -4338,7 +4425,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->heading_home_at = now + 2200u;
         show_notice(g, "TURNING FOR HOME");
     }
-    if (g->heading_home_at && now >= g->heading_home_at) {
+    if (g->heading_home_at && now >= g->heading_home_at && !g->flight_doomed) {
         finish_alternate_sortie(g);
         return;
     }
@@ -4417,7 +4504,22 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
             ++active;
             continue;
         }
-        {
+        if (g->special == SPECIAL_AIRSHIP || g->special == SPECIAL_GOTHA) {
+            /* Raiders hold course and speed for London: an airship at
+             * 40 mph, a Gotha at 70, not a scout's speed through the
+             * scout flight model.  Past the line, they have got through. */
+            float v = enemy->speed * 0.44704f;
+            enemy->world_x += sinf(enemy->heading) * v * dt;
+            enemy->world_z += cosf(enemy->heading) * v * dt;
+            if (enemy->world_x > RAIDER_THROUGH_X && !g->qa_hold &&
+                !g->flight_doomed && !g->flight_crashed) {
+                g->raider_through = 1;
+                show_notice(g, g->special == SPECIAL_AIRSHIP ?
+                            "THE RAIDER HAS GOT THROUGH" :
+                            "THE BOMBERS HAVE GOT THROUGH");
+                if (!g->heading_home_at) g->heading_home_at = now + 2600u;
+            }
+        } else {
             float max_bank, to_player;
             enemy_think(g, enemy, i, dt, &desired_heading, &desired_pitch,
                         &max_bank, &to_player);
@@ -4435,7 +4537,8 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         if (enemy->world_y <= 0.0f) {
             enemy->world_y = 0.0f;
             enemy->crashing = 1;
-            credit_air_kill(g);
+            /* Only an armed pilot can claim a machine that hit the ground. */
+            if (mission_armed(g)) credit_air_kill(g);
             enemy->crash_x = 320.0f;
             enemy->crash_y = 300.0f;
             enemy->crash_size = 18;
@@ -4452,16 +4555,20 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         }
         ++active;
     }
-    if (active == 0 && !g->flight_doomed) {
+    if ((active == 0 || (!g->qa_hold && current_mission_goal(g) > 0 &&
+                         g->kills >= current_mission_goal(g) &&
+                         !enemies_falling(g))) &&
+        !g->flight_doomed) {
         /* Hold the last impact for one beat so its explosion and crash sound
-         * are seen and heard, then end both campaign and direct-test sorties. */
+         * are seen and heard, then end both campaign and direct-test sorties.
+         * Reaching the goal ends it too: two of three Gothas is the order. */
         if (!g->mission_clear_at) g->mission_clear_at = now;
         if (now - g->mission_clear_at >= 900u)
             finish_alternate_sortie(g);
     } else if (active > 0) {
         g->mission_clear_at = 0;
     }
-    if (!g->qa_hold && active > 0 && g->health <= 0 &&
+    if (!g->qa_hold && g->health <= 0 &&
         !g->flight_doomed && !g->flight_crashed) {
         /* Fatal gun damage first becomes a loss-of-control sequence.  Keep
          * the pilot in the cockpit through the spiral and physical impact;
@@ -4473,7 +4580,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.hit = 1400;
         g->audio.blast = 1800;
     }
-    if (!g->qa_hold && active > 0 && g->fuel <= 0.0f) {
+    if (!g->qa_hold && active > 0 && g->fuel <= 0.0f && !g->flight_doomed) {
         finish_alternate_sortie(g);
     } else if (!g->qa_hold && !mission_armed(g) && active > 0 &&
                !g->flight_doomed && !g->flight_crashed &&
@@ -4687,14 +4794,9 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
     }
     if (g->scroll > chapters[g->chapter].distance ||
         g->fuel <= 0.0f || g->health <= 0) {
-        if (g->health <= 0) g->fatal_sortie = 1;
-        if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
-            g->success = g->kills >= current_mission_goal(g) &&
-                         g->health > 0 && g->fuel > 0;
-        else
-            g->success = g->objectives >= current_mission_goal(g) &&
-                         g->health > 0 && g->fuel > 0;
-        set_scene(g, SCENE_DEBRIEF);
+        if (g->health <= 0 && hold_for_wreck(g, g->player_x, g->player_y))
+            return;
+        finish_alternate_sortie(g);
     }
 }
 
@@ -8562,7 +8664,8 @@ static void draw_debrief(Game *g)
     typewriter_text(g, 74, 136, buf, 7, 11, ink);
     snprintf(buf, sizeof(buf), "FUEL REMAINING              %d", (int)g->fuel);
     typewriter_text(g, 74, 157, buf, 7, 11, ink);
-    snprintf(buf, sizeof(buf), "AIRFRAME REMAINING          %d", g->health);
+    snprintf(buf, sizeof(buf), "AIRFRAME REMAINING          %d",
+             g->health > 0 ? g->health : 0);
     typewriter_text(g, 74, 178, buf, 7, 11, ink);
     draw_late_edition(g);
     display_text(g, 73, 226,
@@ -8576,8 +8679,10 @@ static void draw_debrief(Game *g)
         else
             snprintf(buf, sizeof(buf), "POSITION SAVED - CHAPTER %d / MISSION %d",
                      g->saved_chapter + 1, g->saved_mission + 1);
-    } else {
+    } else if (g->mission_save_state == -1) {
         snprintf(buf, sizeof(buf), "SAVE FAILED - ENTER WILL RETRY");
+    } else {
+        snprintf(buf, sizeof(buf), "SAVE FAILED - ENTER TO CARRY ON");
     }
     draw_field_sign(g, 164, 303, 312, buf);
     draw_field_sign(g, 176, 341, 288,
@@ -9000,6 +9105,7 @@ static void advance_after_debrief(Game *g)
     else if (!g->success) set_scene(g, SCENE_BRIEFING);
     else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
         ++g->mission;
+        apply_story_wingmen(g);
         set_scene(g, SCENE_STORY);
     } else if (g->chapter + 1 >= CHAPTER_COUNT) {
         g->campaign_complete = 1;
@@ -9007,6 +9113,7 @@ static void advance_after_debrief(Game *g)
     } else {
         ++g->chapter;
         g->mission = 0;
+        apply_story_wingmen(g);
         set_scene(g, SCENE_STORY);
     }
 }
@@ -9077,6 +9184,13 @@ static void handle_event(Game *g, SDL_Event *ev)
             g->redraw_static = 1;
         } else if (g->scene == SCENE_TITLE) g->running = 0;
         else if (g->scene == SCENE_SCRAPBOOK) set_scene(g, SCENE_MENU);
+        else if (g->scene == SCENE_SORTIE &&
+                 (g->flight_doomed || g->flight_crashed || g->health <= 0 ||
+                  g->wreck_started)) {
+            /* Going down is not escaped by leaving: the sortie ends as the
+             * loss it is, and the debrief saves it. */
+            finish_alternate_sortie(g);
+        }
         else set_scene(g, SCENE_TITLE);
         break;
     case SDLK_UP:
@@ -9157,9 +9271,16 @@ static void handle_event(Game *g, SDL_Event *ev)
             reset_sortie(g);
             set_scene(g, SCENE_SORTIE);
         } else if (g->scene == SCENE_DEBRIEF) {
-            if (g->mission_save_state < 0) {
+            /* A failed save is retried once; if that fails too, the
+             * next Enter carries on with the progress held in memory
+             * rather than leaving the pilot stuck at this board. */
+            if (g->mission_save_state == -1) {
                 g->mission_save_state = 0;
-                if (!save_mission_result(g)) break;
+                if (!save_mission_result(g)) {
+                    g->mission_save_state = -2;
+                    g->redraw_static = 1;
+                    break;
+                }
             }
             if (g->success && !g->mess_done) {
                 g->mess_done = 1;
@@ -9235,7 +9356,19 @@ int main(int argc, char **argv)
 {
     Game g;
     uint32_t previous;
-    if (argc > 1) use_qa_save_paths();
+    /* Only the test entries use their own save file; any other argument
+     * starts the game normally on the player's campaign. */
+    if (argc > 1) {
+        static const char *const qa_modes[] = {
+            "AIRSHIP", "CHAPTER_SUCCESS", "DEATH", "DEBRIEF",
+            "DEBRIEF_SUCCESS", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA", "GUNNER",
+            "HOSPITAL", "NEWS", "SIDE", "TOPDOWN", "TRUCE", "UNARMED",
+            "UNARMED_GUNNER"
+        };
+        int q;
+        for (q = 0; q < (int)(sizeof(qa_modes) / sizeof(qa_modes[0])); ++q)
+            if (strcmp(argv[1], qa_modes[q]) == 0) use_qa_save_paths();
+    }
     if (!game_init(&g)) return 1;
     /* QA entry points keep the normal title/campaign flow untouched while
      * allowing each renderer to be launched directly on real Amiga hardware. */
