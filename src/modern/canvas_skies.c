@@ -4854,7 +4854,10 @@ static void draw_chapter_card(Game *g)
     const Chapter *chapter = &chapters[g->chapter];
     uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
     char year[8];
-    size_t len = strlen(chapter->date);
+    /* The day of the chapter's first sortie, so the card never runs
+     * ahead of the newspaper and diary that follow it. */
+    const char *date = mission_date(g);
+    size_t len = strlen(date);
     int fade;
     rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(10, 8, 8));
     if (g->dogfight_background) {
@@ -4870,7 +4873,7 @@ static void draw_chapter_card(Game *g)
     }
     blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 8, 6, 6, 110);
     blend_rect(s, 0, 110, SCREEN_W, 170, 8, 6, 6, 120);
-    snprintf(year, sizeof(year), "%s", len >= 4 ? chapter->date + len - 4 : "");
+    snprintf(year, sizeof(year), "%s", len >= 4 ? date + len - 4 : "");
     if (elapsed > 500u)
         display_text(g, 320 - 2 * 36, 124, year, 36, 42,
                      PIX_PACK(236, 214, 160));
@@ -4880,8 +4883,8 @@ static void draw_chapter_card(Game *g)
                      PIX_PACK(214, 92, 62));
     }
     if (elapsed > 2000u) {
-        int w = (int)strlen(chapter->date) * 10;
-        typewriter_text(g, 320 - w / 2, 230, chapter->date, 10, 15,
+        int w = (int)strlen(date) * 10;
+        typewriter_text(g, 320 - w / 2, 230, date, 10, 15,
                         PIX_PACK(226, 206, 166));
     }
     if (elapsed > 2800u)
