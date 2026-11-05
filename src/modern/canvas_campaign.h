@@ -31,6 +31,9 @@ static const char *allied_pilot_names[3] = {
 
 /* Neddy Seagoon's continuous first-person campaign. The modes rotate
  * four times per chapter so no period of the war belongs to one game style. */
+/* Most missions are ordinary: their special is left as SPECIAL_NONE. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
     {
         {MISSION_SIDE, "A FIELD IN FRANCE", "I LANDED IN A COW FIELD. TOM CALLED IT OUR AERODROME."},
@@ -145,6 +148,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_DOGFIGHT_3D, "THE ELEVENTH HOUR", "AT ELEVEN THE EARTH WENT QUIET. I TURNED FOR HOME."}
     }
 };
+#pragma GCC diagnostic pop
 
 static const char *mission_mode_name(MissionMode mode)
 {
