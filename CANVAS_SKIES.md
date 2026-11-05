@@ -22,10 +22,12 @@ The first vertical slice contains:
   a font, so the seams, thread and fabric ripple together. A brass Victorian
   plaque opens an overlaid commission board for the full campaign or a direct
   1914, 1915, 1916, 1917 or 1918 starting year;
-- period serif display and field-typewriter faces, each rasterised into a
-  separate atlas at every final pixel size and copied 1:1 with no run-time
-  font scaling. The display face is Noto Serif Display; the field face is
-  Liberation Mono Bold;
+- period faces pre-rendered on the host into one antialiased, proportional
+  glyph atlas at every final pixel size (`make_font_atlases.py`); the Amiga
+  only blends the glyphs and carries no font rasteriser. IM Fell English for
+  titles and menus, Special Elite for typed orders, Cedarville Cursive for
+  the diary, Old Standard TT for the newspaper and Stardos Stencil for the
+  field signs (see `CANVAS_SKIES_SOURCES.md`);
 - squadron briefing and debriefing screens;
 - a continuous side-on, Scramble-style mission with fuel, airframe damage,
   armed fighters, machine-gun nests, anti-aircraft guns and ground objectives;

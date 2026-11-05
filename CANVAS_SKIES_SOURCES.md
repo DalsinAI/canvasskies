@@ -232,3 +232,24 @@ Zealand a few days later than that date.
 The 1918 women's vote, the founding of the Royal Air Force, the end of the Somme
 and the 1918 influenza keep wording written for this game: no period cable found
 for them fitted the day closely enough.
+
+## Typefaces
+
+All five faces come from the Google Fonts library
+(<https://github.com/google/fonts>) under free licences. The font files and
+their licences are in `assets/fonts/`, and the release drawer carries the
+licences in `Fonts-Licences/`. `ports/amigaos3/make_font_atlases.py` renders
+them into `assets/canvas-skies/fonts.bmp`.
+
+| Face | Designer | Licence | Used for |
+|---|---|---|---|
+| IM Fell English and IM Fell English SC | Igino Marini, after the Fell types | SIL Open Font License 1.1 | Title, chapter cards, headings, menus |
+| Special Elite | Brian J. Bonislawsky (Astigmatic) | Apache License 2.0 | General Headquarters orders, roster, prompts, the mess |
+| Cedarville Cursive | Kimberly Geswein | SIL Open Font License 1.1 | Neddy Seagoon's diary hand |
+| Old Standard TT (Regular, Italic, Bold) | Alexey Kryukov | SIL Open Font License 1.1 | The Western Courier: headlines, copy, dates |
+| Stardos Stencil Bold | Vernon Adams | SIL Open Font License 1.1 | Field signs in the side-on and top-down views |
+
+The choices follow the period: Fell's engraved roman for formal titles, a
+worn office typewriter for orders, a pencilled hand for the diary, a late
+Victorian Modern serif of the kind newspapers were set in, and the stencil
+lettering painted on crates and petrol tins.

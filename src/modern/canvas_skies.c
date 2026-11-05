@@ -17,6 +17,7 @@
 
 #include "canvas_campaign.h"
 #include "canvas_news.h"
+#include "canvas_fonts.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -127,26 +128,8 @@
 #ifndef CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP
 #define CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP "assets/canvas-skies/topdown-explosion-atlas.bmp"
 #endif
-#ifndef CANVAS_DISPLAY_36X42_BMP
-#define CANVAS_DISPLAY_36X42_BMP "assets/canvas-skies/font-display-36x42.bmp"
-#endif
-#ifndef CANVAS_DISPLAY_22X28_BMP
-#define CANVAS_DISPLAY_22X28_BMP "assets/canvas-skies/font-display-22x28.bmp"
-#endif
-#ifndef CANVAS_DISPLAY_16X23_BMP
-#define CANVAS_DISPLAY_16X23_BMP "assets/canvas-skies/font-display-16x23.bmp"
-#endif
-#ifndef CANVAS_DISPLAY_12X18_BMP
-#define CANVAS_DISPLAY_12X18_BMP "assets/canvas-skies/font-display-12x18.bmp"
-#endif
-#ifndef CANVAS_TYPEWRITER_10X15_BMP
-#define CANVAS_TYPEWRITER_10X15_BMP "assets/canvas-skies/font-typewriter-10x15.bmp"
-#endif
-#ifndef CANVAS_TYPEWRITER_7X11_BMP
-#define CANVAS_TYPEWRITER_7X11_BMP "assets/canvas-skies/font-typewriter-7x11.bmp"
-#endif
-#ifndef CANVAS_JOURNAL_8X12_BMP
-#define CANVAS_JOURNAL_8X12_BMP "assets/canvas-skies/font-journal-8x12.bmp"
+#ifndef CANVAS_FONTS_BMP
+#define CANVAS_FONTS_BMP "assets/canvas-skies/fonts.bmp"
 #endif
 #ifndef CANVAS_PLAYER_SPRITES_BMP
 #define CANVAS_PLAYER_SPRITES_BMP "assets/canvas-skies/aircraft-player.bmp"
@@ -518,13 +501,7 @@ typedef struct {
     SDL_Surface *gunner_moving_guns;
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
-    SDL_Surface *font_display_36x42;
-    SDL_Surface *font_display_22x28;
-    SDL_Surface *font_display_16x23;
-    SDL_Surface *font_display_12x18;
-    SDL_Surface *font_typewriter_10x15;
-    SDL_Surface *font_typewriter_7x11;
-    SDL_Surface *font_journal_8x12;
+    SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
     SDL_Surface *cockpit_composite;
@@ -541,6 +518,7 @@ typedef struct {
     char notice[48];
     uint32_t notice_until;
     float shake;
+    float blast_flash;   /* side-on: our own bomb went off too close */
     float gun_recoil;
     SDL_Joystick *joystick;
     AudioState audio;
@@ -549,6 +527,8 @@ typedef struct {
     int fullscreen;
     int redraw_static;
     int qa_hold;
+    int qa_diary_all;   /* test entry: turn every diary page in turn */
+    int qa_tracers;     /* test entry: rounds fired at every angle */
     int success;
     uint8_t key_latched[SDL_NUM_SCANCODES];
     uint32_t last_action_key;
@@ -1629,97 +1609,234 @@ static void prepare_magenta_key(SDL_Surface *surface)
     SDL_SetColorKey(surface, SDL_TRUE, key);
 }
 
-/* Pre-rasterised native-size faces: serif display and field typewriter. */
-static void period_text(SDL_Surface *dst, SDL_Surface *atlas,
-                        int cell_w, int cell_h, int x, int y,
-                        const char *str, uint32_t color)
+/* The period faces, pre-rendered on the host at the size they are drawn
+ * (ports/amigaos3/make_font_atlases.py).  Each glyph is a cell of 8-bit
+ * coverage which is blended into the screen, so the letters keep their
+ * antialiased edges and their own widths. */
+static int font_width(FontId font, const char *str)
 {
-    if (!atlas) {
-        text(dst, x, y, str, cell_h >= 20 ? 3 : 1, color);
-        return;
-    }
-    if (SDL_MUSTLOCK(atlas)) SDL_LockSurface(atlas);
+    const FontFace *f = &font_faces[font];
+    int w = 0;
     while (*str) {
         unsigned int ch = (unsigned char)*str++;
-        int index, sx0, sy0, px, py;
-        if (ch < 32 || ch > 95) ch = ' ';
-        index = (int)ch - 32;
-        sx0 = (index & 15) * cell_w;
-        sy0 = (index >> 4) * cell_h;
+        if (ch < FONT_FIRST || ch > FONT_LAST) ch = ' ';
+        w += f->advance[ch - FONT_FIRST];
+    }
+    return w;
+}
+
+static int font_width_n(FontId font, const char *str, int n)
+{
+    const FontFace *f = &font_faces[font];
+    int w = 0;
+    while (n-- > 0 && *str) {
+        unsigned int ch = (unsigned char)*str++;
+        if (ch < FONT_FIRST || ch > FONT_LAST) ch = ' ';
+        w += f->advance[ch - FONT_FIRST];
+    }
+    return w;
+}
+
+/* Draws str with its baseline on row 'baseline'; returns the end x. */
+static int font_text(Game *g, FontId font, int x, int baseline,
+                     const char *str, uint32_t color)
+{
+    const FontFace *f = &font_faces[font];
+    SDL_Surface *s = g->screen, *atlas = g->fonts;
+    pix_t ink = (pix_t)color;
+    if (!atlas) {
+        text(s, x, baseline - 7, str, 1, color);
+        return x + (int)strlen(str) * 6;
+    }
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    while (*str) {
+        unsigned int ch = (unsigned char)*str++;
+        int index, sx0, sy0, dx0, dy0, px, py;
+        if (ch < FONT_FIRST || ch > FONT_LAST) ch = ' ';
+        index = (int)ch - FONT_FIRST;
         if (ch != ' ') {
-            for (py = 0; py < cell_h; ++py) {
-                int sy = sy0 + py;
-                for (px = 0; px < cell_w; ++px) {
-                    int sx = sx0 + px;
-                    uint8_t r, g, b;
-                    unpack_rgb(atlas->format, surface_pixel(atlas, sx, sy),
-                               &r, &g, &b);
-                    if ((int)r + (int)g + (int)b > 150)
-                        pixel(dst, x + px, y + py, color);
+            sx0 = (index % FONT_COLUMNS) * f->cell_w;
+            sy0 = f->top + (index / FONT_COLUMNS) * f->cell_h;
+            dx0 = x - f->origin_x;
+            dy0 = baseline - f->baseline;
+            for (py = 0; py < f->cell_h; ++py) {
+                const uint8_t *cov;
+                pix_t *row;
+                int dy = dy0 + py;
+                if (dy < 0 || dy >= s->h) continue;
+                cov = (const uint8_t *)atlas->pixels +
+                      (sy0 + py) * atlas->pitch + sx0;
+                row = PIX_ROW(s, dy);
+                for (px = 0; px < f->cell_w; ++px) {
+                    int c = cov[px], dx = dx0 + px;
+                    if (c < 12 || dx < 0 || dx >= s->w) continue;
+                    if (c > 243) row[dx] = ink;
+                    else row[dx] = pix_mix(row[dx], ink, (c + 4) >> 3);
                 }
             }
         }
-        x += cell_w;
+        x += f->advance[index];
     }
-    if (SDL_MUSTLOCK(atlas)) SDL_UnlockSurface(atlas);
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+    return x;
+}
+
+/* The older calls name a face by its former cell size and give the top of
+ * the line; the baseline sits four fifths of the way down that cell. */
+static FontId display_font(int h)
+{
+    return h >= 42 ? FONT_TITLE : h >= 28 ? FONT_HEADING :
+           h >= 23 ? FONT_SUBHEAD : FONT_LABEL;
 }
 
 static void display_text(Game *g, int x, int y, const char *str,
                          int w, int h, uint32_t color)
 {
-    SDL_Surface *atlas = NULL;
-    if (w == 36 && h == 42) atlas = g->font_display_36x42;
-    else if (w == 22 && h == 28) atlas = g->font_display_22x28;
-    else if (w == 16 && h == 23) atlas = g->font_display_16x23;
-    else if (w == 12 && h == 18) atlas = g->font_display_12x18;
-    period_text(g->screen, atlas, w, h, x, y, str, color);
+    (void)w;
+    font_text(g, display_font(h), x, y + h * 4 / 5, str, color);
 }
 
+static int display_width(const char *str, int h)
+{
+    return font_width(display_font(h), str);
+}
+
+static FontId typewriter_font(int h)
+{
+    return h >= 15 ? FONT_TYPE : FONT_TYPE_SMALL;
+}
+
+/* Typed tables were laid out with runs of spaces on a fixed pitch.  A run
+ * of two or more now acts as a tab: the text after it starts in the
+ * column the old w-pixel cells gave it, so the columns still line up. */
 static void typewriter_text(Game *g, int x, int y, const char *str,
                             int w, int h, uint32_t color)
 {
-    SDL_Surface *atlas = NULL;
-    if (w == 10 && h == 15) atlas = g->font_typewriter_10x15;
-    else if (w == 7 && h == 11) atlas = g->font_typewriter_7x11;
-    period_text(g->screen, atlas, w, h, x, y, str, color);
+    FontId font = typewriter_font(h);
+    char part[96];
+    const char *p = str;
+    while (*p) {
+        const char *start = p, *gap;
+        int len;
+        gap = strstr(p, "  ");
+        len = gap ? (int)(gap - p) : (int)strlen(p);
+        if (len > (int)sizeof(part) - 1) len = (int)sizeof(part) - 1;
+        memcpy(part, start, (size_t)len);
+        part[len] = '\0';
+        font_text(g, font, x + (int)(start - str) * w, y + h * 4 / 5, part,
+                  color);
+        if (!gap) break;
+        p = gap;
+        while (*p == ' ') ++p;
+    }
+}
+
+static int typewriter_width(const char *str, int h)
+{
+    /* Measured as typewriter_text lays it out, tab stops included; the
+     * stops sit on the old 7- or 10-pixel pitch. */
+    const char *last = str, *gap;
+    while ((gap = strstr(last, "  ")) != NULL) {
+        last = gap;
+        while (*last == ' ') ++last;
+    }
+    return (int)(last - str) * (h >= 15 ? 10 : 7) +
+           font_width(typewriter_font(h), last);
+}
+
+/* Diary writing, given the top of its line: the foot rests on the rule. */
+#define JOURNAL_HAND_HEIGHT 11
+/* Names, dates and headings shared with the typed pages are stored in
+ * capitals; in the diary they are written in a hand, in title case.
+ * Abbreviations such as R.F.C. keep their capitals. */
+static const char *hand_case(const char *str, char *buf, int size)
+{
+    static const char *const small[] = {
+        "a", "an", "and", "at", "by", "for", "in", "of", "on", "the", "to"
+    };
+    const char *p;
+    int n = 0, word = 0;
+    for (p = str; *p; ++p)
+        if (*p >= 'a' && *p <= 'z') return str;
+    while (*str && n < size - 1) {
+        const char *end = str;
+        int len, i, keep = 0, minor = 0;
+        if (*str == ' ' || *str == '/') { buf[n++] = *str++; continue; }
+        while (*end && *end != ' ' && *end != '/') ++end;
+        len = (int)(end - str);
+        for (i = 0; i + 1 < len; ++i)
+            if (str[i] == '.' && str[i + 1] >= 'A' && str[i + 1] <= 'Z')
+                keep = 1;
+        if (word > 0)
+            for (i = 0; i < (int)(sizeof(small) / sizeof(small[0])); ++i)
+                if ((int)strlen(small[i]) == len) {
+                    int k = 0;
+                    while (k < len && str[k] - 'A' + 'a' == small[i][k]) ++k;
+                    if (k == len) minor = 1;
+                }
+        for (i = 0; i < len && n < size - 1; ++i) {
+            char c = str[i];
+            int first = i == 0 || str[i - 1] == '-' || str[i - 1] == '(';
+            if (!keep && c >= 'A' && c <= 'Z' && (!first || minor))
+                c = (char)(c - 'A' + 'a');
+            buf[n++] = c;
+        }
+        str = end;
+        ++word;
+    }
+    buf[n] = '\0';
+    return buf;
 }
 
 static void journal_text(Game *g, int x, int y, const char *str,
                          uint32_t color)
 {
-    period_text(g->screen, g->font_journal_8x12, 8, 12,
-                x, y, str, color);
+    char buf[96];
+    font_text(g, FONT_HAND, x, y + JOURNAL_HAND_HEIGHT,
+              hand_case(str, buf, (int)sizeof(buf)), color);
 }
 
-/* The ruled lines photographed in the journal, left page then right,
- * measured on the 640x360 painting (they open out a little toward the
- * foot of the page).  Writing sits on every second rule: the hand is
- * eleven pixels tall and the rules only ten or eleven apart. */
+/* The journal's pages are ruled by the game, dead level, one rule to each
+ * line of writing.  The painting has had its own rules taken out
+ * (ports/amigaos3/make_journal_page.py): they ran uphill and bowed, so the
+ * hand never sat on them.  Rule indices count half-lines, as before: the
+ * writing goes on the even ones, which are the ruled ones. */
 #define JOURNAL_LEFT 0
 #define JOURNAL_RIGHT 1
 #define JOURNAL_RULES 20
-#define JOURNAL_LINE_STEP 20    /* two rules */
-static const short journal_rules[2][JOURNAL_RULES] = {
-    {88, 99, 108, 118, 128, 138, 147, 158, 168, 178,
-     188, 199, 210, 220, 231, 242, 253, 264, 275, 287},
-    {85, 96, 106, 115, 125, 135, 145, 155, 165, 175,
-     186, 196, 207, 218, 228, 239, 250, 261, 273, 285}
-};
+#define JOURNAL_LINE_STEP 20    /* one ruled line */
+#define JOURNAL_FIRST_RULE 88
+static const short journal_page_x[2][2] = {{100, 306}, {330, 550}};
 
 /* The top of a line of writing whose foot rests on rule n of the page. */
 static int journal_line_y(int page, int rule)
 {
+    (void)page;
     if (rule < 0) rule = 0;
     if (rule >= JOURNAL_RULES) rule = JOURNAL_RULES - 1;
-    return journal_rules[page][rule] - 11;
+    return JOURNAL_FIRST_RULE + rule * (JOURNAL_LINE_STEP / 2) -
+           JOURNAL_HAND_HEIGHT;
+}
+
+static void draw_journal_rules(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int page, y;
+    for (page = 0; page < 2; ++page) {
+        int x0 = journal_page_x[page][0], x1 = journal_page_x[page][1];
+        for (y = JOURNAL_FIRST_RULE; y <= JOURNAL_FIRST_RULE + 200;
+             y += JOURNAL_LINE_STEP)
+            blend_rect(s, x0, y, x1 - x0, 1, 112, 124, 150, 84);
+    }
 }
 
 static void journal_paragraph(Game *g, int x, int y, const char *str,
                               int columns, uint32_t color)
 {
-    char line_buf[64];
+    int max_w = columns * 8;   /* the width the old fixed cells gave */
+    char line_buf[64], cased[96];
     int line_len = 0;
-    const char *p = str;
+    const char *p = hand_case(str, cased, (int)sizeof(cased));
     while (*p) {
         const char *word;
         int word_len;
@@ -1728,7 +1845,12 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
         word = p;
         while (*p && *p != ' ') ++p;
         word_len = (int)(p - word);
-        if (line_len && line_len + 1 + word_len > columns) {
+        if (word_len > (int)sizeof(line_buf) - 2)
+            word_len = (int)sizeof(line_buf) - 2;
+        if (line_len &&
+            font_width_n(FONT_HAND, line_buf, line_len) +
+            font_width_n(FONT_HAND, " ", 1) +
+            font_width_n(FONT_HAND, word, word_len) > max_w) {
             line_buf[line_len] = '\0';
             journal_text(g, x, y, line_buf, color);
             y += JOURNAL_LINE_STEP;
@@ -1739,6 +1861,7 @@ static void journal_paragraph(Game *g, int x, int y, const char *str,
             word_len = (int)sizeof(line_buf) - line_len - 1;
         memcpy(line_buf + line_len, word, (size_t)word_len);
         line_len += word_len;
+        line_buf[line_len] = '\0';
     }
     if (line_len) {
         line_buf[line_len] = '\0';
@@ -3365,6 +3488,17 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
             --g->bombs_remaining;
         }
     }
+    if (g->qa_tracers && now - g->last_shot >= 700u) {
+        /* A ring of rounds, turning 5 degrees each time, from mid-screen. */
+        int k;
+        float turn = (float)((now / 700u) % 3u) * 5.0f;
+        for (k = 0; k < 24; ++k) {
+            float a = ((float)k * 15.0f + turn) * (float)M_PI / 180.0f;
+            new_bullet(g, 320.0f, 190.0f, cosf(a) * 300.0f,
+                       sinf(a) * 300.0f, 0, 0, 0.55f);
+        }
+        g->last_shot = now;
+    }
     age_explosions(g, dt);
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];
@@ -4637,6 +4771,29 @@ static void update_gunner_3d_sortie(Game *g, float dt,
     update_perspective_sortie(g, dt, keys, 1);
 }
 
+/* A 112 lb bomb throws earth and steel a long way up.  Bombing from too
+ * low hurts the machine that dropped it: the damage falls away with
+ * distance and is gone beyond BOMB_BLAST_RADIUS, about a hundred feet of
+ * height on this scale, which is the safe height the pilots learnt. */
+#define BOMB_BLAST_RADIUS 104.0f
+#define BOMB_BLAST_DAMAGE 30.0f
+static void own_bomb_blast(Game *g, float x, float y, uint32_t now)
+{
+    float dx = g->player_x - x, dy = g->player_y - y;
+    float distance = sqrtf(dx * dx + dy * dy);
+    float reach;
+    int damage;
+    if (distance >= BOMB_BLAST_RADIUS) return;
+    reach = 1.0f - distance / BOMB_BLAST_RADIUS;
+    damage = (int)(BOMB_BLAST_DAMAGE * reach * reach + 0.5f);
+    if (reach > g->shake) g->shake = reach;
+    if (reach > g->blast_flash) g->blast_flash = reach;
+    if (damage <= 0) return;
+    if (!g->qa_hold || g->health > damage) g->health -= damage;
+    g->last_damage = now;
+    new_explosion(g, g->player_x - 6.0f, g->player_y + 6.0f, 0);
+}
+
 static void update_sortie(Game *g, float dt, const uint8_t *keys)
 {
     int i, j;
@@ -4694,6 +4851,10 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         if (g->explosions[i].age >= g->explosions[i].duration)
             g->explosions[i].active = 0;
     }
+    g->shake -= dt * 2.2f;
+    if (g->shake < 0.0f) g->shake = 0.0f;
+    g->blast_flash -= dt * 3.5f;
+    if (g->blast_flash < 0.0f) g->blast_flash = 0.0f;
 
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];
@@ -4814,6 +4975,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
                 new_ground_explosion(g, sx, (float)ty,
                                      b->type == 1 ? 3 : 1);
                 g->audio.blast = 7000;
+                if (b->type == 1) own_bomb_blast(g, sx, (float)ty, now);
             }
         }
     }
@@ -4829,6 +4991,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
                 b->active = 0;
                 new_ground_explosion(g, b->x, b->y, 2);
                 g->audio.blast = 7000;
+                own_bomb_blast(g, b->x, b->y, now);
             }
         }
     }
@@ -4854,7 +5017,7 @@ static void draw_victorian_plaque(Game *g, int x, int y, int w,
     uint32_t ink = rgb(s, selected ? 255 : 225,
                        selected ? 230 : 199,
                        selected ? 163 : 137);
-    int text_x = x + (w - (int)strlen(label) * 7) / 2;
+    int text_x = x + (w - typewriter_width(label, 11)) / 2;
     rect(s, x + 3, y + 4, w, 30, shadow);
     rect(s, x, y, w, 30, brass);
     rect(s, x + 2, y + 2, w - 4, 26, enamel);
@@ -4922,11 +5085,11 @@ static void draw_campaign_menu(Game *g)
 {
     static const char *new_campaign_items[6] = {
         "BEGIN FULL CAMPAIGN - AUGUST 1914",
-        "JOIN THE CONFLICT - 1914",
-        "JOIN THE CONFLICT - 1915",
-        "JOIN THE CONFLICT - 1916",
-        "JOIN THE CONFLICT - 1917",
-        "JOIN THE CONFLICT - 1918"
+        "JOIN THE SQUADRON - 1914",
+        "JOIN THE SQUADRON - 1915",
+        "JOIN THE SQUADRON - 1916",
+        "JOIN THE SQUADRON - 1917",
+        "JOIN THE SQUADRON - 1918"
     };
     SDL_Surface *s = g->screen;
     int count = campaign_menu_count(g);
@@ -5036,12 +5199,15 @@ static int award_reveal_done(const Game *g)
 }
 
 /* Word-wrapped text which shows only its first 'limit' letters, laid out
- * as if complete so words never jump between lines as they are written. */
+ * as if complete so words never jump between lines as they are written.
+ * 'columns' is the width in the old fixed cells: 7 pixels typed, 8 written. */
 static int wrapped_text_limit(Game *g, int x, int y, const char *str,
                               int columns, int line_height, int limit,
                               int typewriter, uint32_t color)
 {
-    char line_buf[80];
+    FontId font = typewriter ? FONT_TYPE_SMALL : FONT_HAND;
+    int max_w = columns * (typewriter ? 7 : 8);
+    char line_buf[96];
     int line_len = 0, shown = 0;
     const char *p = str;
     while (*p) {
@@ -5052,7 +5218,12 @@ static int wrapped_text_limit(Game *g, int x, int y, const char *str,
         word = p;
         while (*p && *p != ' ') ++p;
         word_len = (int)(p - word);
-        if (line_len && line_len + 1 + word_len > columns) {
+        if (word_len > (int)sizeof(line_buf) - 2)
+            word_len = (int)sizeof(line_buf) - 2;
+        if (line_len &&
+            font_width_n(font, line_buf, line_len) +
+            font_width_n(font, " ", 1) +
+            font_width_n(font, word, word_len) > max_w) {
             line_buf[line_len] = '\0';
             if (typewriter) typewriter_text(g, x, y, line_buf, 7, 11, color);
             else journal_text(g, x, y, line_buf, color);
@@ -5073,11 +5244,13 @@ static int wrapped_text_limit(Game *g, int x, int y, const char *str,
             else journal_text(g, x, y, line_buf, color);
             /* The pen nib at the end of the writing. */
             if (!typewriter)
-                circle(g->screen, x + line_len * 8 + 2, y + 9, 1, color);
+                circle(g->screen, x + font_width(font, line_buf) + 2,
+                       y + JOURNAL_HAND_HEIGHT - 2, 1, color);
             return 0;
         }
         memcpy(line_buf + line_len, word, (size_t)word_len);
         line_len += word_len;
+        line_buf[line_len] = '\0';
         shown += word_len;
     }
     if (line_len) {
@@ -5129,20 +5302,21 @@ static void draw_chapter_card(Game *g)
     blend_rect(s, 0, 110, SCREEN_W, 170, 8, 6, 6, 120);
     snprintf(year, sizeof(year), "%s", len >= 4 ? date + len - 4 : "");
     if (elapsed > 500u)
-        display_text(g, 320 - 2 * 36, 124, year, 36, 42,
+        display_text(g, 320 - display_width(year, 42) / 2, 124, year, 36, 42,
                      PIX_PACK(236, 214, 160));
     if (elapsed > 1300u) {
-        int w = (int)strlen(chapter->title) * 22;
+        int w = display_width(chapter->title, 28);
         display_text(g, 320 - w / 2, 184, chapter->title, 22, 28,
                      PIX_PACK(214, 92, 62));
     }
     if (elapsed > 2000u) {
-        int w = (int)strlen(date) * 10;
+        int w = typewriter_width(date, 15);
         typewriter_text(g, 320 - w / 2, 230, date, 10, 15,
                         PIX_PACK(226, 206, 166));
     }
     if (elapsed > 2800u)
-        typewriter_text(g, 320 - 6 * 7, 360, "ENTER", 7, 11,
+        typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 360,
+                        "ENTER", 7, 11,
                         PIX_PACK(200, 180, 140));
     /* Fade up from black. */
     fade = elapsed < 1200u ? 255 - (int)(elapsed * 255u / 1200u) : 0;
@@ -5180,7 +5354,8 @@ static void draw_loss_card(Game *g)
         typewriter_text(g, 60, 300, "GRIDPIPE THYNE, ROYAL FLYING CORPS", 7, 11,
                         PIX_PACK(160, 146, 120));
     if (elapsed > 6000u)
-        typewriter_text(g, 320 - 6 * 7, 360, "ENTER", 7, 11,
+        typewriter_text(g, 320 - typewriter_width("ENTER", 11) / 2, 360,
+                        "ENTER", 7, 11,
                         PIX_PACK(200, 180, 140));
 }
 
@@ -5206,29 +5381,31 @@ static void draw_newspaper(Game *g, int index, const char *footer)
     uint32_t red = PIX_PACK(128, 36, 28);
     uint32_t grey = PIX_PACK(150, 140, 120);
     uint32_t paper = PIX_PACK(222, 210, 178);
-    int len, w, i;
+    int w, i;
     rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
     rect(s, 36, 20, 580, 372, PIX_PACK(16, 12, 10));
     rect(s, 30, 14, 580, 372, paper);
     blend_rect(s, 30, 14, 580, 372, 180, 150, 90, 40);
-    w = (int)strlen(NEWS_MASTHEAD) * 22;
+    /* Newsprint: an engraved masthead over a Modern serif, as the
+     * papers of the day were set. */
+    w = display_width(NEWS_MASTHEAD, 28);
     display_text(g, 320 - w / 2, 22, NEWS_MASTHEAD, 22, 28, ink);
     rect(s, 44, 56, 552, 2, ink);
-    typewriter_text(g, 46, 61, "PRICE ONE PENNY", 7, 11, ink);
-    len = (int)strlen(n->date);
-    typewriter_text(g, 594 - len * 7, 61, n->date, 7, 11, ink);
+    font_text(g, FONT_NEWS_ITALIC, 46, 71, "Price One Penny", ink);
+    font_text(g, FONT_NEWS_BODY, 594 - font_width(FONT_NEWS_BODY, n->date),
+              71, n->date, ink);
     rect(s, 44, 75, 552, 1, ink);
     rect(s, 44, 78, 552, 1, ink);
-    len = (int)strlen(n->headline);
-    if (len * 16 <= 548) {
-        display_text(g, 320 - len * 8, 86, n->headline, 16, 23, red);
-    } else {
-        display_text(g, 320 - len * 6, 90, n->headline, 12, 18, red);
-    }
+    w = font_width(FONT_NEWS_HEAD, n->headline);
+    if (w <= 548)
+        font_text(g, FONT_NEWS_HEAD, 320 - w / 2, 106, n->headline, red);
+    else
+        display_text(g, 320 - display_width(n->headline, 18) / 2, 90,
+                     n->headline, 12, 18, red);
     rect(s, 44, 116, 552, 1, ink);
     for (i = 0; i < 3; ++i)
         if (n->body[i])
-            typewriter_text(g, 50, 126 + i * 17, n->body[i], 7, 11, ink);
+            font_text(g, FONT_NEWS_BODY, 50, 136 + i * 17, n->body[i], ink);
     /* Three columns of the rest of the day's news. */
     for (i = 0; i < 3; ++i) {
         int cx = 50 + i * 184;
@@ -5237,13 +5414,13 @@ static void draw_newspaper(Game *g, int index, const char *footer)
         if (i < 2) rect(s, cx + 176, 184, 1, 112, grey);
     }
     rect(s, 44, 300, 552, 1, ink);
-    typewriter_text(g, 50, 306, "IN BRIEF", 7, 11, red);
-    if (n->brief[0]) typewriter_text(g, 50, 324, n->brief[0], 7, 11, ink);
-    if (n->brief[1]) typewriter_text(g, 330, 324, n->brief[1], 7, 11, ink);
+    font_text(g, FONT_NEWS_ITALIC, 50, 316, "In Brief", red);
+    if (n->brief[0]) font_text(g, FONT_NEWS_BODY, 50, 334, n->brief[0], ink);
+    if (n->brief[1]) font_text(g, FONT_NEWS_BODY, 330, 334, n->brief[1], ink);
     rect(s, 320, 304, 1, 36, grey);
     rect(s, 44, 344, 552, 1, ink);
     if (footer)
-        typewriter_text(g, 320 - (int)strlen(footer) * 7 / 2, 356, footer,
+        typewriter_text(g, 320 - typewriter_width(footer, 11) / 2, 356, footer,
                         7, 11, red);
 }
 
@@ -5260,19 +5437,22 @@ static void draw_scrapbook(Game *g)
     if (!total) {
         rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
         rect(s, 140, 150, 360, 90, PIX_PACK(222, 210, 178));
-        display_text(g, 320 - 15 * 6, 168, "NO CUTTINGS YET", 12, 18,
+        display_text(g, 320 - display_width("NO CUTTINGS YET", 18) / 2, 168,
+                     "NO CUTTINGS YET", 12, 18,
                      PIX_PACK(128, 36, 28));
-        typewriter_text(g, 320 - 30 * 7 / 2, 200,
+        typewriter_text(g, 320 - typewriter_width(
+                            "FLY A SORTIE TO BEGIN THE BOOK", 11) / 2, 200,
                         "FLY A SORTIE TO BEGIN THE BOOK", 7, 11,
                         PIX_PACK(36, 30, 26));
-        typewriter_text(g, 320 - 11 * 7 / 2, 220, "ENTER  BACK", 7, 11,
+        typewriter_text(g, 320 - typewriter_width("ENTER  BACK", 11) / 2, 220,
+                        "ENTER  BACK", 7, 11,
                         PIX_PACK(36, 30, 26));
         return;
     }
     draw_newspaper(g, g->scrap_index,
                    "LEFT / RIGHT  TURN THE PAGE    ENTER  BACK");
     snprintf(buf, sizeof(buf), "CUTTING %d OF %d", place, total);
-    typewriter_text(g, 320 - (int)strlen(buf) * 7 / 2, 372, buf, 7, 11,
+    typewriter_text(g, 320 - typewriter_width(buf, 11) / 2, 372, buf, 7, 11,
                     PIX_PACK(36, 30, 26));
 }
 
@@ -5444,6 +5624,16 @@ static void draw_story(Game *g)
     uint32_t ink = rgb(s, 47, 37, 27);
     uint32_t red = rgb(s, 125, 39, 31);
     int done;
+    if (g->qa_diary_all) {
+        /* Every page of the campaign, fully written, a second and a half
+         * each, so a capture can check the whole diary in one run. */
+        int n = (int)((SDL_GetTicks() - g->scene_started) / 1500u) %
+                (8 * MISSIONS_PER_CHAPTER);
+        g->chapter = n / MISSIONS_PER_CHAPTER;
+        g->mission = n % MISSIONS_PER_CHAPTER;
+        g->story_stage = 2;
+        g->reveal_started = SDL_GetTicks() - 600000u;
+    }
     if (g->story_stage == 0) { draw_chapter_card(g); return; }
     if (g->story_stage == 1) { draw_loss_card(g); return; }
     if (g->story_stage == 3) {
@@ -5455,6 +5645,7 @@ static void draw_story(Game *g)
     }
     rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 34, 24, 17));
     if (g->journal) SDL_BlitSurface(g->journal, NULL, s, NULL);
+    draw_journal_rules(g);
     journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 0), "FLIGHT LOG", red);
     snprintf(buf, sizeof(buf), "%s NEDDY SEAGOON", rank_short[g->rank & 3]);
     journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 2), buf, ink);
@@ -5469,31 +5660,31 @@ static void draw_story(Game *g)
     journal_text(g, 112, journal_line_y(JOURNAL_LEFT, 14), buf, ink);
     draw_victory_tally(g, 116, journal_line_y(JOURNAL_LEFT, 16) + 5,
                        g->victories, ink);
-    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 0), mission->title, red);
-    journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 2),
+    journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 0), mission->title, red);
+    journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 2),
                  mission_mode_name(mission->mode), ink);
-    done = wrapped_text_limit(g, 348, journal_line_y(JOURNAL_RIGHT, 4),
+    done = wrapped_text_limit(g, 338, journal_line_y(JOURNAL_RIGHT, 4),
                               mission->log, 25, JOURNAL_LINE_STEP,
                               revealed_letters(g, JOURNAL_LETTERS_PER_SECOND),
                               0, ink);
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), "FLYING WITH:", red);
+        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "FLYING WITH:", red);
         if (wingman_sick(g, 2))
             snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
         else
             snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                      allied_pilot_names[2]);
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
+        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
         if (g->wingman_health[1] > 0)
-            journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 18),
+            journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
                          allied_pilot_names[1], ink);
     } else if (mission->mode == MISSION_GUNNER_3D) {
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 16),
+        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
+        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16),
                      tom_wounded(g) ? "A STAND-IN AT THE CONTROLS" :
                                       "TOM AT THE CONTROLS", ink);
-        journal_text(g, 348, journal_line_y(JOURNAL_RIGHT, 18),
+        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
                      mission_armed(g) ? "LEWIS GUN READY" : "NO GUN ABOARD", ink);
     }
     typewriter_text(g, 348, 374, "ENTER - READ ORDERS", 7, 11,
@@ -5542,11 +5733,11 @@ static void draw_award(Game *g)
     rect(s, 88, 54, 460, 270, PIX_PACK(226, 212, 178));
     rect(s, 96, 62, 444, 1, PIX_PACK(150, 120, 80));
     rect(s, 96, 314, 444, 1, PIX_PACK(150, 120, 80));
-    w = 22 * 12;
+    w = display_width("BY COMMAND OF THE KING", 18);
     display_text(g, 318 - w / 2, 72, "BY COMMAND OF THE KING", 12, 18, ink);
     typewriter_text(g, 210, 98, index >= 0 ? "IS AWARDED THE" : "IS PROMOTED",
                     7, 11, ink);
-    w = (int)strlen(title) * 12;
+    w = display_width(title, 18);
     if (w > 420) w = 420;
     display_text(g, 318 - w / 2, 116, title, 12, 18, red);
     if (index >= 0) draw_medal(s, 140, 150, &decorations[index]);
@@ -5575,20 +5766,22 @@ static void draw_squadron_roster(Game *g)
     circle(s, 498, 208, 3, PIX_PACK(150, 40, 30));
     typewriter_text(g, 410, y - 6, "SQUADRON ROSTER", 7, 11, red);
     y += 12;
-    snprintf(buf, sizeof(buf), "%s SEAGOON %dV", rank_short[g->rank & 3],
-             g->victories);
+    /* Two columns: the name, then the state of the man. */
+    snprintf(buf, sizeof(buf), "%s SEAGOON", rank_short[g->rank & 3]);
     typewriter_text(g, 410, y, buf, 7, 11, ink);
+    snprintf(buf, sizeof(buf), "VICT. %d", g->victories);
+    typewriter_text(g, 530, y, buf, 7, 11, ink);
     for (i = 0; i < 3; ++i) {
+        uint32_t c = g->wingman_health[i] > 0 && !wingman_sick(g, i) ?
+                     ink : red;
         y += 15;
-        snprintf(buf, sizeof(buf), "%-14s %s", allied_pilot_names[i],
-                 g->wingman_health[i] <= 0 ? "LOST" :
-                 wingman_sick(g, i) ? "SICK" : "FIT");
-        typewriter_text(g, 410, y, buf, 7, 11,
-                        g->wingman_health[i] > 0 && !wingman_sick(g, i) ?
-                        ink : red);
+        typewriter_text(g, 410, y, allied_pilot_names[i], 7, 11, c);
+        typewriter_text(g, 530, y, g->wingman_health[i] <= 0 ? "LOST" :
+                        wingman_sick(g, i) ? "SICK" : "FIT", 7, 11, c);
     }
     y += 15;
-    typewriter_text(g, 410, y, "TOM           OBSERVER", 7, 11, ink);
+    typewriter_text(g, 410, y, "TOM", 7, 11, ink);
+    typewriter_text(g, 530, y, "OBSERVER", 7, 11, ink);
     y += 15;
     snprintf(buf, sizeof(buf), "FLY %d  GUN %d  ENG %d",
              (int)(g->skill_flying * 10.0f), (int)(g->skill_gunnery * 10.0f),
@@ -6041,7 +6234,7 @@ static void draw_player_damage(Game *g)
 static void draw_field_sign(Game *g, int x, int y, int w, const char *label)
 {
     SDL_Surface *s = g->screen;
-    int text_width = (int)strlen(label) * 7;
+    int text_width = font_width(FONT_STENCIL, label);
     int text_x = x + (w - text_width) / 2;
     uint32_t wood = rgb(s, 54, 38, 27);
     uint32_t brass = rgb(s, 180, 137, 63);
@@ -6051,8 +6244,8 @@ static void draw_field_sign(Game *g, int x, int y, int w, const char *label)
     circle(s, x + 6, y + 6, 2, brass);
     circle(s, x + w - 7, y + 6, 2, brass);
     if (text_x < x + 4) text_x = x + 4;
-    typewriter_text(g, text_x, y + 6, label, 7, 11,
-                    rgb(s, 239, 215, 155));
+    /* Stencilled, like the squadron's crates and petrol tins. */
+    font_text(g, FONT_STENCIL, text_x, y + 17, label, rgb(s, 239, 215, 155));
 }
 
 static void draw_top_plane(SDL_Surface *s, int x, int y, int enemy)
@@ -6132,6 +6325,64 @@ static void draw_top_target(Game *g, int x, int y, Target *target)
     }
 }
 
+/* Adds 'weight' (0..256) of colour c at a sub-pixel position, shared
+ * between the four pixels round it. */
+static void splat(SDL_Surface *s, float x, float y, pix_t c, int weight)
+{
+    int ix = (int)floorf(x), iy = (int)floorf(y);
+    int fx = (int)((x - (float)ix) * 16.0f), fy = (int)((y - (float)iy) * 16.0f);
+    int w[4], i;
+    w[0] = (16 - fx) * (16 - fy);
+    w[1] = fx * (16 - fy);
+    w[2] = (16 - fx) * fy;
+    w[3] = fx * fy;
+    for (i = 0; i < 4; ++i) {
+        int px = ix + (i & 1), py = iy + (i >> 1);
+        int t = (w[i] * weight) >> 11;          /* 0..32 */
+        pix_t *row;
+        if (t <= 0 || px < 0 || py < 0 || px >= s->w || py >= s->h) continue;
+        if (t > 32) t = 32;
+        row = PIX_ROW(s, py);
+        row[px] = pix_mix(row[px], c, t);
+    }
+}
+
+/* A tracer seen from above: a bright head and a tail that fades out
+ * behind it, two pixels wide, pointing exactly along its velocity. */
+static void draw_tracer(SDL_Surface *s, float x, float y, float vx, float vy,
+                        uint8_t r, uint8_t g, uint8_t b)
+{
+    float speed = sqrtf(vx * vx + vy * vy);
+    float dx, dy, length, step;
+    pix_t core = PIX_PACK(255, 252, 230), colour = PIX_PACK(r, g, b);
+    int n, i;
+    if (speed < 0.01f) return;
+    dx = vx / speed;
+    dy = vy / speed;
+    length = speed * 0.035f;
+    if (length < 9.0f) length = 9.0f;
+    if (length > 18.0f) length = 18.0f;
+    n = (int)(length * 2.0f);
+    step = length / (float)n;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    /* A dark edge first, so the streak reads on pale mud and dark grass. */
+    for (i = 0; i <= n; i += 2) {
+        float along = (float)i * step;
+        float px = x - dx * along, py = y - dy * along;
+        splat(s, px - dy * 1.5f, py + dx * 1.5f, PIX_PACK(24, 20, 14), 150);
+        splat(s, px + dy * 1.5f, py - dx * 1.5f, PIX_PACK(24, 20, 14), 150);
+    }
+    for (i = 0; i <= n; ++i) {
+        float along = (float)i * step;
+        float px = x - dx * along, py = y - dy * along;
+        int fade = 256 - i * 220 / n;
+        splat(s, px - dy * 0.5f, py + dx * 0.5f, colour, fade);
+        splat(s, px + dy * 0.5f, py - dx * 0.5f, colour, fade);
+        if (i < n / 3) splat(s, px, py, core, 256);
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
 static void draw_top_down_sortie(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -6204,20 +6455,13 @@ static void draw_top_down_sortie(Game *g)
             circle(s, (int)b->x - 1, (int)b->y - body / 2,
                    body / 2, rgb(s, 178, 145, 79));
         } else {
-            /* A round is a short streak along its own line of flight, so
-             * an enemy's aimed burst slants the way it is travelling. */
-            uint32_t c = b->enemy ? rgb(s, 255, 107, 53) : rgb(s, 255, 230, 143);
-            uint32_t tip = b->enemy ? rgb(s, 255, 196, 150) : rgb(s, 255, 250, 214);
-            float speed = sqrtf(b->vx * b->vx + b->vy * b->vy);
-            float dx = speed > 0.01f ? b->vx / speed : 0.0f;
-            float dy = speed > 0.01f ? b->vy / speed : -1.0f;
-            int hx = (int)(b->x + dx * 5.0f), hy = (int)(b->y + dy * 5.0f);
-            int tx = (int)(b->x - dx * 7.0f), ty = (int)(b->y - dy * 7.0f);
-            int px = (int)(-dy * 1.5f), py = (int)(dx * 1.5f);
-            line(s, tx, ty, hx, hy, c);
-            line(s, tx + px, ty + py, hx + px, hy + py, c);
-            line(s, tx - px, ty - py, hx - px, hy - py, c);
-            line(s, hx - (int)(dx * 3.0f), hy - (int)(dy * 3.0f), hx, hy, tip);
+            /* A round is a tracer streak along its own line of flight, at
+             * any angle, drawn with sub-pixel weights so it glides rather
+             * than steps.  Its length is about one frame's travel. */
+            if (b->enemy)
+                draw_tracer(s, b->x, b->y, b->vx, b->vy, 255, 120, 60);
+            else
+                draw_tracer(s, b->x, b->y, b->vx, b->vy, 255, 236, 160);
         }
     }
     draw_explosions(g);
@@ -8355,6 +8599,32 @@ static void draw_dogfight_3d_sortie(Game *g)
     draw_field_sign(g, 502, 371, 130, buf);
 }
 
+/* Moves the whole picture by (ox, oy) for a shake, filling the edge it
+ * leaves with the row or column beside it. */
+static void shift_frame(SDL_Surface *s, int ox, int oy)
+{
+    int y;
+    if (ox == 0 && oy == 0) return;
+    if (ox > 8) ox = 8;
+    if (ox < -8) ox = -8;
+    if (oy > 8) oy = 8;
+    if (oy < -8) oy = -8;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    if (oy > 0)
+        for (y = s->h - 1; y >= oy; --y)
+            memcpy(PIX_ROW(s, y), PIX_ROW(s, y - oy), (size_t)s->w * sizeof(pix_t));
+    else if (oy < 0)
+        for (y = 0; y < s->h + oy; ++y)
+            memcpy(PIX_ROW(s, y), PIX_ROW(s, y - oy), (size_t)s->w * sizeof(pix_t));
+    if (ox != 0)
+        for (y = 0; y < s->h; ++y) {
+            pix_t *row = PIX_ROW(s, y);
+            if (ox > 0) memmove(row + ox, row, (size_t)(s->w - ox) * sizeof(pix_t));
+            else memmove(row, row - ox, (size_t)(s->w + ox) * sizeof(pix_t));
+        }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
 static void draw_sortie(Game *g)
 {
     SDL_Surface *s = g->screen;
@@ -8511,6 +8781,14 @@ static void draw_sortie(Game *g)
         int pitch = 2 + (int)(g->player_vy / 45.0f);
         draw_plane(g, (int)g->player_x, (int)g->player_y, 0, pitch);
     }
+    if (g->shake > 0.0f) {
+        uint32_t now = SDL_GetTicks();
+        shift_frame(s, (int)(sinf((float)now * 0.093f) * g->shake * 6.0f),
+                    (int)(cosf((float)now * 0.077f) * g->shake * 5.0f));
+    }
+    if (g->blast_flash > 0.0f)
+        blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 255, 226, 170,
+                   (uint8_t)(g->blast_flash * 150.0f));
     snprintf(buf, sizeof(buf), "SCORE %05d", g->score);
     draw_field_sign(g, 8, 8, 112, buf);
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
@@ -8631,7 +8909,7 @@ static int draw_fatal_memorial(Game *g)
     {
         static const char *const carved[4] = {"2ND LT", "LT", "CAPT", "MAJOR"};
         const char *rank = carved[g->rank & 3];
-        typewriter_text(g, 320 - (int)strlen(rank) * 7 / 2, 217, rank, 7, 11,
+        typewriter_text(g, 320 - typewriter_width(rank, 11) / 2, 217, rank, 7, 11,
                         inscription);
     }
     typewriter_text(g, 303, 241, "NEDDY", 7, 11, inscription);
@@ -8725,7 +9003,7 @@ static void draw_debrief(Game *g)
     if (g->mission_board) SDL_BlitSurface(g->mission_board, NULL, s, NULL);
     draw_board_lighting(g);
     display_text(g, 69, 48,
-         g->success ? "MISSION ACCOMPLISHED" : "MISSION INCOMPLETE",
+         g->success ? "DUTY CARRIED OUT" : "DUTY NOT CARRIED OUT",
          12, 18, red);
     if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
         snprintf(buf, sizeof(buf), "ENEMY AIRCRAFT              %d/%d",
@@ -9125,31 +9403,24 @@ static int game_init(Game *g)
         !g->pilot_cockpit || !g->gunner_cockpit || !g->gunner_ring ||
         !g->gunner_airframe || !g->gunner_moving_guns || !g->explosion_atlas)
         fprintf(stderr, "One or more alternate-view art assets are unavailable\n");
-    g->font_display_36x42 = SDL_LoadBMP(CANVAS_DISPLAY_36X42_BMP);
-    g->font_display_22x28 = SDL_LoadBMP(CANVAS_DISPLAY_22X28_BMP);
-    g->font_display_16x23 = SDL_LoadBMP(CANVAS_DISPLAY_16X23_BMP);
-    g->font_display_12x18 = SDL_LoadBMP(CANVAS_DISPLAY_12X18_BMP);
-    g->font_typewriter_10x15 = SDL_LoadBMP(CANVAS_TYPEWRITER_10X15_BMP);
-    g->font_typewriter_7x11 = SDL_LoadBMP(CANVAS_TYPEWRITER_7X11_BMP);
-    g->font_journal_8x12 = SDL_LoadBMP(CANVAS_JOURNAL_8X12_BMP);
-    if (!g->font_display_36x42 || !g->font_display_22x28 ||
-        !g->font_display_16x23 || !g->font_display_12x18 ||
-        !g->font_typewriter_10x15 || !g->font_typewriter_7x11 ||
-        !g->font_journal_8x12)
-        fprintf(stderr, "One or more native-size font atlases are unavailable\n");
+    /* An 8-bit coverage map: it is read directly, never converted. */
+    g->fonts = SDL_LoadBMP(CANVAS_FONTS_BMP);
+    if (g->fonts && g->fonts->format->BytesPerPixel != 1) {
+        SDL_FreeSurface(g->fonts);
+        g->fonts = NULL;
+    }
+    if (!g->fonts)
+        fprintf(stderr, "The font atlas is unavailable\n");
     g->player_sprites = SDL_LoadBMP(CANVAS_PLAYER_SPRITES_BMP);
     g->enemy_sprites = SDL_LoadBMP(CANVAS_ENEMY_SPRITES_BMP);
     if (!g->player_sprites || !g->enemy_sprites)
         fprintf(stderr, "Aircraft sprite atlas unavailable; using vector fallback\n");
     {
-        /* Fonts and aircraft atlases are read pixel by pixel every frame.
-         * Holding them in the screen's 32-bit format lets the renderer read
+        /* The aircraft atlases are read pixel by pixel every frame.
+         * Holding them in the screen's format lets the renderer read
          * them directly instead of decoding 24-bit BMP pixels through SDL. */
         SDL_Surface **atlases[] = {
-            &g->font_display_36x42, &g->font_display_22x28,
-            &g->font_display_16x23, &g->font_display_12x18,
-            &g->font_typewriter_10x15, &g->font_typewriter_7x11,
-            &g->font_journal_8x12, &g->player_sprites, &g->enemy_sprites
+            &g->player_sprites, &g->enemy_sprites
         };
         int i;
         for (i = 0; i < (int)(sizeof(atlases) / sizeof(atlases[0])); ++i)
@@ -9437,8 +9708,9 @@ int main(int argc, char **argv)
     if (argc > 1) {
         static const char *const qa_modes[] = {
             "AIRSHIP", "CHAPTER_SUCCESS", "DEATH", "DEBRIEF",
-            "DEBRIEF_SUCCESS", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA", "GUNNER",
-            "HOSPITAL", "NEWS", "SIDE", "TOPDOWN", "TRUCE", "UNARMED",
+            "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
+            "GUNNER", "HOSPITAL", "NEWS", "SIDE", "TOPDOWN", "TRACERS", "TRUCE",
+            "UNARMED",
             "UNARMED_GUNNER"
         };
         int q;
@@ -9462,15 +9734,21 @@ int main(int argc, char **argv)
         reset_sortie(&g);
         g.qa_hold = argv[1][0] != 'T';
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "DIARY") == 0) {
+        g.qa_diary_all = 1;
+        set_scene(&g, SCENE_STORY);
     } else if (argc > 1 && strcmp(argv[1], "NEWS") == 0) {
         /* The front page before the first day of the Somme. */
         g.chapter = 2;
         g.mission = 4;
         set_scene(&g, SCENE_STORY);
-    } else if (argc > 1 && strcmp(argv[1], "TOPDOWN") == 0) {
+    } else if (argc > 1 && (strcmp(argv[1], "TOPDOWN") == 0 ||
+                            strcmp(argv[1], "TRACERS") == 0)) {
         g.chapter = 2;
         g.mission = 1;
         reset_sortie(&g);
+        g.qa_tracers = argv[1][1] == 'R';
+        g.qa_hold = g.qa_tracers;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && (strcmp(argv[1], "UNARMED") == 0 ||
                             strcmp(argv[1], "UNARMED_GUNNER") == 0)) {
@@ -9653,13 +9931,7 @@ int main(int argc, char **argv)
     if (g.gunner_moving_guns) SDL_FreeSurface(g.gunner_moving_guns);
     if (g.explosion_atlas) SDL_FreeSurface(g.explosion_atlas);
     if (g.topdown_explosion_atlas) SDL_FreeSurface(g.topdown_explosion_atlas);
-    if (g.font_display_36x42) SDL_FreeSurface(g.font_display_36x42);
-    if (g.font_display_22x28) SDL_FreeSurface(g.font_display_22x28);
-    if (g.font_display_16x23) SDL_FreeSurface(g.font_display_16x23);
-    if (g.font_display_12x18) SDL_FreeSurface(g.font_display_12x18);
-    if (g.font_typewriter_10x15) SDL_FreeSurface(g.font_typewriter_10x15);
-    if (g.font_typewriter_7x11) SDL_FreeSurface(g.font_typewriter_7x11);
-    if (g.font_journal_8x12) SDL_FreeSurface(g.font_journal_8x12);
+    if (g.fonts) SDL_FreeSurface(g.fonts);
     if (g.player_sprites) SDL_FreeSurface(g.player_sprites);
     if (g.enemy_sprites) SDL_FreeSurface(g.enemy_sprites);
     if (g.audio.music_data) SDL_free(g.audio.music_data);

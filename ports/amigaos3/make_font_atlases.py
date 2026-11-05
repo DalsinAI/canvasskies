@@ -1,49 +1,117 @@
 #!/usr/bin/env python3
-"""Rasterise the two distributable period faces used by Canvas Skies."""
+"""Pre-render the Canvas Skies period faces into one glyph atlas.
+
+Every face is rasterised here, on the host, at the exact pixel size the game
+draws it, antialiased and with its own advance widths.  The Amiga build only
+blends these coverage maps onto the screen; it carries no font rasteriser.
+
+Writes assets/canvas-skies/fonts.bmp (8-bit coverage, one band of cells per
+face) and src/modern/canvas_fonts.h (the metrics for each band).
+"""
 
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[2]
-ASSETS = ROOT / "assets" / "canvas-skies"
+FONTS = ROOT / "assets" / "fonts"
+ATLAS = ROOT / "assets" / "canvas-skies" / "fonts.bmp"
+HEADER = ROOT / "src" / "modern" / "canvas_fonts.h"
+
+FIRST, LAST = 32, 126          # printable ASCII
+COLUMNS = 16
+PAD = 3                        # room for italic and script overhangs
+
+# (enum name, file, pixel size, what it is for)
+FACES = (
+    ("FONT_TITLE", "imfellenglish/IMFeENrm28P.ttf", 40,
+     "IM Fell English: the title and chapter cards"),
+    ("FONT_HEADING", "imfellenglish/IMFeENrm28P.ttf", 27,
+     "IM Fell English: headings"),
+    ("FONT_SUBHEAD", "imfellenglish/IMFeENsc28P.ttf", 21,
+     "IM Fell English small capitals: menus and sub-headings"),
+    ("FONT_LABEL", "imfellenglish/IMFeENsc28P.ttf", 17,
+     "IM Fell English small capitals: labels"),
+    ("FONT_TYPE", "specialelite/SpecialElite-Regular.ttf", 16,
+     "Special Elite: orders and the roster"),
+    ("FONT_TYPE_SMALL", "specialelite/SpecialElite-Regular.ttf", 13,
+     "Special Elite: small typed lines and prompts"),
+    ("FONT_HAND", "cedarvillecursive/Cedarville-Cursive.ttf", 17,
+     "Cedarville Cursive: Neddy's diary hand"),
+    ("FONT_NEWS_HEAD", "oldstandardtt/OldStandard-Bold.ttf", 25,
+     "Old Standard TT Bold: newspaper headlines"),
+    ("FONT_NEWS_BODY", "oldstandardtt/OldStandard-Regular.ttf", 13,
+     "Old Standard TT: newspaper copy"),
+    ("FONT_NEWS_ITALIC", "oldstandardtt/OldStandard-Italic.ttf", 13,
+     "Old Standard TT Italic: dates and side items"),
+    ("FONT_STENCIL", "stardosstencil/StardosStencil-Bold.ttf", 14,
+     "Stardos Stencil Bold: the flying instruments"),
+)
 
 
-def atlas(path: Path, font_path: str, font_size: int,
-          cell_w: int, cell_h: int) -> None:
-    image = Image.new("RGB", (cell_w * 16, cell_h * 4), "black")
-    draw = ImageDraw.Draw(image)
-    font = ImageFont.truetype(font_path, font_size)
-    for code in range(32, 96):
-        ch = chr(code)
-        box = draw.textbbox((0, 0), ch, font=font)
-        width, height = box[2] - box[0], box[3] - box[1]
-        col, row = (code - 32) & 15, (code - 32) >> 4
-        x = col * cell_w + (cell_w - width) // 2 - box[0]
-        y = row * cell_h + (cell_h - height) // 2 - box[1]
-        draw.text((x, y), ch, font=font, fill="white")
-    image.save(path, format="BMP")
+def render(file: str, size: int):
+    font = ImageFont.truetype(str(FONTS / file), size)
+    ascent, descent = font.getmetrics()
+    advances, boxes = [], []
+    for code in range(FIRST, LAST + 1):
+        advances.append(round(font.getlength(chr(code))))
+        boxes.append(font.getbbox(chr(code)))
+    left = min(0, min(b[0] for b in boxes))
+    right = max(max(b[2] for b in boxes), max(advances))
+    cell_w = right - left + 2 * PAD
+    cell_h = ascent + descent + 2
+    rows = (LAST - FIRST + COLUMNS) // COLUMNS
+    band = Image.new("L", (cell_w * COLUMNS, cell_h * rows), 0)
+    draw = ImageDraw.Draw(band)
+    origin_x = PAD - left
+    for i, code in enumerate(range(FIRST, LAST + 1)):
+        col, row = i % COLUMNS, i // COLUMNS
+        draw.text((col * cell_w + origin_x, row * cell_h + 1), chr(code),
+                  font=font, fill=255)
+    return band, cell_w, cell_h, origin_x, ascent + 1, ascent + descent, advances
 
 
 def main() -> None:
-    serif = "/usr/share/fonts/truetype/noto/NotoSerifDisplay-Regular.ttf"
-    journal = "/usr/share/fonts/truetype/noto/NotoSerif-Italic.ttf"
-    mono = "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf"
-    # Each atlas is rendered at its final on-screen cell size. The game never
-    # rescales these glyphs, avoiding soft edges and broken thin strokes.
-    for name, font_size, width, height in (
-        ("font-display-36x42.bmp", 40, 36, 42),
-        ("font-display-22x28.bmp", 27, 22, 28),
-        ("font-display-16x23.bmp", 21, 16, 23),
-        ("font-display-12x18.bmp", 16, 12, 18),
-    ):
-        atlas(ASSETS / name, serif, font_size, width, height)
-    for name, font_size, width, height in (
-        ("font-typewriter-10x15.bmp", 14, 10, 15),
-        ("font-typewriter-7x11.bmp", 10, 7, 11),
-    ):
-        atlas(ASSETS / name, mono, font_size, width, height)
-    atlas(ASSETS / "font-journal-8x12.bmp", journal, 11, 8, 12)
+    bands, metrics, top = [], [], 0
+    for name, file, size, note in FACES:
+        band, cell_w, cell_h, origin_x, baseline, line, advances = \
+            render(file, size)
+        bands.append(band)
+        metrics.append((name, note, top, cell_w, cell_h, origin_x, baseline,
+                        line, advances))
+        top += band.height
+    width = max(b.width for b in bands)
+    atlas = Image.new("L", (width, top), 0)
+    y = 0
+    for band in bands:
+        atlas.paste(band, (0, y))
+        y += band.height
+    atlas.save(ATLAS, format="BMP")
+
+    out = ["/* Generated by ports/amigaos3/make_font_atlases.py: do not edit. */",
+           "#ifndef CANVAS_FONTS_H", "#define CANVAS_FONTS_H", "",
+           f"#define FONT_FIRST {FIRST}", f"#define FONT_LAST {LAST}",
+           f"#define FONT_COLUMNS {COLUMNS}", "",
+           "typedef enum {"]
+    out += [f"    {m[0]}, /* {m[1]} */" for m in metrics]
+    out += ["    FONT_COUNT", "} FontId;", "",
+            "typedef struct {",
+            "    short top;      /* first atlas row of this face's band */",
+            "    short cell_w, cell_h;",
+            "    short origin_x; /* pen position inside a cell */",
+            "    short baseline; /* baseline row inside a cell */",
+            "    short line;     /* ascent plus descent */",
+            f"    unsigned char advance[{LAST - FIRST + 1}];",
+            "} FontFace;", "",
+            "static const FontFace font_faces[FONT_COUNT] = {"]
+    for name, _, top_row, cell_w, cell_h, origin_x, baseline, line, adv in metrics:
+        out.append(f"    {{{top_row}, {cell_w}, {cell_h}, {origin_x}, "
+                   f"{baseline}, {line}, {{ /* {name} */")
+        for i in range(0, len(adv), 19):
+            out.append("        " + ", ".join(str(a) for a in adv[i:i + 19]) + ",")
+        out.append("    }},")
+    out += ["};", "", "#endif", ""]
+    HEADER.write_text("\n".join(out))
 
 
 if __name__ == "__main__":
