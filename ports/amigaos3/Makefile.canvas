@@ -36,6 +36,7 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_DOGFIGHT_BACKGROUND_BMP=\"PROGDIR:assets/canvas-skies/dogfight-panorama-v2.bmp\" \
 	-DCANVAS_DOGFIGHT_ENEMY_BMP=\"PROGDIR:assets/canvas-skies/dogfight-enemy-headon.bmp\" \
 	-DCANVAS_PILOT_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit.bmp\" \
+	-DCANVAS_PILOT_COCKPIT_UNARMED_BMP=\"PROGDIR:assets/canvas-skies/pilot-cockpit-unarmed.bmp\" \
 	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_GUNNER_RING_BMP=\"PROGDIR:assets/canvas-skies/gunner-ring-empty-v2.bmp\" \
 	-DCANVAS_GUNNER_AIRFRAME_BMP=\"PROGDIR:assets/canvas-skies/gunner-airframe-tail.bmp\" \
