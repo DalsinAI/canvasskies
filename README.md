@@ -9,8 +9,8 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.2.0 RC1**, a release candidate. Download it from
-[the v0.2.0-rc1 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc1).
+Current release: **0.2.0 RC2**, a release candidate. Download it from
+[the v0.2.0-rc2 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc2).
 New since the alpha: a cinematic cockpit view, open-sky dogfights, a pilot's
 career with medals, the story as a war diary, the morning paper and Book of
 Press Cuttings, the Christmas truce, the airship and Gotha raids, and period
