@@ -21,6 +21,7 @@
 #include "canvas_topdown_sprites.h"
 #include "canvas_machine_sprites.h"
 #include "canvas_side_civilians.h"
+#include "canvas_rear_carbine.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -678,7 +679,7 @@ typedef struct {
     SDL_Surface *pilot_cockpit_unarmed; /* 1914: no guns, no ring sight */
     SDL_Surface *pilot_cockpit_single;  /* 1915 to spring 1917: one Vickers */
     SDL_Surface *cockpit_revolver;      /* 1914: two frames, rest and kick */
-    SDL_Surface *rear_carbine;          /* 1914: nine aims from the rear seat */
+    SDL_Surface *rear_carbine;          /* 1914: the carbine at every aim */
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
@@ -852,6 +853,7 @@ static void reset_wingmen(Game *g);
 static void show_notice(Game *g, const char *text);
 static float random_unit(Game *g);
 static int personal_shot(Game *g, int revolver);
+static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void cinema_start(Game *g);
 static int cinema_reels_present(void);
@@ -3857,6 +3859,17 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
             *sy = 142 - (int)(past * 290.0f);
         }
     }
+    if (campaign_missions[g->chapter][g->mission].mode == MISSION_GUNNER_3D &&
+        depth >= 90.0f && index % 3 == 2) {
+        /* Every third attacker works round a flank, out beside the tailplane
+         * where the observer must swing right round to bear on him, and
+         * comes in from there rather than from dead astern. */
+        float flank = (index & 4) ? -1.0f : 1.0f;
+        float swing = 1.0f - fabsf(sinf(g->scroll * 0.0016f +
+                                        enemy->phase * 1.3f)) * 0.55f;
+        *sx += (int)(flank * swing * 285.0f);
+        *sy += (int)(swing * 28.0f);
+    }
     *sx -= (int)(g->view_bank * 185.0f);
     *sy += (int)(g->view_pitch * 150.0f);
     if (campaign_missions[g->chapter][g->mission].mode == MISSION_GUNNER_3D) {
@@ -4526,6 +4539,14 @@ static void update_perspective_sortie(Game *g, float dt,
         if (g->player_x > 612.0f) g->player_x = 612.0f;
         if (g->player_y < 28.0f) g->player_y = 28.0f;
         if (g->player_y > 300.0f) g->player_y = 300.0f;
+        if (personal) {
+            /* The carbine's range: a rifle aimed lower than this would lie
+             * under the signs, where nobody could see where it pointed. */
+            if (g->player_y < (float)CARBINE_AIM_Y0)
+                g->player_y = (float)CARBINE_AIM_Y0;
+            if (g->player_y > (float)CARBINE_AIM_Y1)
+                g->player_y = (float)CARBINE_AIM_Y1;
+        }
         aim_elevation = gunner_aim_elevation(g);
         target_view_x = 320.0f + (g->player_x - 320.0f) * 0.80f;
         target_view_y = 235.0f - aim_elevation * 90.0f;
@@ -4598,7 +4619,10 @@ static void update_perspective_sortie(Game *g, float dt,
             --g->ammunition;
             g->audio.shot = gunner ? 1750 : 1500;
         }
-        if (gunner) gunner_muzzle_position(g, &muzzle_x, &muzzle_y);
+        if (gunner && personal)
+            carbine_muzzle_position(g, &muzzle_x, &muzzle_y);
+        else if (gunner)
+            gunner_muzzle_position(g, &muzzle_x, &muzzle_y);
         dx = (float)aim_x - muzzle_x;
         dy = (float)aim_y - muzzle_y;
         length = sqrtf(dx * dx + dy * dy);
@@ -10077,21 +10101,64 @@ static void draw_revolver_in_hand(Game *g)
     SDL_BlitSurface(g->cockpit_revolver, &src, g->screen, &dst);
 }
 
+/* The carbine is rendered in perspective for a grid of aims over its
+ * whole range (make_rear_carbine.py): astern it runs away into the
+ * picture, on a flank across it, raised it climbs it.  The frame for the
+ * nearest aim is drawn where it was rendered on the screen. */
+static const short *carbine_frame(const Game *g)
+{
+    float fx = (g->player_x - CARBINE_AIM_X0) * (CARBINE_AIM_COLUMNS - 1) /
+               (float)(CARBINE_AIM_X1 - CARBINE_AIM_X0);
+    float fy = (g->player_y - CARBINE_AIM_Y0) * (CARBINE_AIM_ROWS - 1) /
+               (float)(CARBINE_AIM_Y1 - CARBINE_AIM_Y0);
+    int column = (int)(fx + 0.5f), row = (int)(fy + 0.5f);
+    if (column < 0) column = 0;
+    if (column > CARBINE_AIM_COLUMNS - 1) column = CARBINE_AIM_COLUMNS - 1;
+    if (row < 0) row = 0;
+    if (row > CARBINE_AIM_ROWS - 1) row = CARBINE_AIM_ROWS - 1;
+    return carbine_frames[row * CARBINE_AIM_COLUMNS + column];
+}
+
+/* The kick throws the rifle back along its own line, towards the butt. */
+static void carbine_kick_offset(const Game *g, const short *f,
+                                int *dx, int *dy)
+{
+    float kick = personal_kick(g);
+    float bx = (float)f[4] + (float)f[2] * 0.5f - (float)f[6];
+    float by = (float)f[5] + (float)f[3] - (float)f[7];
+    float length = sqrtf(bx * bx + by * by);
+    if (length < 1.0f) length = 1.0f;
+    *dx = (int)(bx / length * kick * 9.0f);
+    *dy = (int)(by / length * kick * 9.0f);
+}
+
+static void carbine_muzzle_position(const Game *g, float *x, float *y)
+{
+    const short *f = carbine_frame(g);
+    int dx, dy;
+    carbine_kick_offset(g, f, &dx, &dy);
+    *x = (float)(f[6] + dx);
+    *y = (float)(f[7] + dy);
+}
+
 static void draw_carbine_in_hand(Game *g)
 {
-    /* The butt rests low in the middle of the rear seat; the frame whose
-     * angle is nearest the crosshair is shown. */
-    float deg = atan2f(g->player_x - 330.0f, 400.0f - g->player_y) *
-                180.0f / (float)M_PI;
-    int frame = (int)floorf((deg + 48.0f) / 12.0f + 0.5f);
+    const short *f = carbine_frame(g);
     SDL_Rect src, dst;
+    int dx, dy;
+    float kick = personal_kick(g);
     if (!g->rear_carbine) return;
-    if (frame < 0) frame = 0;
-    if (frame > 8) frame = 8;
-    src.x = frame * 200; src.y = 0; src.w = 200; src.h = 260;
-    dst.x = 230; dst.y = 140 + (int)(personal_kick(g) * 10.0f);
-    dst.w = 200; dst.h = 260;
+    carbine_kick_offset(g, f, &dx, &dy);
+    src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
+    dst.x = f[4] + dx; dst.y = f[5] + dy; dst.w = f[2]; dst.h = f[3];
     SDL_BlitSurface(g->rear_carbine, &src, g->screen, &dst);
+    if (kick > 0.6f) {
+        /* The flash at the muzzle, along the line the round takes. */
+        int mx = f[6] + dx, my = f[7] + dy;
+        blend_circle(g->screen, mx, my, 9 + (int)(kick * 7.0f),
+                     255, 196, 110, 150);
+        blend_circle(g->screen, mx, my, 4, 255, 246, 220, 230);
+    }
 }
 
 static void draw_living_cockpit(Game *g)
@@ -10399,8 +10466,17 @@ static void draw_dogfight_3d_sortie(Game *g)
          * full-screen ring overlay belonged to the abandoned twin-gun mockup
          * and would duplicate the mount around the single Lewis. */
     } else if (gunner && !mission_armed(g)) {
-        /* 1914: Neddy in the back with the carbine. */
-        if (personal_arms(g)) draw_carbine_in_hand(g);
+        /* 1914: Neddy in the back with the carbine, and where it points. */
+        if (personal_arms(g)) {
+            int ax = (int)g->player_x, ay = (int)g->player_y;
+            uint32_t sight = gunner_tail_blocks_shot(g, ax, ay) ?
+                             rgb(s, 242, 72, 45) : rgb(s, 239, 221, 164);
+            draw_carbine_in_hand(g);
+            line(s, ax - 14, ay, ax - 6, ay, sight);
+            line(s, ax + 6, ay, ax + 14, ay, sight);
+            line(s, ax, ay - 14, ax, ay - 6, sight);
+            line(s, ax, ay + 6, ax, ay + 14, sight);
+        }
     } else if (gunner && g->gunner_cockpit)
         SDL_BlitSurface(g->gunner_cockpit, NULL, s, NULL);
     else if (!gunner && g->pilot_cockpit)
@@ -11269,13 +11345,13 @@ static int game_init(Game *g)
             &g->gunner_ring, &g->gunner_airframe,
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
-            &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
+            &g->cockpit_revolver, &g->topdown_targets,
             &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
             &g->medals, &g->mess, &g->loss_card, &g->machine_cards,
             &g->office_paper, &g->office_stamp
         };
         int i;
-        for (i = 0; i < 25; ++i) if (*convert[i]) {
+        for (i = 0; i < 24; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11293,11 +11369,16 @@ static int game_init(Game *g)
                                 g->gunner_moving_guns,
                                 g->explosion_atlas,
                                 g->topdown_explosion_atlas,
-                                g->cockpit_revolver, g->rear_carbine,
+                                g->cockpit_revolver,
                                 g->topdown_targets, g->side_civilians};
         int i;
-        for (i = 0; i < 15; ++i) if (keyed[i])
+        for (i = 0; i < 14; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
+        /* The carbine's frames stay in their 256 colours, a quarter of
+         * the memory; the generator leaves no colour blended with the
+         * key, so the key is exact: the last entry of the palette. */
+        if (g->rear_carbine && g->rear_carbine->format->BitsPerPixel == 8)
+            SDL_SetColorKey(g->rear_carbine, SDL_TRUE, 255);
         /* The ribbons are purple silk, which the loose key would eat; the
          * painter leaves hard edges, so the exact colour is enough. */
         if (g->medals)

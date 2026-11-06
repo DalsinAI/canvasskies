@@ -19,7 +19,7 @@ runtime so the generated bitmaps contain no baked-in lettering.
 
 ## Painted on the host
 
-The 1914 weapons in hand (`cockpit-revolver.bmp`, `rear-carbine.bmp`) and
+The pilot's revolver (`cockpit-revolver.bmp`) and
 the top-down mission targets (`topdown-targets.bmp`) are original art for
 this game, painted procedurally on the host by
 `ports/amigaos3/make_personal_arms.py` and
@@ -29,6 +29,13 @@ shading lit from the low sun, a soft inner rim, grain and edge highlights,
 then filtered down to game size. No photograph, film still or other game's
 art was used. The ambulances are marked by a pale tilt and the word
 AMBULANCE; the protected red cross emblem is deliberately not drawn.
+
+The observer's carbine in hand (`rear-carbine.bmp`) is original art for
+this game, rendered on the host by `ports/amigaos3/make_rear_carbine.py`:
+the rifle, gloves and sleeves are simple solids ray-cast in perspective from
+the observer's eye and lit by the low sun, the sky and a rim of sunlight, one
+frame for each aim of a grid over the rear arc. It is stored as a 256-colour
+run-length encoded BMP.
 
 `pilot-cockpit-single.bmp` is assembled from the existing cockpit
 paintings by `ports/amigaos3/make_single_gun_cockpit.py`, and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paint 1914's weapons in hand: the pilot's Webley and Tom's carbine.
+"""Paint the pilot's Webley in hand for 1914.
 
 Each part is painted on the host at four times its size: a shaded fill
 lit from the low sun ahead and to the right, a soft rim of shadow inside
@@ -9,9 +9,8 @@ cockpit painting.  Magenta is the transparent key, as in the other atlases.
 
   assets/canvas-skies/cockpit-revolver.bmp  two frames, 220x170: at rest
                                             and kicking up with the flash
-  assets/canvas-skies/rear-carbine.bmp      nine frames, 200x260: the
-                                            carbine raised from the rear seat
-                                            at -48..+48 degrees from upright
+
+The observer's carbine is rendered in perspective by make_rear_carbine.py.
 """
 
 import math
@@ -146,86 +145,12 @@ def revolver(kick):
     return c.image()
 
 
-def carbine(angle):
-    """A short Lee-Enfield raised from the rear seat, seen from behind:
-    the butt big in the foreground, the barrel running away up the frame."""
-    c = Canvas(200, 260)
-    base = (100, 260)
-
-    def R(pts):
-        return rot(pts, angle, base)
-
-    def cap(p0, p1, w, colour, **kw):
-        q = R([p0, p1])
-        c.part([q[0], q[1], w], colour, shape="capsule", **kw)
-
-    def poly(pts, colour, **kw):
-        q = R(pts)
-        # At the steepest angles the muzzle end leaves the frame altogether.
-        if max(x for x, _ in q) < 0 or min(x for x, _ in q) > 200:
-            return
-        c.part(q, colour, **kw)
-
-    # The forearms first, so the rifle lies over them: the left reaches up
-    # from the corner beneath the stock to the fore-end, the right comes
-    # in low to the wrist.  Khaki sleeves, the gauntlet cuffs at the wrists.
-    cap((150, 272), (110, 128), 22.0, SLEEVE, gloss=0.1, grain=4, round_=3)
-    cap((116, 150), (108, 126), 17.0, GLOVE, gloss=0.16, round_=2)
-    cap((36, 272), (84, 228), 28.0, SLEEVE, gloss=0.1, grain=4, round_=3)
-    cap((72, 240), (88, 226), 22.0, GLOVE, gloss=0.16, round_=2)
-    poly([(72, 262), (128, 262), (117, 204), (85, 204)], WOOD, gloss=0.2,
-         grain=7, round_=4)                              # butt
-    c.line(R([(100, 258)])[0], R([(100, 210)])[0], (112, 66, 34), 0.6)
-    poly([(88, 206), (112, 206), (108, 168), (92, 168)], WOOD, gloss=0.22,
-         grain=6, round_=2.5)                            # wrist
-    poly([(91, 172), (109, 172), (107, 124), (93, 124)], STEEL, gloss=0.4,
-         grain=2, round_=1.6)                            # receiver
-    poly([(96, 128), (104, 128), (103, 114), (97, 114)], (60, 62, 70),
-         gloss=0.5, round_=0.8)                          # rear sight leaf
-    poly([(85, 160), (91, 160), (91, 134), (86, 136)], (36, 38, 44),
-         gloss=0.3, round_=0.8)                          # magazine
-    cap((107, 162), (126, 170), 3.6, STEEL, gloss=0.4, round_=0.6)
-    k = R([(127, 170.5)])[0]
-    c.part([(k[0] - 4, k[1] - 4), (k[0] + 4, k[1] + 4)], STEEL,
-           shape="ellipse", gloss=0.55, round_=0.6)      # bolt knob
-    poly([(92, 126), (108, 126), (104.5, 34), (95.5, 34)], WOOD, gloss=0.2,
-         grain=6, round_=2)                              # fore-end
-    poly([(96.5, 124), (103.5, 124), (102, 36), (98, 36)], (160, 102, 56),
-         gloss=0.3, grain=4, round_=1)                   # handguard
-    for y in (98, 62):
-        w = 8.5 - (124 - y) * 0.04
-        poly([(100 - w, y), (100 + w, y), (100 + w, y - 4), (100 - w, y - 4)],
-             STEEL, gloss=0.5, round_=0.5)               # barrel bands
-    poly([(95.5, 36), (104.5, 36), (103.5, 16), (96.5, 16)], STEEL,
-         gloss=0.45, round_=1)                           # the snub nose cap
-    poly([(96, 18), (98.5, 18), (98, 8), (96.5, 9)], STEEL, round_=0.4)
-    poly([(101.5, 18), (104, 18), (103.5, 9), (102, 8)], STEEL, round_=0.4)
-    c.part(R([(98.6, 14), (101.4, 17)]), (14, 14, 16), shape="ellipse",
-           round_=0.3)
-    # Sleeves from the bottom corners, then the hands: the right round the
-    # wrist of the stock, the left under the fore-end.
-    poly([(76, 230), (92, 200), (114, 196), (118, 228), (96, 244)], GLOVE,
-         gloss=0.16, grain=4, round_=5)
-    gloved_fingers(c, R, cap, [((84, 202), (110, 196)), ((86, 211), (112, 205)),
-                         ((88, 220), (112, 214))], 8.0, GLOVE)
-    cap((90, 196), (102, 178), 7.0, GLOVE, gloss=0.22, round_=1.4)  # thumb
-    poly([(104, 132), (126, 112), (128, 96), (112, 92), (100, 114)],
-         GLOVE, gloss=0.16, grain=4, round_=5)
-    gloved_fingers(c, R, cap, [((122, 112), (92, 116)), ((124, 104), (93, 107)),
-                         ((124, 96), (94, 98))], 7.4, GLOVE)
-    return c.image()
-
-
 def main():
     frames = [revolver(0.0), revolver(1.0)]
     sheet = Image.new("RGB", (440, 170), KEY)
     for i, f in enumerate(frames):
         sheet.paste(f, (i * 220, 0))
     sheet.save(ASSETS / "cockpit-revolver.bmp")
-    sheet = Image.new("RGB", (200 * 9, 260), KEY)
-    for i in range(9):
-        sheet.paste(carbine(math.radians(-48 + 12 * i)), (i * 200, 0))
-    sheet.save(ASSETS / "rear-carbine.bmp")
 
 
 if __name__ == "__main__":
