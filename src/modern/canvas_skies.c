@@ -143,6 +143,15 @@
 #ifndef CANVAS_LOSS_CARD_BMP
 #define CANVAS_LOSS_CARD_BMP "assets/canvas-skies/loss-card.bmp"
 #endif
+#ifndef CANVAS_MACHINE_CARDS_BMP
+#define CANVAS_MACHINE_CARDS_BMP "assets/canvas-skies/machine-cards.bmp"
+#endif
+#ifndef CANVAS_OFFICE_PAPER_BMP
+#define CANVAS_OFFICE_PAPER_BMP "assets/canvas-skies/office-paper.bmp"
+#endif
+#ifndef CANVAS_OFFICE_STAMP_BMP
+#define CANVAS_OFFICE_STAMP_BMP "assets/canvas-skies/office-stamp.bmp"
+#endif
 #ifndef CANVAS_MESS_BMP
 #define CANVAS_MESS_BMP "assets/canvas-skies/mess.bmp"
 #endif
@@ -682,6 +691,9 @@ typedef struct {
     SDL_Surface *cinema_hut;        /* the picture house, its screen dark */
     SDL_Surface *medals;            /* the decorations and the office crest */
     SDL_Surface *mess;              /* the squadron mess by lamplight */
+    SDL_Surface *machine_cards;     /* the papers of the new-machines cards */
+    SDL_Surface *office_paper;      /* foolscap on the adjutant's desk */
+    SDL_Surface *office_stamp;      /* the rubber stamp's frame and its wear */
     SDL_Surface *loss_card;         /* the empty chair, by candlelight */
     Newsreel newsreel;
     int cinema_reel_slot;
@@ -6885,11 +6897,20 @@ static void draw_machine_card(Game *g, int x, int y, int enemy,
                          enemy ? g->enemy_sprites : g->player_sprites;
     pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(128, 36, 28);
     char buf[48];
-    rect(s, x + 5, y + 5, 268, 250, PIX_PACK(14, 10, 8));
-    rect(s, x, y, 268, 250, PIX_PACK(222, 210, 178));
-    blend_rect(s, x, y, 268, 250, 180, 150, 90, 40);
+    if (g->machine_cards) {
+        /* The painted card (make_cards.py): a record card from the park,
+         * a grey form from intelligence. */
+        SDL_Rect src = {enemy ? 269 : 0, 0, 268, 250};
+        SDL_Rect dst = {x, y, 268, 250};
+        blend_rect(s, x + 6, y + 7, 268, 250, 6, 4, 2, 150);
+        SDL_BlitSurface(g->machine_cards, &src, s, &dst);
+    } else {
+        rect(s, x + 5, y + 5, 268, 250, PIX_PACK(14, 10, 8));
+        rect(s, x, y, 268, 250, PIX_PACK(222, 210, 178));
+        blend_rect(s, x, y, 268, 250, 180, 150, 90, 40);
+        rect(s, x + 10, y + 26, 248, 1, ink);
+    }
     typewriter_text(g, x + 12, y + 10, heading, 7, 11, red);
-    rect(s, x + 10, y + 26, 248, 1, ink);
     if (atlas) {
         /* The level frame, two and a half times size, magenta left out. */
         int dx, dy;
@@ -6933,7 +6954,12 @@ static void draw_new_machines(Game *g)
     if (their_machine_index(g->chapter) != their_machine_index(g->chapter - 1))
         draw_machine_card(g, ours_new ? 342 : 186, 30, 1, theirs,
                           "INTELLIGENCE SUMMARY");
-    if (line) {
+    if (line && g->machine_cards) {
+        SDL_Rect src = {538, 0, 600, 70}, dst = {20, 296, 600, 70};
+        blend_rect(s, 26, 303, 600, 70, 6, 4, 2, 150);
+        SDL_BlitSurface(g->machine_cards, &src, s, &dst);
+        journal_paragraph(g, 34, 304, line, 70, PIX_PACK(47, 37, 27));
+    } else if (line) {
         blend_rect(s, 20, 296, 600, 70, 222, 210, 178, 220);
         journal_paragraph(g, 34, 304, line, 70, PIX_PACK(47, 37, 27));
     }
@@ -9006,7 +9032,9 @@ static void draw_dogfight_particles(Game *g, int foreground)
  * pale under surfaces depending on which side faces the camera, and the
  * national markings sit on the panels as their own faces.  Model axes are
  * metres: x right, y up, z forward. */
-#define MESH_MAX_VERTS 192
+/* Every decal panel has its own four corners: the rib tapes alone take
+ * 176, so the limit must leave room for the crosses and struts after. */
+#define MESH_MAX_VERTS 320
 #define MESH_MAX_FACES 96
 #define FACE_TWO_SIDED 1
 #define FACE_OUTLINE 2
@@ -9021,7 +9049,7 @@ enum {
 
 typedef struct {
     int count;
-    unsigned char index[8];
+    unsigned short index[8];
     unsigned char material, under, flags;
     signed char parent;
     float bias;
@@ -9075,7 +9103,7 @@ static void mesh_face(AircraftMesh *m, int count, const int *index,
     if (m->faces >= MESH_MAX_FACES) return;
     f = &m->f[m->faces++];
     f->count = count;
-    for (i = 0; i < count; ++i) f->index[i] = (unsigned char)index[i];
+    for (i = 0; i < count; ++i) f->index[i] = (unsigned short)index[i];
     f->material = (unsigned char)material;
     f->under = (unsigned char)under;
     f->flags = (unsigned char)flags;
@@ -9381,6 +9409,9 @@ static const AircraftMesh *aircraft_mesh(int kind)
     }
     return &meshes[kind];
 }
+
+/* QA: "DOGFIGHT n TIME" shows the average drawing time of a frame. */
+static int qa_frame_time;
 
 static int enemy_mesh_kind(const Game *g)
 {
@@ -11221,6 +11252,9 @@ static int game_init(Game *g)
     g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
     g->medals = SDL_LoadBMP(CANVAS_MEDALS_BMP);
     g->mess = SDL_LoadBMP(CANVAS_MESS_BMP);
+    g->machine_cards = SDL_LoadBMP(CANVAS_MACHINE_CARDS_BMP);
+    g->office_paper = SDL_LoadBMP(CANVAS_OFFICE_PAPER_BMP);
+    g->office_stamp = SDL_LoadBMP(CANVAS_OFFICE_STAMP_BMP);
     g->loss_card = SDL_LoadBMP(CANVAS_LOSS_CARD_BMP);
     {
         SDL_Surface **convert[] = {
@@ -11233,10 +11267,11 @@ static int game_init(Game *g)
             &g->explosion_atlas, &g->topdown_explosion_atlas,
             &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
             &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
-            &g->medals, &g->mess, &g->loss_card
+            &g->medals, &g->mess, &g->loss_card, &g->machine_cards,
+            &g->office_paper, &g->office_stamp
         };
         int i;
-        for (i = 0; i < 22; ++i) if (*convert[i]) {
+        for (i = 0; i < 25; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11264,6 +11299,12 @@ static int game_init(Game *g)
         if (g->medals)
             SDL_SetColorKey(g->medals, SDL_TRUE,
                             SDL_MapRGB(g->medals->format, 255, 0, 255));
+        if (g->machine_cards)
+            SDL_SetColorKey(g->machine_cards, SDL_TRUE,
+                            SDL_MapRGB(g->machine_cards->format, 255, 0, 255));
+        if (g->office_stamp)
+            SDL_SetColorKey(g->office_stamp, SDL_TRUE,
+                            SDL_MapRGB(g->office_stamp->format, 255, 0, 255));
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
         !g->dogfight_background || !g->dogfight_enemy ||
@@ -11349,16 +11390,21 @@ static void draw_office_paper(Game *g, const char *heading, const char *sub,
     SDL_Surface *s = g->screen;
     pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(140, 34, 26);
     int k, w;
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
-    rect(s, 96, 30, 460, 344, PIX_PACK(14, 10, 8));
-    rect(s, 90, 24, 460, 344, PIX_PACK(222, 210, 178));
-    blend_rect(s, 90, 24, 460, 344, 180, 150, 90, 40);
-    for (k = 0; k < 9; ++k)                     /* foxing on the old paper */
-        blend_circle(s, 110 + (int)(scene_hash((uint32_t)k * 77u) % 420u),
-                     40 + (int)(scene_hash((uint32_t)k * 131u) % 310u),
-                     6 + k % 5, 150, 112, 60, 40);
-    rect(s, 104, 38, 432, 1, PIX_PACK(150, 120, 80));
-    rect(s, 104, 353, 432, 1, PIX_PACK(150, 120, 80));
+    if (g->office_paper) {
+        /* Foolscap on the adjutant's desk (make_office_paper.py). */
+        SDL_BlitSurface(g->office_paper, NULL, s, NULL);
+    } else {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
+        rect(s, 96, 30, 460, 344, PIX_PACK(14, 10, 8));
+        rect(s, 90, 24, 460, 344, PIX_PACK(222, 210, 178));
+        blend_rect(s, 90, 24, 460, 344, 180, 150, 90, 40);
+        for (k = 0; k < 9; ++k)                 /* foxing on the old paper */
+            blend_circle(s, 110 + (int)(scene_hash((uint32_t)k * 77u) % 420u),
+                         40 + (int)(scene_hash((uint32_t)k * 131u) % 310u),
+                         6 + k % 5, 150, 112, 60, 40);
+        rect(s, 104, 38, 432, 1, PIX_PACK(150, 120, 80));
+        rect(s, 104, 353, 432, 1, PIX_PACK(150, 120, 80));
+    }
     /* The crest, printed in black. */
     if (g->medals) {
         SDL_Rect src = {5 * 72, 8, 72, 64}, dst = {284, 28, 72, 64};
@@ -11369,7 +11415,26 @@ static void draw_office_paper(Game *g, const char *heading, const char *sub,
     w = typewriter_width(sub, 11);
     typewriter_text(g, 320 - w / 2, 108, sub, 7, 11, red);
     rect(s, 120, 126, 400, 1, ink);
-    if (stamp) {
+    if (stamp && g->office_stamp) {
+        /* Struck a little crooked: the frame inked unevenly, the words,
+         * then the specks where the ink failed to take. */
+        int sw;
+        SDL_Rect src, dst;
+        w = typewriter_width(stamp, 15);
+        sw = w + 30 > 300 ? 300 : w + 30;
+        /* The frame's left part to the width of the words, then its
+         * right-hand end, from the 300-wide stamp. */
+        src.x = 0; src.y = 0; src.w = sw - 10; src.h = 40;
+        dst.x = 366; dst.y = 312; dst.w = src.w; dst.h = 40;
+        SDL_BlitSurface(g->office_stamp, &src, s, &dst);
+        src.x = 290; src.w = 10; dst.x = 366 + sw - 10;
+        SDL_BlitSurface(g->office_stamp, &src, s, &dst);
+        typewriter_text(g, 381, 324, stamp, 10, 15, red);
+        src.x = 300; src.w = sw - 10; dst.x = 366;
+        SDL_BlitSurface(g->office_stamp, &src, s, &dst);
+        src.x = 590; src.w = 10; dst.x = 366 + sw - 10;
+        SDL_BlitSurface(g->office_stamp, &src, s, &dst);
+    } else if (stamp) {
         w = typewriter_width(stamp, 15);
         rect(s, 372, 318, w + 20, 30, red);
         rect(s, 375, 321, w + 14, 24, PIX_PACK(222, 204, 170));
@@ -12129,6 +12194,7 @@ int main(int argc, char **argv)
         g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "DOGFIGHT") == 0) {
+        qa_frame_time = argc > 3 && strcmp(argv[3], "TIME") == 0;
         /* Use a durable late-war squadron for visual QA so the direct test
          * remains playable instead of completing before the window appears. */
         g.chapter = 6;
@@ -12262,6 +12328,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
             g.scene == SCENE_CINEMA ||
             g.redraw_static) {
+            uint32_t drawn_from = SDL_GetTicks();
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
             switch (g.scene) {
             case SCENE_TITLE: draw_title(&g); break;
@@ -12278,6 +12345,17 @@ int main(int argc, char **argv)
             case SCENE_CONDUCT: draw_conduct(&g); break;
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
+            }
+            if (qa_frame_time && g.scene == SCENE_SORTIE) {
+                /* The mean over the last 64 frames, in tenths of a ms. */
+                static uint32_t sum, n, shown;
+                char t[32];
+                sum += SDL_GetTicks() - drawn_from;
+                if (++n == 64) { shown = sum * 10u / 64u; sum = n = 0; }
+                snprintf(t, sizeof(t), "DRAW %u.%u MS", (unsigned)(shown / 10u),
+                         (unsigned)(shown % 10u));
+                rect(g.screen, 470, 6, 164, 18, PIX_PACK(0, 0, 0));
+                typewriter_text(&g, 476, 9, t, 7, 11, PIX_PACK(255, 255, 255));
             }
             if (SDL_MUSTLOCK(g.screen)) SDL_UnlockSurface(g.screen);
             present_frame(&g);
@@ -12344,6 +12422,9 @@ int main(int argc, char **argv)
     if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
     if (g.medals) SDL_FreeSurface(g.medals);
     if (g.mess) SDL_FreeSurface(g.mess);
+    if (g.machine_cards) SDL_FreeSurface(g.machine_cards);
+    if (g.office_paper) SDL_FreeSurface(g.office_paper);
+    if (g.office_stamp) SDL_FreeSurface(g.office_stamp);
     if (g.loss_card) SDL_FreeSurface(g.loss_card);
     newsreel_free(&g.newsreel);
     free_world_textures(&g);

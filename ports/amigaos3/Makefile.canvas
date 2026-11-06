@@ -53,6 +53,9 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_COCKPIT_CELLULE_BMP=\"PROGDIR:assets/canvas-skies/cockpit-cellule.bmp\" \
 	-DCANVAS_MEDALS_BMP=\"PROGDIR:assets/canvas-skies/medals.bmp\" \
 	-DCANVAS_MESS_BMP=\"PROGDIR:assets/canvas-skies/mess.bmp\" \
+	-DCANVAS_OFFICE_PAPER_BMP=\"PROGDIR:assets/canvas-skies/office-paper.bmp\" \
+	-DCANVAS_OFFICE_STAMP_BMP=\"PROGDIR:assets/canvas-skies/office-stamp.bmp\" \
+	-DCANVAS_MACHINE_CARDS_BMP=\"PROGDIR:assets/canvas-skies/machine-cards.bmp\" \
 	-DCANVAS_LOSS_CARD_BMP=\"PROGDIR:assets/canvas-skies/loss-card.bmp\" \
 	-DCANVAS_NEWSREELS_BIN=\"PROGDIR:assets/canvas-skies/newsreels.bin\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
