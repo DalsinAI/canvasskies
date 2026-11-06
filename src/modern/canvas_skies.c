@@ -8998,13 +8998,15 @@ static void draw_dogfight_particles(Game *g, int foreground)
  * national markings sit on the panels as their own faces.  Model axes are
  * metres: x right, y up, z forward. */
 #define MESH_MAX_VERTS 192
-#define MESH_MAX_FACES 72
+#define MESH_MAX_FACES 96
 #define FACE_TWO_SIDED 1
 #define FACE_OUTLINE 2
 
 enum {
     MAT_WING_TOP, MAT_WING_UNDER, MAT_BODY, MAT_BODY_DARK, MAT_TAIL,
     MAT_METAL, MAT_MARK_LIGHT, MAT_MARK_DARK, MAT_MARK_RED, MAT_MARK_BLUE,
+    MAT_RIB,                    /* rib tapes: the wing colour, lighter */
+    MAT_RIB_UNDER,              /* and beneath, a shade darker */
     MAT_COUNT
 };
 
@@ -9197,6 +9199,39 @@ static void build_aircraft_mesh(AircraftMesh *m, int allied,
     mesh_face(m, 4, q, MAT_METAL, 0, 0, 0.0f);
     q[0] = tail[0]; q[1] = tail[1]; q[2] = tail[2]; q[3] = tail[3];
     mesh_face(m, 4, q, MAT_BODY, 0, 0, 0.0f);
+    /* Rib tapes across the chord of each wing, as decals on its top
+     * surface, so the planes read as stretched fabric and not as boards. */
+    {
+        int n;
+        m->parent_for_new = 0;
+        for (n = 1; n <= 6; ++n) {
+            float x = half * (float)n / 6.6f;
+            for (k = -1; k <= 1; k += 2) {
+                mesh_panel_y(m, (float)k * x - 0.07f, (float)k * x + 0.07f,
+                             up_y + 0.01f, up_le - chord + 0.12f,
+                             up_le - 0.08f, MAT_RIB, MAT_RIB, 0, -0.01f, 1);
+                mesh_panel_y(m, (float)k * x - 0.07f, (float)k * x + 0.07f,
+                             up_y - 0.01f, up_le - chord + 0.12f,
+                             up_le - 0.08f, MAT_RIB_UNDER, MAT_RIB_UNDER, 0,
+                             -0.01f, 0);
+            }
+        }
+        if (!t->monoplane) {
+            m->parent_for_new = 1;
+            for (n = 1; n <= 5; ++n) {
+                float x = low_half * (float)n / 5.6f;
+                for (k = -1; k <= 1; k += 2) {
+                    mesh_panel_y(m, (float)k * x - 0.07f, (float)k * x + 0.07f,
+                                 low_y + 0.01f, low_le - chord * 0.95f + 0.12f,
+                                 low_le - 0.08f, MAT_RIB, MAT_RIB, 0, -0.01f, 1);
+                    mesh_panel_y(m, (float)k * x - 0.07f, (float)k * x + 0.07f,
+                                 low_y - 0.01f, low_le - chord * 0.95f + 0.12f,
+                                 low_le - 0.08f, MAT_RIB_UNDER, MAT_RIB_UNDER,
+                                 0, -0.01f, 0);
+                }
+            }
+        }
+    }
     /* Markings on the wing tips, drawn straight after the wing they sit
      * on (faces 0 and 1) so depth sorting can never hide them. */
     {
@@ -9410,9 +9445,11 @@ static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
         centre.y < -260 || centre.y > SCREEN_H + 260) return 0;
     haze = (int)flight_clamp((centre.depth - 900.0f) * 32.0f / 9000.0f,
                              0.0f, 26.0f);
-    for (i = 0; i < MAT_COUNT; ++i)
+    for (i = 0; i < MAT_RIB; ++i)       /* the livery's own colours */
         base[i] = PIX_PACK(livery->rgb[i][0], livery->rgb[i][1],
                            livery->rgb[i][2]);
+    base[MAT_RIB] = pix_mix(base[MAT_WING_TOP], PIX_PACK(236, 228, 200), 9);
+    base[MAT_RIB_UNDER] = pix_mix(base[MAT_WING_UNDER], PIX_PACK(0, 0, 0), 7);
     if (kind == 2 && centre.depth > 2400.0f) {
         Projected3D bow = project_world_point(g, pose_point(pose, 0.0f, 0.0f, 30.0f));
         Projected3D stern = project_world_point(g, pose_point(pose, 0.0f, 0.0f, -30.0f));
