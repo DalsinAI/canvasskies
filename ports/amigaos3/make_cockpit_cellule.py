@@ -114,47 +114,60 @@ def wings():
 
 
 def paint_strut(rgb, hit, a, b, width):
-    """A streamlined spruce strut: dark heart, lit leading edge, grain."""
+    """A streamlined spruce strut, teardrop in section: seen end-on it is
+    narrow, lit softly along its rounded leading edge and shaded down the
+    long tapering trailing edge.  It narrows into the distance toward the
+    wing, where a flat steel socket plate with a wire lug sits flush on the
+    linen and casts a little shadow on it."""
     seg = clip(a, b)
     if seg is None:
         return
     a, b = seg
     (ax, ay), (bx, by) = project(a), project(b)
-    wa, wb = width * F / a[0] * SS, width * F / b[0] * SS
-    wa, wb = min(wa, 60 * SS), min(wb, 60 * SS)
+    wa, wb = width * F / a[0] * SS * 0.62, width * F / b[0] * SS * 0.62
+    wa, wb = min(wa, 40 * SS), min(wb, 40 * SS)
+    wa = min(wa, wb * 0.72)                    # taper away from the eye
     length = math.hypot(bx - ax, by - ay)
     if length < 1:
         return
     ux, uy = (bx - ax) / length, (by - ay) / length
     nx, ny = -uy, ux
-    x0 = int(max(0, min(ax, bx) - max(wa, wb)))
-    x1 = int(min(W * SS, max(ax, bx) + max(wa, wb)))
-    y0 = int(max(0, min(ay, by) - max(wa, wb)))
-    y1 = int(min(H * SS, max(ay, by) + max(wa, wb)))
+    pad = max(wa, wb) * 2
+    x0 = int(max(0, min(ax, bx) - pad)); x1 = int(min(W * SS, max(ax, bx) + pad))
+    y0 = int(max(0, min(ay, by) - pad)); y1 = int(min(H * SS, max(ay, by) + pad))
     if x1 <= x0 or y1 <= y0:
         return
     yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
     t = ((xx - ax) * ux + (yy - ay) * uy) / length
     s = (xx - ax) * nx + (yy - ay) * ny
     half = (wa + (wb - wa) * np.clip(t, 0, 1)) / 2
-    inside = (t >= 0) & (t <= 1) & (np.abs(s) <= half)
-    u = np.clip(s / np.maximum(half, 1e-3), -1, 1)        # -1..1 across
-    # Rounded section lit from the left; varnished spruce.
-    shade = 0.55 + 0.6 * np.clip(-u * 0.8 + 0.3, 0, 1) - 0.35 * u * u
-    grain = np.sin(t * length * 0.09 + u * 3.0 +
-                   np.sin(t * length * 0.013) * 2.0) * 0.06
-    col = np.stack([150 * (shade + grain), 98 * (shade + grain),
-                    52 * (shade + grain)], -1)
-    spec = np.clip(1 - np.abs(u + 0.45) / 0.12, 0, 1)
-    col += spec[..., None] * np.array([70, 56, 40])
-    # Steel fittings at the ends.
-    ends = (t < 0.035) | (t > 0.965)
-    col = np.where(ends[..., None],
-                   np.array([96, 96, 100]) * (0.7 + 0.5 * np.clip(-u, 0, 1))[..., None],
-                   col)
     region = rgb[y0:y1, x0:x1]
+    # The socket's shadow on the linen, beside the strut's head.
+    d = t * length                              # along, in pixels
+    shadow = (d > -1.0 * SS) & (d < 3.0 * SS) & (s > half * 0.4) & \
+        (s < half * 2.4) & hit[y0:y1, x0:x1]
+    region[shadow] *= 0.72
+    inside = (t >= 0) & (t <= 1) & (np.abs(s) <= half)
+    u = np.clip(s / np.maximum(half, 1e-3), -1, 1)
+    # Teardrop: the rounded nose on the lit side (u < 0), the long tail
+    # falling away into shade.
+    nose = np.clip(1 - np.abs(u + 0.55) / 0.45, 0, 1)
+    tail = np.clip((u + 0.1) / 1.1, 0, 1)
+    shade = 0.62 + 0.42 * nose - 0.42 * tail
+    grain = np.sin(t * length * 0.11 + np.sin(t * length * 0.017) * 2.2) * 0.05
+    col = np.stack([156 * (shade + grain), 104 * (shade + grain),
+                    58 * (shade + grain)], -1)
+    spec = np.clip(1 - np.abs(u + 0.6) / 0.1, 0, 1) * 0.8
+    col += spec[..., None] * np.array([60, 48, 34])
+    # The socket plate at the head: flat steel, just wider than the strut,
+    # and the wire lug standing off it.
+    plate = (d >= -0.5 * SS) & (d < 2.2 * SS) & (np.abs(s) <= half * 1.25)
+    col_plate = np.array([84, 84, 88]) * (0.85 + 0.3 * np.clip(-u, 0, 1))[..., None]
+    lug = (d >= 0.5 * SS) & (d < 3.5 * SS) & (np.abs(s - half * 1.45) < 0.9 * SS)
     region[inside] = np.clip(col[inside], 0, 255)
-    hit[y0:y1, x0:x1] |= inside
+    region[plate] = np.clip(col_plate[plate], 0, 255)
+    region[lug] = (70, 70, 74)
+    hit[y0:y1, x0:x1] |= inside | plate | lug
 
 
 def paint_wire(img, a, b, tension=1.0):
