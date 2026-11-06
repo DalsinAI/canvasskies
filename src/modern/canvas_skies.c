@@ -3077,8 +3077,10 @@ static int current_mission_goal(const Game *g)
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
             goal = chapters[g->chapter].enemy_count;
-        /* The rear seat meets a stream of attackers for three minutes. */
-        if (mode == MISSION_GUNNER_3D) goal = goal + 2 > 5 ? 5 : goal + 2;
+        /* The rear seat meets a stream of tough attackers, most of whom
+         * break off hurt: two brought down is a good day's work, one with
+         * the carbine in 1914. */
+        if (mode == MISSION_GUNNER_3D) goal = g->chapter == 0 ? 1 : 2;
         if (mode == MISSION_DOGFIGHT_3D && goal > 4) goal = 4;
         return goal;
     }
@@ -6796,7 +6798,7 @@ static void update_perspective_sortie(Game *g, float dt,
         }
     }
     if (!qa_still) g->scroll += g->airspeed * dt * 1.16f;
-    g->fuel -= dt * 0.4f;
+    g->fuel -= dt * 0.3f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = gunner ? 0.35f :
         (fabsf(g->view_bank) + fabsf(g->view_pitch));
@@ -6856,16 +6858,31 @@ static void update_perspective_sortie(Game *g, float dt,
             }
             continue;
         }
-        if (depth < -520.0f || ((i & 3) == 3 && depth > 3300.0f)) {
+        if (depth < -520.0f || ((i & 3) == 3 && depth > 3300.0f) ||
+            (enemy->fled && depth > 3000.0f)) {
             enemy->active = 0;
             continue;
         }
+        if (enemy->fled) {
+            /* Hurt, he has had enough: opens the range and goes home
+             * trailing smoke, jinking as he goes. */
+            enemy->x += (personal ? 950.0f : 560.0f) * dt;
+            enemy->phase += dt * 1.6f;
+        }
         ++active_enemies;
         if (!project_enemy_3d(g, enemy, i, &sx, &sy, &size)) continue;
-        if (firing && (!personal || random_unit(g) < PERSONAL_HIT_CHANCE)) {
+        /* Not every round of a Lewis burst finds the machine; the carbine's
+         * single shots seldom do. */
+        if (firing && random_unit(g) < (personal ? PERSONAL_HIT_CHANCE :
+                                        gunner ? 0.5f : 1.0f)) {
             if (abs(aim_x - sx) < size / 2 + 10 &&
                 abs(aim_y - sy) < size / 3 + 9) {
                 --enemy->hp;
+                if (gunner && enemy->hp > 0 && !enemy->fled &&
+                    enemy->hp * 5 <= enemy->max_hp * 3) {
+                    enemy->fled = 1;
+                    g->score += 50;
+                }
                 if (enemy->hp <= 0) {
                     enemy->crashing = 1;
                     enemy->crash_x = (float)sx;
@@ -6880,7 +6897,7 @@ static void update_perspective_sortie(Game *g, float dt,
                 }
             }
         }
-        if (enemy->crashing) continue;
+        if (enemy->crashing || enemy->fled) continue;
         if ((enemies_hostile(g) ||
              (personal_arms(g) && (scene_hash(now / 900u + (uint32_t)i) & 3u) == 0u)) &&
             depth < 1250.0f && depth > 140.0f &&
@@ -7929,6 +7946,10 @@ static void gunner_place_enemy(Game *g, int i, float depth)
     Enemy *e = &g->enemies[i];
     enemy_fresh(g, e, i);
     e->phase = random_unit(g) * 6.0f;
+    /* Built to take punishment: it takes a long burst to bring one down,
+     * and half of one sends him home. */
+    e->hp = mission_armed(g) ? 12 + g->chapter / 2 : 3;
+    e->max_hp = e->hp;
     e->x = 0.0f;
     e->x = depth - enemy_depth_3d(g, e, i);
 }
@@ -7970,7 +7991,14 @@ static int update_gunner_legs(Game *g, float dt)
     g->sortie_clock += dt;
     g->leg_time += dt;
     g->wave_clock += dt;
-    alive = live_enemies(g);
+    /* Those breaking off for home no longer count as attackers. */
+    alive = 0;
+    {
+        int i;
+        for (i = 0; i < MAX_ENEMIES; ++i)
+            if (g->enemies[i].active && !g->enemies[i].crashing &&
+                !g->enemies[i].fled) ++alive;
+    }
     g->archie_clock -= dt;
     if (g->qa_idle_run > 6.0f && g->archie_clock > 0.5f) g->archie_clock = 0.5f;
     if (g->archie_clock <= 0.0f) {
@@ -7985,7 +8013,7 @@ static int update_gunner_legs(Game *g, float dt)
         if (g->wave == 0) {
             if (g->leg_time > 6.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
         } else if (g->sortie_clock > 175.0f ||
-                   g->wave >= (mission_armed(g) ? 12 : 8)) {
+                   g->wave >= (mission_armed(g) ? 18 : 12)) {
             if (alive == 0 || g->wave_clock > 30.0f) {
                 g->leg = LEG_HOME;
                 g->leg_time = 0.0f;
