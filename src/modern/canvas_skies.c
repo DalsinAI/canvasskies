@@ -10,6 +10,7 @@
 
 #include <SDL.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -241,6 +242,9 @@
 #ifndef CANVAS_SAVE_NEW_PATH
 #define CANVAS_SAVE_NEW_PATH "PROGDIR:CanvasSkies.save.new"
 #endif
+#ifndef CANVAS_PREFS_PATH
+#define CANVAS_PREFS_PATH "PROGDIR:CanvasSkies.prefs"
+#endif
 #ifndef CANVAS_SAVE_BACKUP_PATH
 #define CANVAS_SAVE_BACKUP_PATH "PROGDIR:CanvasSkies.save.bak"
 #endif
@@ -337,7 +341,8 @@ typedef enum {
     SCENE_MESS,     /* the mess that evening, after a mission won */
     SCENE_CONDUCT,  /* the Officer Commanding's memorandum */
     SCENE_COURT_MARTIAL, /* the end of a career in disgrace */
-    SCENE_CINEMA    /* the picture house, a chapter's first morning */
+    SCENE_CINEMA,   /* the picture house, a chapter's first morning */
+    SCENE_SETTINGS  /* the officer's preferences */
 } Scene;
 
 typedef enum {
@@ -651,6 +656,8 @@ typedef struct {
     float gramophone_lp;
     float gramophone_hp;
     float gramophone_previous;
+    float music_gain;     /* the settings' two sliders, 0..1 */
+    float effects_gain;
 } AudioState;
 
 typedef struct {
@@ -728,6 +735,14 @@ typedef struct {
     Scene scene;
     int running;
     int fullscreen;
+    /* Settings, kept in canvas-skies.prefs beside the save. */
+    int cache_in_ram;       /* keep art and records once loaded */
+    int music_volume;       /* 0..10 */
+    int effects_volume;     /* 0..10 */
+    int settings_row;
+    Scene settings_from;    /* where the settings page returns to */
+    unsigned assets_loaded; /* the AssetGroup bits held now */
+    unsigned long fast_at_start;    /* free fast memory before loading */
     uint32_t window_restore_at;  /* back from full screen: tidy up then */
     int redraw_static;
     int qa_hold;
@@ -854,6 +869,8 @@ static void reset_wingmen(Game *g);
 static void show_notice(Game *g, const char *text);
 static float random_unit(Game *g);
 static int personal_shot(Game *g, int revolver);
+static void ensure_scene_assets(Game *g, Scene scene);
+static void ensure_music(Game *g, int mood);
 static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void cinema_start(Game *g);
@@ -1364,8 +1381,9 @@ static int save_mission_result(Game *g)
  * which is always the last plaque. */
 static int campaign_menu_count(const Game *g)
 {
+    /* The commissions, the book of press cuttings and the preferences. */
     return ((g->has_save && g->saved_lives > 0 && !g->saved_conduct[4]) ?
-            7 : 6) + 1;
+            7 : 6) + 2;
 }
 
 static float gunner_traverse(const Game *g)
@@ -2551,6 +2569,11 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             a->gramophone_previous = filtered;
             sample = a->gramophone_hp * 1.12f + hiss * 0.0045f;
         }
+        /* Music on one slider; in a sortie the engines' drone goes with
+         * the guns and bangs on the other. */
+        float bed = sample * (a->scene == SCENE_SORTIE ? a->effects_gain :
+                                                        a->music_gain);
+        sample = 0.0f;
         if (a->shot > 0) {
             int gun_phase = a->shot % 540;
             if (gun_phase < 100) {
@@ -2617,6 +2640,7 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
             }
             --a->hit;
         }
+        sample = bed + sample * a->effects_gain;
         if (sample > 1.0f) sample = 1.0f;
         if (sample < -1.0f) sample = -1.0f;
         out[i * 2] = (int16_t)(sample * 18000.0f);
@@ -2706,6 +2730,18 @@ static void prepare_record(Game *g, Scene scene)
     int record = record_for_scene(g, scene);
     uint8_t *data, *old;
     uint32_t len = 0;
+    if (record == RECORD_NONE && !g->cache_in_ram && g->audio.device &&
+        g->audio.record_data) {
+        /* No record tonight: lend its memory back. */
+        SDL_LockAudioDevice(g->audio.device);
+        old = g->audio.record_data;
+        g->audio.record_data = NULL;
+        g->audio.record_len = 0;
+        g->audio.record_track = RECORD_NONE;
+        SDL_UnlockAudioDevice(g->audio.device);
+        SDL_free(old);
+        return;
+    }
     if (record == RECORD_NONE || !g->audio.device ||
         record == g->audio.record_track)
         return;
@@ -2730,6 +2766,8 @@ static void set_scene(Game *g, Scene scene)
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
     /* A test entry's safety net never follows the player into a campaign. */
     if (scene == SCENE_TITLE) g->qa_hold = 0;
+    ensure_scene_assets(g, scene);
+    ensure_music(g, music_mood_for_scene(g, scene));
     prepare_record(g, scene);
     if (scene == SCENE_STORY)
         g->story_stage = g->mission == 0 ? 0 : thyne_lost_tonight(g) ? 1 :
@@ -6236,6 +6274,8 @@ static void draw_campaign_menu(Game *g)
         const char *label;
         char continued[64];
         if (i == count - 1) {
+            label = "THE OFFICER'S PREFERENCES";
+        } else if (i == count - 2) {
             label = "THE BOOK OF PRESS CUTTINGS";
         } else if (has_continue && i == 0) {
             if (g->saved_campaign_complete)
@@ -6250,7 +6290,8 @@ static void draw_campaign_menu(Game *g)
             int new_index = i - (has_continue ? 1 : 0);
             label = new_campaign_items[new_index];
         }
-        draw_victorian_plaque(g, 128, 112 + i * (count > 7 ? 28 : 31), 384,
+        draw_victorian_plaque(g, 128, 112 + i * (count > 8 ? 25 :
+                                                 count > 7 ? 28 : 31), 384,
                               label, i == g->menu_selection);
     }
     if (g->has_save && g->saved_conduct[4])
@@ -8369,41 +8410,63 @@ static pix_t average_pixels(SDL_Surface *s, int x0, int y0, int w, int h)
 /* Builds the ground mip chain (1024 down to 32 texels) and the sky's
  * seamless wrap.  Distant ground reads a smaller copy, so it shimmers far
  * less as the aircraft moves. */
-static void prepare_world_textures(Game *g)
+/* The ground's average colour, for the haze of the far fields in the
+ * cockpit view.  Measured once at start-up from the top-down painting. */
+static void measure_ground_tint(Game *g, SDL_Surface *ground)
 {
-    int level;
-    if (g->topdown_battlefield && convert_to_screen(g, &g->topdown_battlefield) &&
-        g->topdown_battlefield->w == 1024 && g->topdown_battlefield->h == 1024) {
-        SDL_Surface *src = g->topdown_battlefield;
-        int size = 1024;
-        g->ground_mip[0] = (pix_t *)malloc(sizeof(pix_t) * 1024 * 1024);
-        if (g->ground_mip[0]) {
-            int y;
-            for (y = 0; y < 1024; ++y)
-                memcpy(g->ground_mip[0] + y * 1024, PIX_ROW(src, y),
-                       sizeof(pix_t) * 1024);
-            g->ground_mips = 1;
-        }
-        for (level = 1; level < GROUND_MIPS && g->ground_mips == level; ++level) {
-            pix_t *prev = g->ground_mip[level - 1];
-            int half = size / 2, x, y;
-            pix_t *next = (pix_t *)malloc(sizeof(pix_t) * half * half);
-            if (!next) break;
-            for (y = 0; y < half; ++y)
-                for (x = 0; x < half; ++x) {
-                    pix_t a = prev[(y * 2) * size + x * 2];
-                    pix_t b = prev[(y * 2) * size + x * 2 + 1];
-                    pix_t c = prev[(y * 2 + 1) * size + x * 2];
-                    pix_t d = prev[(y * 2 + 1) * size + x * 2 + 1];
-                    next[y * half + x] = pix_mix(pix_mix(a, b, 16),
-                                                 pix_mix(c, d, 16), 16);
-                }
-            g->ground_mip[level] = next;
-            g->ground_mips = level + 1;
-            size = half;
-        }
-        g->ground_haze_tint = average_pixels(src, 0, 0, 1024, 1024);
+    if (ground && convert_to_screen(g, &ground) && ground->w >= 64)
+        g->ground_haze_tint = average_pixels(ground, 0, 0, ground->w,
+                                             ground->h);
+}
+
+/* The cockpit view's ground: the top-down painting and its mipmaps, so
+ * the fields far off are filtered rather than sparkling. */
+static void build_ground_mips(Game *g, SDL_Surface *src)
+{
+    int level, size = 1024;
+    if (!src || src->w != 1024 || src->h != 1024 || g->ground_mips) return;
+    g->ground_mip[0] = (pix_t *)malloc(sizeof(pix_t) * 1024 * 1024);
+    if (g->ground_mip[0]) {
+        int y;
+        for (y = 0; y < 1024; ++y)
+            memcpy(g->ground_mip[0] + y * 1024, PIX_ROW(src, y),
+                   sizeof(pix_t) * 1024);
+        g->ground_mips = 1;
     }
+    for (level = 1; level < GROUND_MIPS && g->ground_mips == level; ++level) {
+        pix_t *prev = g->ground_mip[level - 1];
+        int half = size / 2, x, y;
+        pix_t *next = (pix_t *)malloc(sizeof(pix_t) * half * half);
+        if (!next) break;
+        for (y = 0; y < half; ++y)
+            for (x = 0; x < half; ++x) {
+                pix_t a = prev[(y * 2) * size + x * 2];
+                pix_t b = prev[(y * 2) * size + x * 2 + 1];
+                pix_t c = prev[(y * 2 + 1) * size + x * 2];
+                pix_t d = prev[(y * 2 + 1) * size + x * 2 + 1];
+                next[y * half + x] = pix_mix(pix_mix(a, b, 16),
+                                             pix_mix(c, d, 16), 16);
+            }
+        g->ground_mip[level] = next;
+        g->ground_mips = level + 1;
+        size = half;
+    }
+}
+
+static void free_ground_mips(Game *g)
+{
+    int i;
+    for (i = 0; i < GROUND_MIPS; ++i) {
+        free(g->ground_mip[i]);
+        g->ground_mip[i] = NULL;
+    }
+    g->ground_mips = 0;
+}
+
+/* The sky panorama's ends are blended so it wraps without a seam, and its
+ * top and horizon colours are taken for the haze. */
+static void prepare_sky(Game *g)
+{
     if (g->sky && convert_to_screen(g, &g->sky) && g->sky->w >= 256) {
         SDL_Surface *s = g->sky;
         int y, k;
@@ -8417,35 +8480,13 @@ static void prepare_world_textures(Game *g)
         }
         g->sky_top = average_pixels(s, 0, 0, s->w, 4);
         g->sky_haze = average_pixels(s, 0, s->h - 10, s->w, 10);
-    } else {
+    } else if (!g->sky_top) {
         g->sky_top = PIX_PACK(92, 104, 140);
         g->sky_haze = PIX_PACK(214, 150, 128);
     }
     /* Distant fields take on the colour of the low sky, so the ground
      * melts into the painted horizon instead of meeting it at a hard line. */
     g->world_haze = pix_mix(g->sky_haze, g->ground_haze_tint, 9);
-    for (level = 0; level < MIDGROUND_ELEMENT_COUNT; ++level)
-        if (g->midground[level]) {
-            if (!convert_to_screen(g, &g->midground[level]))
-                fprintf(stderr, "Midground element %d not converted\n", level);
-            prepare_magenta_key(g->midground[level]);
-        }
-    for (level = 0; level < NEAR_ELEMENT_COUNT; ++level)
-        if (g->near_props[level]) {
-            if (!convert_to_screen(g, &g->near_props[level]))
-                fprintf(stderr, "Near element %d not converted\n", level);
-            prepare_magenta_key(g->near_props[level]);
-        }
-}
-
-static void free_world_textures(Game *g)
-{
-    int i;
-    for (i = 0; i < GROUND_MIPS; ++i) {
-        free(g->ground_mip[i]);
-        g->ground_mip[i] = NULL;
-    }
-    g->ground_mips = 0;
 }
 
 typedef struct {
@@ -11109,101 +11150,12 @@ static uint8_t *load_mono_wav(const char *path, uint32_t *len_out)
 
 static int init_audio(Game *g)
 {
-    SDL_AudioSpec want, wav_spec;
-    uint8_t *wav_data = NULL;
-    uint32_t wav_len = 0;
-    SDL_AudioCVT cvt;
+    SDL_AudioSpec want;
     /* Recordings are kept as mono 11 kHz: the mixer sums them to one
      * channel anyway, and mono halves their memory. */
     init_audio_tables();
-    if (SDL_LoadWAV(CANVAS_MARCH_WAV, &wav_spec, &wav_data, &wav_len)) {
-        int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
-                                           wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 1, 11025);
-        if (cvt_result >= 0 && cvt.needed) {
-            cvt.len = (int)wav_len;
-            cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
-            if (cvt.buf) {
-                memcpy(cvt.buf, wav_data, wav_len);
-                SDL_FreeWAV(wav_data);
-                wav_data = NULL;
-                if (SDL_ConvertAudio(&cvt) == 0) {
-                    g->audio.music_data = cvt.buf;
-                    g->audio.music_len = (uint32_t)cvt.len_cvt;
-                } else {
-                    SDL_free(cvt.buf);
-                }
-            }
-        } else if (cvt_result >= 0) {
-            g->audio.music_data = wav_data;
-            g->audio.music_len = wav_len;
-            wav_data = NULL;
-        }
-        if (wav_data) SDL_FreeWAV(wav_data);
-    } else {
-        fprintf(stderr, "Gramophone march unavailable; using synth fallback: %s\n",
-                SDL_GetError());
-    }
-    wav_data = NULL;
-    wav_len = 0;
-    if (SDL_LoadWAV(CANVAS_MESS_WAV, &wav_spec, &wav_data, &wav_len)) {
-        int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
-                                           wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 1, 11025);
-        if (cvt_result >= 0 && cvt.needed) {
-            cvt.len = (int)wav_len;
-            cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
-            if (cvt.buf) {
-                memcpy(cvt.buf, wav_data, wav_len);
-                SDL_FreeWAV(wav_data);
-                wav_data = NULL;
-                if (SDL_ConvertAudio(&cvt) == 0) {
-                    g->audio.mess_data = cvt.buf;
-                    g->audio.mess_len = (uint32_t)cvt.len_cvt;
-                } else {
-                    SDL_free(cvt.buf);
-                }
-            }
-        } else if (cvt_result >= 0) {
-            g->audio.mess_data = wav_data;
-            g->audio.mess_len = wav_len;
-            wav_data = NULL;
-        }
-        if (wav_data) SDL_FreeWAV(wav_data);
-    } else {
-        fprintf(stderr, "Colonel Bogey recording unavailable; using synth fallback: %s\n",
-                SDL_GetError());
-    }
-    wav_data = NULL;
-    wav_len = 0;
-    if (SDL_LoadWAV(CANVAS_PIPER_WAV, &wav_spec, &wav_data, &wav_len)) {
-        int cvt_result = SDL_BuildAudioCVT(&cvt, wav_spec.format,
-                                           wav_spec.channels, wav_spec.freq,
-                                           AUDIO_S16SYS, 1, 11025);
-        if (cvt_result >= 0 && cvt.needed) {
-            cvt.len = (int)wav_len;
-            cvt.buf = (uint8_t *)SDL_malloc((size_t)wav_len * cvt.len_mult);
-            if (cvt.buf) {
-                memcpy(cvt.buf, wav_data, wav_len);
-                SDL_FreeWAV(wav_data);
-                wav_data = NULL;
-                if (SDL_ConvertAudio(&cvt) == 0) {
-                    g->audio.piper_data = cvt.buf;
-                    g->audio.piper_len = (uint32_t)cvt.len_cvt;
-                } else {
-                    SDL_free(cvt.buf);
-                }
-            }
-        } else if (cvt_result >= 0) {
-            g->audio.piper_data = wav_data;
-            g->audio.piper_len = wav_len;
-            wav_data = NULL;
-        }
-        if (wav_data) SDL_FreeWAV(wav_data);
-    } else {
-        fprintf(stderr, "Amazing Grace pipes unavailable; using synth fallback: %s\n",
-                SDL_GetError());
-    }
+    /* The march, the mess's song and the pipes are loaded when a scene
+     * plays them (ensure_music), not all at start-up. */
     memset(&want, 0, sizeof(want));
     want.freq = 11025;
     want.format = AUDIO_S16SYS;
@@ -11213,6 +11165,8 @@ static int init_audio(Game *g)
     want.userdata = &g->audio;
     g->audio.noise = 0x19171917u;
     g->audio.record_track = RECORD_NONE;
+    g->audio.music_gain = (float)g->music_volume / 10.0f;
+    g->audio.effects_gain = (float)g->effects_volume / 10.0f;
     g->audio.device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
     if (!g->audio.device) {
         fprintf(stderr, "Canvas Skies audio disabled: %s\n", SDL_GetError());
@@ -11222,12 +11176,474 @@ static int init_audio(Game *g)
     return 1;
 }
 
+/* The three recordings the mixer plays by mood: loaded when a scene's
+ * mood wants one, let go when it does not (unless kept in memory). */
+static void ensure_music(Game *g, int mood)
+{
+    struct {
+        uint8_t **data;
+        uint32_t *len, *pos;
+        const char *path;
+        int mood;
+    } track[3];
+    int k;
+    track[0].data = &g->audio.music_data; track[0].len = &g->audio.music_len;
+    track[0].pos = &g->audio.music_pos; track[0].path = CANVAS_MARCH_WAV;
+    track[0].mood = MUSIC_MARCH;
+    track[1].data = &g->audio.mess_data; track[1].len = &g->audio.mess_len;
+    track[1].pos = &g->audio.mess_pos; track[1].path = CANVAS_MESS_WAV;
+    track[1].mood = MUSIC_MESS;
+    track[2].data = &g->audio.piper_data; track[2].len = &g->audio.piper_len;
+    track[2].pos = &g->audio.piper_pos; track[2].path = CANVAS_PIPER_WAV;
+    track[2].mood = MUSIC_PIPER;
+    if (!g->audio.device) return;
+    for (k = 0; k < 3; ++k) {
+        uint8_t *old = NULL;
+        if (mood != track[k].mood) {
+            if (!*track[k].data || g->cache_in_ram) continue;
+            SDL_LockAudioDevice(g->audio.device);
+            old = *track[k].data;
+            *track[k].data = NULL;
+            *track[k].len = 0;
+            SDL_UnlockAudioDevice(g->audio.device);
+            SDL_free(old);
+        } else if (!*track[k].data) {
+            uint32_t len = 0;
+            uint8_t *data = load_mono_wav(track[k].path, &len);
+            if (!data) {
+                fprintf(stderr, "Recording unavailable; using synth: %s\n",
+                        SDL_GetError());
+                continue;
+            }
+            SDL_LockAudioDevice(g->audio.device);
+            *track[k].data = data;
+            *track[k].len = len;
+            *track[k].pos = 0;
+            SDL_UnlockAudioDevice(g->audio.device);
+        }
+    }
+}
+
+/* ---- Art on demand ------------------------------------------------------
+ *
+ * Every painting belongs to the scenes that show it.  On entering a scene
+ * the groups it needs are loaded; unless the settings keep everything in
+ * memory, whatever else is held is let go first, so a machine with 32 MB
+ * holds only the art of the scene in front of it. */
+typedef enum {
+    AG_TITLE = 1u << 0, AG_BOARD = 1u << 1, AG_JOURNAL = 1u << 2,
+    AG_DEBRIEF = 1u << 3, AG_NEWS = 1u << 4, AG_CINEMA = 1u << 5,
+    AG_MESS = 1u << 6, AG_MEDALS = 1u << 7, AG_CARDS = 1u << 8,
+    AG_OFFICE = 1u << 9, AG_LOSS = 1u << 10, AG_CHAPTER = 1u << 11,
+    AG_SIDE = 1u << 12, AG_SKY = 1u << 13, AG_TOPDOWN = 1u << 14,
+    AG_TARGETS = 1u << 15, AG_EXPLODE = 1u << 16, AG_COCKPIT = 1u << 17,
+    AG_GROUND = 1u << 18, AG_GUNNER = 1u << 19, AG_LEWIS = 1u << 20,
+    AG_CARBINE = 1u << 21
+} AssetGroup;
+
+enum { ASSET_PLAIN, ASSET_LOOSE_KEY, ASSET_EXACT_KEY, ASSET_INDEX_KEY };
+
+typedef struct {
+    size_t offset;          /* of the SDL_Surface pointer in Game */
+    const char *path;
+    unsigned group;
+    unsigned char convert;  /* to the screen's format */
+    unsigned char key;
+} AssetSpec;
+
+#define ASSET(field, path, group, convert, key) \
+    {offsetof(Game, field), path, group, convert, key}
+static const AssetSpec asset_specs[] = {
+    ASSET(title, CANVAS_TITLE_BMP, AG_TITLE, 0, ASSET_PLAIN),
+    ASSET(title_banner, CANVAS_TITLE_BANNER_BMP, AG_TITLE, 0, ASSET_LOOSE_KEY),
+    ASSET(mission_board, CANVAS_BOARD_BMP, AG_BOARD, 0, ASSET_PLAIN),
+    ASSET(fatal_memorial, CANVAS_FATAL_MEMORIAL_BMP, AG_DEBRIEF, 1, ASSET_PLAIN),
+    ASSET(field_hospital, CANVAS_FIELD_HOSPITAL_BMP, AG_DEBRIEF, 1, ASSET_PLAIN),
+    ASSET(journal, CANVAS_JOURNAL_BMP, AG_JOURNAL, 0, ASSET_PLAIN),
+    ASSET(sky, CANVAS_SKY_BMP, AG_SKY, 1, ASSET_PLAIN),
+    ASSET(battlefield, CANVAS_BATTLEFIELD_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(foreground_panorama, CANVAS_FOREGROUND_BMP, AG_SIDE, 0, ASSET_LOOSE_KEY),
+    ASSET(midground[0], CANVAS_MID_FARM_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(midground[1], CANVAS_MID_CHURCH_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(midground[2], CANVAS_MID_POPLARS_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(midground[3], CANVAS_MID_SMOKE_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(midground[4], CANVAS_MID_TELEGRAPH_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(midground[5], CANVAS_MID_WALL_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[0], CANVAS_NEAR_CRATER_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[1], CANVAS_NEAR_TRENCH_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[2], CANVAS_NEAR_TREE_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[3], CANVAS_NEAR_WIRE_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[4], CANVAS_NEAR_ROAD_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(near_props[5], CANVAS_NEAR_MOUND_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(machine_gun_sprite, CANVAS_MACHINE_GUN_BMP, AG_SIDE, 0, ASSET_LOOSE_KEY),
+    ASSET(aa_gun_sprite, CANVAS_AA_GUN_BMP, AG_SIDE, 0, ASSET_LOOSE_KEY),
+    ASSET(side_civilians, CANVAS_SIDE_CIVILIANS_BMP, AG_SIDE, 1, ASSET_LOOSE_KEY),
+    ASSET(topdown_battlefield, CANVAS_TOPDOWN_BATTLEFIELD_BMP, AG_TOPDOWN, 1, ASSET_PLAIN),
+    ASSET(topdown_player, CANVAS_TOPDOWN_PLAYER_BMP, AG_TOPDOWN, 1, ASSET_LOOSE_KEY),
+    ASSET(dogfight_enemy, CANVAS_DOGFIGHT_ENEMY_BMP, AG_TOPDOWN, 1, ASSET_LOOSE_KEY),
+    ASSET(topdown_machines[0], CANVAS_TOPDOWN_TWOSEAT_BMP, AG_TOPDOWN, 1, ASSET_LOOSE_KEY),
+    ASSET(topdown_machines[1], CANVAS_TOPDOWN_LATE_BMP, AG_TOPDOWN, 1, ASSET_LOOSE_KEY),
+    ASSET(topdown_targets, CANVAS_TOPDOWN_TARGETS_BMP, AG_TARGETS, 1, ASSET_LOOSE_KEY),
+    ASSET(dogfight_background, CANVAS_DOGFIGHT_BACKGROUND_BMP, AG_CHAPTER, 1, ASSET_PLAIN),
+    ASSET(explosion_atlas, CANVAS_EXPLOSION_ATLAS_BMP, AG_EXPLODE, 1, ASSET_LOOSE_KEY),
+    ASSET(topdown_explosion_atlas, CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP, AG_EXPLODE, 1, ASSET_LOOSE_KEY),
+    ASSET(pilot_cockpit, CANVAS_PILOT_COCKPIT_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
+    ASSET(pilot_cockpit_unarmed, CANVAS_PILOT_COCKPIT_UNARMED_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
+    ASSET(pilot_cockpit_single, CANVAS_PILOT_COCKPIT_SINGLE_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
+    ASSET(cockpit_revolver, CANVAS_COCKPIT_REVOLVER_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
+    ASSET(gunner_cockpit, CANVAS_GUNNER_COCKPIT_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
+    ASSET(gunner_ring, CANVAS_GUNNER_RING_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
+    ASSET(gunner_airframe, CANVAS_GUNNER_AIRFRAME_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
+    ASSET(gunner_moving_guns, CANVAS_GUNNER_MOVING_BMP, AG_LEWIS, 1, ASSET_LOOSE_KEY),
+    /* The carbine stays in its 256 colours, keyed by its last entry. */
+    ASSET(rear_carbine, CANVAS_REAR_CARBINE_BMP, AG_CARBINE, 0, ASSET_INDEX_KEY),
+    ASSET(newspaper_table, CANVAS_NEWSPAPER_TABLE_BMP, AG_NEWS, 1, ASSET_PLAIN),
+    ASSET(cinema_hut, CANVAS_CINEMA_HUT_BMP, AG_CINEMA, 1, ASSET_PLAIN),
+    /* The ribbons are purple silk, which the loose key would eat; the
+     * painter leaves hard edges, so the exact colour is enough. */
+    ASSET(medals, CANVAS_MEDALS_BMP, AG_MEDALS, 1, ASSET_EXACT_KEY),
+    ASSET(mess, CANVAS_MESS_BMP, AG_MESS, 1, ASSET_PLAIN),
+    ASSET(machine_cards, CANVAS_MACHINE_CARDS_BMP, AG_CARDS, 1, ASSET_EXACT_KEY),
+    ASSET(office_paper, CANVAS_OFFICE_PAPER_BMP, AG_OFFICE, 1, ASSET_PLAIN),
+    ASSET(office_stamp, CANVAS_OFFICE_STAMP_BMP, AG_OFFICE, 1, ASSET_EXACT_KEY),
+    ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN)
+};
+#define ASSET_COUNT ((int)(sizeof(asset_specs) / sizeof(asset_specs[0])))
+
+static SDL_Surface **asset_slot(Game *g, const AssetSpec *a)
+{
+    return (SDL_Surface **)(void *)((char *)g + a->offset);
+}
+
+static void free_asset_groups(Game *g, unsigned drop)
+{
+    int i;
+    drop &= g->assets_loaded;
+    if (!drop) return;
+    for (i = 0; i < ASSET_COUNT; ++i) {
+        SDL_Surface **slot = asset_slot(g, &asset_specs[i]);
+        if ((asset_specs[i].group & drop) && *slot) {
+            SDL_FreeSurface(*slot);
+            *slot = NULL;
+        }
+    }
+    if (drop & AG_COCKPIT) {
+        SDL_Surface **made[] = {&g->cockpit_composite,
+                                &g->cockpit_composite_unarmed,
+                                &g->cockpit_composite_single};
+        for (i = 0; i < 3; ++i) if (*made[i]) {
+            SDL_FreeSurface(*made[i]);
+            *made[i] = NULL;
+        }
+    }
+    if (drop & AG_GROUND) free_ground_mips(g);
+    if (drop & AG_TITLE) {
+        /* The backdrops composed from the title painting go with it. */
+        if (g->title_backdrop) SDL_FreeSurface(g->title_backdrop);
+        if (g->dawn_backdrop) SDL_FreeSurface(g->dawn_backdrop);
+        g->title_backdrop = g->dawn_backdrop = NULL;
+    }
+    g->assets_loaded &= ~drop;
+}
+
+static void load_asset_groups(Game *g, unsigned want)
+{
+    unsigned fresh = want & ~g->assets_loaded;
+    int i;
+    if (!fresh) return;
+    for (i = 0; i < ASSET_COUNT; ++i) {
+        const AssetSpec *a = &asset_specs[i];
+        SDL_Surface **slot = asset_slot(g, a);
+        if (!(a->group & fresh) || *slot) continue;
+        *slot = SDL_LoadBMP(a->path);
+        if (!*slot) {
+            fprintf(stderr, "Art unavailable (%s): %s\n", a->path,
+                    SDL_GetError());
+            continue;
+        }
+        if (a->convert) convert_to_screen(g, slot);
+        if (a->key == ASSET_LOOSE_KEY)
+            prepare_magenta_key(*slot);
+        else if (a->key == ASSET_EXACT_KEY)
+            SDL_SetColorKey(*slot, SDL_TRUE,
+                            SDL_MapRGB((*slot)->format, 255, 0, 255));
+        else if (a->key == ASSET_INDEX_KEY &&
+                 (*slot)->format->BitsPerPixel == 8)
+            SDL_SetColorKey(*slot, SDL_TRUE, 255);
+    }
+    if (fresh & AG_SKY) prepare_sky(g);
+    if (fresh & AG_COCKPIT) build_cockpit_composite(g);
+    if (fresh & AG_GROUND) {
+        /* Built from the top-down painting, which need not stay. */
+        SDL_Surface *ground = g->topdown_battlefield;
+        if (!ground) {
+            ground = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
+            convert_to_screen(g, &ground);
+        }
+        build_ground_mips(g, ground);
+        if (ground != g->topdown_battlefield) SDL_FreeSurface(ground);
+    }
+    g->assets_loaded |= fresh;
+}
+
+static unsigned asset_groups_for_scene(const Game *g, Scene scene)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    switch (scene) {
+    case SCENE_TITLE: case SCENE_MENU: case SCENE_DAWN: case SCENE_SETTINGS:
+        return AG_TITLE;
+    case SCENE_STORY:
+        return AG_JOURNAL | AG_LOSS | AG_CARDS | AG_NEWS | AG_TITLE |
+               AG_CHAPTER | AG_TARGETS;
+    case SCENE_BRIEFING: case SCENE_EPILOGUE: return AG_BOARD;
+    case SCENE_DEBRIEF: return AG_BOARD | AG_DEBRIEF;
+    case SCENE_AWARD: return AG_JOURNAL | AG_MEDALS;
+    case SCENE_SCRAPBOOK: return AG_NEWS;
+    case SCENE_MESS: return AG_MESS;
+    case SCENE_CONDUCT: return AG_MEDALS | AG_OFFICE;
+    case SCENE_COURT_MARTIAL: return AG_JOURNAL;
+    case SCENE_CINEMA: return AG_CINEMA;
+    case SCENE_SORTIE:
+        if (mode == MISSION_SIDE) return AG_SIDE | AG_SKY | AG_EXPLODE;
+        if (mode == MISSION_TOP_DOWN)
+            return AG_TOPDOWN | AG_TARGETS | AG_EXPLODE;
+        if (mode == MISSION_DOGFIGHT_3D)
+            return AG_COCKPIT | AG_GROUND | AG_SKY | AG_EXPLODE;
+        return AG_GUNNER | AG_CHAPTER | AG_EXPLODE |
+               (mission_armed(g) ? AG_LEWIS :
+                personal_arms(g) ? AG_CARBINE : 0u);
+    }
+    return 0;
+}
+
+static void ensure_scene_assets(Game *g, Scene scene)
+{
+    unsigned want = asset_groups_for_scene(g, scene);
+    if (!g->cache_in_ram) {
+        free_asset_groups(g, g->assets_loaded & ~want);
+        if (scene != SCENE_CINEMA) newsreel_free(&g->newsreel);
+    }
+    load_asset_groups(g, want);
+}
+
+/* Free fast memory, from exec.library: the settings choose their default
+ * from it, and the settings page shows it. */
+#if defined(__amigaos__)
+extern void *SysBase;   /* exec.library, opened by the startup code */
+#endif
+static unsigned long exec_avail_mem(unsigned long requirements)
+{
+#if defined(__amigaos__)
+    register unsigned long d0 __asm__("d0");
+    register unsigned long d1 __asm__("d1") = requirements;
+    register void *a6 __asm__("a6") = SysBase;
+    __asm__ volatile ("jsr -216(%%a6)"
+                      : "=r"(d0), "+r"(d1)
+                      : "r"(a6)
+                      : "a0", "a1", "cc", "memory");
+    return d0;
+#else
+    (void)requirements;
+    return 0;
+#endif
+}
+#define MEMF_ANY_BITS 0ul
+#define MEMF_FAST_BITS 4ul
+
+/* ---- The officer's preferences --------------------------------------------
+ *
+ * Kept apart from the campaign in CanvasSkies.prefs, so an old save is
+ * never touched: a line naming the file, then "name value" pairs. */
+static void load_prefs(Game *g)
+{
+    FILE *f = fopen(CANVAS_PREFS_PATH, "r");
+    char name[32];
+    int version, value;
+    if (!f) return;
+    if (fscanf(f, "CANVAS_SKIES_PREFS %d", &version) == 1) {
+        while (fscanf(f, "%31s %d", name, &value) == 2) {
+            if (value < 0) value = 0;
+            if (strcmp(name, "cache") == 0) g->cache_in_ram = value != 0;
+            else if (strcmp(name, "music") == 0)
+                g->music_volume = value > 10 ? 10 : value;
+            else if (strcmp(name, "effects") == 0)
+                g->effects_volume = value > 10 ? 10 : value;
+        }
+    }
+    fclose(f);
+}
+
+static void save_prefs(const Game *g)
+{
+    FILE *f = fopen(CANVAS_PREFS_PATH, "w");
+    if (!f) return;
+    fprintf(f, "CANVAS_SKIES_PREFS 1\ncache %d\nmusic %d\neffects %d\n",
+            g->cache_in_ram, g->music_volume, g->effects_volume);
+    fclose(f);
+}
+
+static void apply_volumes(Game *g)
+{
+    if (!g->audio.device) return;
+    SDL_LockAudioDevice(g->audio.device);
+    g->audio.music_gain = (float)g->music_volume / 10.0f;
+    g->audio.effects_gain = (float)g->effects_volume / 10.0f;
+    SDL_UnlockAudioDevice(g->audio.device);
+}
+
+#define SETTINGS_ROWS 5
+
+static void draw_settings_slider(Game *g, int x, int y, int value, int selected)
+{
+    SDL_Surface *s = g->screen;
+    pix_t ink = PIX_PACK(36, 30, 26);
+    int k;
+    rect(s, x, y + 7, 200, 2, ink);
+    for (k = 0; k <= 10; ++k)
+        rect(s, x + k * 20, y + (k % 5 == 0 ? 2 : 4), 1, k % 5 == 0 ? 12 : 8,
+             ink);
+    /* A brass slide on the rule. */
+    rect(s, x + value * 20 - 5, y, 11, 16, PIX_PACK(24, 18, 14));
+    rect(s, x + value * 20 - 4, y + 1, 9, 14,
+         selected ? PIX_PACK(214, 168, 80) : PIX_PACK(160, 124, 62));
+}
+
+static void draw_settings(Game *g)
+{
+    static const char *const names[SETTINGS_ROWS] = {
+        "KEEP THE ART IN MEMORY", "MUSIC", "EFFECTS",
+        "FULL SCREEN  (F9)", "RETURN TO THE OFFICERS' MENU"
+    };
+    SDL_Surface *s = g->screen;
+    pix_t ink = PIX_PACK(36, 30, 26), red = PIX_PACK(140, 34, 26);
+    pix_t faint = PIX_PACK(112, 92, 66);
+    char buf[80];
+    unsigned long now_free = exec_avail_mem(MEMF_FAST_BITS);
+    int i, w;
+    draw_title(g);
+    blend_rect(s, 0, 0, SCREEN_W, SCREEN_H, 5, 7, 10, 150);
+    /* A sheet of buff foolscap on the adjutant's desk. */
+    rect(s, 106, 34, 436, 336, PIX_PACK(14, 10, 8));
+    rect(s, 100, 28, 436, 336, PIX_PACK(222, 210, 178));
+    blend_rect(s, 100, 28, 436, 336, 180, 150, 90, 40);
+    for (i = 0; i < 9; ++i)                     /* foxing on the old paper */
+        blend_circle(s, 120 + (int)(scene_hash((uint32_t)i * 77u) % 400u),
+                     44 + (int)(scene_hash((uint32_t)i * 131u) % 300u),
+                     6 + i % 5, 150, 112, 60, 40);
+    rect(s, 114, 42, 408, 1, PIX_PACK(150, 120, 80));
+    rect(s, 114, 350, 408, 1, PIX_PACK(150, 120, 80));
+    w = display_width("THE OFFICER'S PREFERENCES", 23);
+    display_text(g, 318 - w / 2, 50, "THE OFFICER'S PREFERENCES", 16, 23, ink);
+    w = typewriter_width("UP / DOWN  CHOOSE    LEFT / RIGHT  ALTER    "
+                         "ESCAPE  RETURN", 11);
+    typewriter_text(g, 318 - w / 2, 80,
+                    "UP / DOWN  CHOOSE    LEFT / RIGHT  ALTER    "
+                    "ESCAPE  RETURN", 7, 11, red);
+    rect(s, 130, 96, 376, 1, ink);
+    for (i = 0; i < SETTINGS_ROWS; ++i) {
+        int y = 112 + i * 40;
+        int selected = i == g->settings_row;
+        if (selected) blend_rect(s, 116, y - 6, 404, 32, 150, 110, 50, 60);
+        display_text(g, 130, y, names[i], 12, 18, selected ? red : ink);
+        if (i == 0) {
+            typewriter_text(g, 400, y + 4, g->cache_in_ram ? "ON" : "OFF",
+                            7, 11, ink);
+        } else if (i == 1 || i == 2) {
+            int v = i == 1 ? g->music_volume : g->effects_volume;
+            draw_settings_slider(g, 290, y + 2, v, selected);
+            snprintf(buf, sizeof(buf), "%d", v);
+            typewriter_text(g, 502, y + 4, buf, 7, 11, ink);
+        } else if (i == 3) {
+            typewriter_text(g, 400, y + 4, g->fullscreen ? "ON" : "OFF",
+                            7, 11, ink);
+        }
+    }
+    typewriter_text(g, 130, 300, g->cache_in_ram ?
+                    "ART AND RECORDS ARE KEPT ONCE USED: FOR LARGE MEMORIES" :
+                    "EACH SCENE LOADS ITS OWN ART AND LETS IT GO AFTER",
+                    7, 11, faint);
+    if (now_free) {
+        unsigned long used = g->fast_at_start > now_free ?
+                             g->fast_at_start - now_free : 0;
+        snprintf(buf, sizeof(buf),
+                 "FAST MEMORY FREE %lu.%lu MB    THE GAME HOLDS %lu.%lu MB",
+                 now_free >> 20, ((now_free >> 10) & 1023) * 10 / 1024,
+                 used >> 20, ((used >> 10) & 1023) * 10 / 1024);
+        typewriter_text(g, 130, 322, buf, 7, 11, faint);
+    }
+}
+
+static void handle_settings_key(Game *g, SDL_Keycode key)
+{
+    int step = 0;
+    switch (key) {
+    case SDLK_UP:
+        g->settings_row = (g->settings_row + SETTINGS_ROWS - 1) % SETTINGS_ROWS;
+        break;
+    case SDLK_DOWN:
+        g->settings_row = (g->settings_row + 1) % SETTINGS_ROWS;
+        break;
+    case SDLK_LEFT: step = -1; break;
+    case SDLK_RIGHT: step = 1; break;
+    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE:
+        step = g->settings_row >= 3 || g->settings_row == 0 ? 1 : 0;
+        if (g->settings_row == 4) {
+            set_scene(g, g->settings_from);
+            return;
+        }
+        break;
+    case SDLK_ESCAPE:
+        set_scene(g, g->settings_from);
+        return;
+    case SDLK_F9:
+        toggle_fullscreen(g);
+        break;
+    default:
+        return;
+    }
+    if (step) {
+        switch (g->settings_row) {
+        case 0:
+            g->cache_in_ram = !g->cache_in_ram;
+            /* Turned off, what this page does not show goes at once. */
+            ensure_scene_assets(g, SCENE_SETTINGS);
+            ensure_music(g, music_mood_for_scene(g, SCENE_SETTINGS));
+            break;
+        case 1:
+            g->music_volume += step;
+            if (g->music_volume < 0) g->music_volume = 0;
+            if (g->music_volume > 10) g->music_volume = 10;
+            apply_volumes(g);   /* the march below is the test */
+            break;
+        case 2:
+            g->effects_volume += step;
+            if (g->effects_volume < 0) g->effects_volume = 0;
+            if (g->effects_volume > 10) g->effects_volume = 10;
+            apply_volumes(g);
+            g->audio.crack = 2600;  /* a rifle shot to judge it by */
+            break;
+        case 3:
+            toggle_fullscreen(g);
+            break;
+        }
+        save_prefs(g);
+    }
+    g->redraw_static = 1;
+}
+
 static int game_init(Game *g)
 {
     memset(g, 0, sizeof(*g));
     g->running = 1;
     g->lives = 3;
     g->morale = 70;     /* a cheerful mess until something sours it */
+    /* With room to spare the art stays once loaded; otherwise each scene
+     * holds only its own.  The officer's preferences may say otherwise. */
+    g->fast_at_start = exec_avail_mem(MEMF_FAST_BITS);
+    g->cache_in_ram = g->fast_at_start >= 96ul * 1024ul * 1024ul;
+    g->music_volume = 10;
+    g->effects_volume = 10;
+    load_prefs(g);
     g->has_save = load_campaign_save(g);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
@@ -11249,199 +11665,13 @@ static int game_init(Game *g)
         fprintf(stderr, "Canvas Skies could not create its framebuffer\n");
         return 0;
     }
-    g->title = SDL_LoadBMP(CANVAS_TITLE_BMP);
-    if (!g->title)
-        fprintf(stderr, "Title art unavailable (%s): %s\n", CANVAS_TITLE_BMP, SDL_GetError());
-    g->title_banner = SDL_LoadBMP(CANVAS_TITLE_BANNER_BMP);
-    if (g->title_banner)
-        prepare_magenta_key(g->title_banner);
-    else
-        fprintf(stderr, "Stitched title banner unavailable (%s): %s\n",
-                CANVAS_TITLE_BANNER_BMP, SDL_GetError());
-    g->mission_board = SDL_LoadBMP(CANVAS_BOARD_BMP);
-    if (!g->mission_board)
-        fprintf(stderr, "Mission board unavailable (%s): %s\n",
-                CANVAS_BOARD_BMP, SDL_GetError());
-    g->fatal_memorial = SDL_LoadBMP(CANVAS_FATAL_MEMORIAL_BMP);
-    if (g->fatal_memorial) {
-        SDL_Surface *converted = SDL_ConvertSurface(g->fatal_memorial,
-                                                    g->screen->format, 0);
-        if (converted) {
-            SDL_FreeSurface(g->fatal_memorial);
-            g->fatal_memorial = converted;
-        }
-    } else {
-        fprintf(stderr, "Fatal memorial unavailable (%s): %s\n",
-                CANVAS_FATAL_MEMORIAL_BMP, SDL_GetError());
-    }
-    g->field_hospital = SDL_LoadBMP(CANVAS_FIELD_HOSPITAL_BMP);
-    if (g->field_hospital) {
-        SDL_Surface *converted = SDL_ConvertSurface(g->field_hospital,
-                                                    g->screen->format, 0);
-        if (converted) {
-            SDL_FreeSurface(g->field_hospital);
-            g->field_hospital = converted;
-        }
-    } else {
-        fprintf(stderr, "Field hospital unavailable (%s): %s\n",
-                CANVAS_FIELD_HOSPITAL_BMP, SDL_GetError());
-    }
-    g->journal = SDL_LoadBMP(CANVAS_JOURNAL_BMP);
-    if (!g->journal)
-        fprintf(stderr, "Journal art unavailable (%s): %s\n",
-                CANVAS_JOURNAL_BMP, SDL_GetError());
-    g->sky = SDL_LoadBMP(CANVAS_SKY_BMP);
-    if (g->sky) {
-        SDL_Surface *converted = SDL_ConvertSurface(g->sky, g->screen->format, 0);
-        if (converted) {
-            SDL_FreeSurface(g->sky);
-            g->sky = converted;
-        }
-    } else {
-        fprintf(stderr, "Sky panorama unavailable (%s): %s\n",
-                CANVAS_SKY_BMP, SDL_GetError());
-    }
-    g->battlefield = SDL_LoadBMP(CANVAS_BATTLEFIELD_BMP);
-    if (g->battlefield) {
-        SDL_Surface *converted = SDL_ConvertSurface(g->battlefield,
-                                                    g->screen->format, 0);
-        if (converted) {
-            SDL_FreeSurface(g->battlefield);
-            g->battlefield = converted;
-        }
-        prepare_magenta_key(g->battlefield);
-    } else {
-        fprintf(stderr, "Battlefield panorama unavailable (%s): %s\n",
-                CANVAS_BATTLEFIELD_BMP, SDL_GetError());
-    }
-    g->foreground_panorama = SDL_LoadBMP(CANVAS_FOREGROUND_BMP);
-    if (g->foreground_panorama)
-        prepare_magenta_key(g->foreground_panorama);
-    else
-        fprintf(stderr, "Foreground panorama unavailable (%s): %s\n",
-                CANVAS_FOREGROUND_BMP, SDL_GetError());
+    /* The haze of the far fields comes from the top-down painting; it is
+     * measured now, and the painting loaded again when a scene shows it. */
     {
-        const char *mid_paths[MIDGROUND_ELEMENT_COUNT] = {
-            CANVAS_MID_FARM_BMP, CANVAS_MID_CHURCH_BMP,
-            CANVAS_MID_POPLARS_BMP, CANVAS_MID_SMOKE_BMP,
-            CANVAS_MID_TELEGRAPH_BMP, CANVAS_MID_WALL_BMP
-        };
-        const char *near_paths[NEAR_ELEMENT_COUNT] = {
-            CANVAS_NEAR_CRATER_BMP, CANVAS_NEAR_TRENCH_BMP,
-            CANVAS_NEAR_TREE_BMP, CANVAS_NEAR_WIRE_BMP,
-            CANVAS_NEAR_ROAD_BMP, CANVAS_NEAR_MOUND_BMP
-        };
-        int i;
-        for (i = 0; i < MIDGROUND_ELEMENT_COUNT; ++i) {
-            g->midground[i] = SDL_LoadBMP(mid_paths[i]);
-            if (g->midground[i])
-                prepare_magenta_key(g->midground[i]);
-            else
-                fprintf(stderr, "Midground element unavailable (%s): %s\n",
-                        mid_paths[i], SDL_GetError());
-        }
-        for (i = 0; i < NEAR_ELEMENT_COUNT; ++i) {
-            g->near_props[i] = SDL_LoadBMP(near_paths[i]);
-            if (g->near_props[i])
-                prepare_magenta_key(g->near_props[i]);
-            else
-                fprintf(stderr, "Near-ground element unavailable (%s): %s\n",
-                        near_paths[i], SDL_GetError());
-        }
+        SDL_Surface *ground = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
+        measure_ground_tint(g, ground);
+        if (ground) SDL_FreeSurface(ground);
     }
-    g->machine_gun_sprite = SDL_LoadBMP(CANVAS_MACHINE_GUN_BMP);
-    g->aa_gun_sprite = SDL_LoadBMP(CANVAS_AA_GUN_BMP);
-    {
-        SDL_Surface *sprites[] = {g->machine_gun_sprite, g->aa_gun_sprite};
-        int i;
-        for (i = 0; i < 2; ++i) if (sprites[i])
-            prepare_magenta_key(sprites[i]);
-    }
-    g->topdown_battlefield = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
-    g->topdown_player = SDL_LoadBMP(CANVAS_TOPDOWN_PLAYER_BMP);
-    g->dogfight_background = SDL_LoadBMP(CANVAS_DOGFIGHT_BACKGROUND_BMP);
-    g->dogfight_enemy = SDL_LoadBMP(CANVAS_DOGFIGHT_ENEMY_BMP);
-    g->pilot_cockpit = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_BMP);
-    g->pilot_cockpit_unarmed = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_UNARMED_BMP);
-    g->pilot_cockpit_single = SDL_LoadBMP(CANVAS_PILOT_COCKPIT_SINGLE_BMP);
-    g->cockpit_revolver = SDL_LoadBMP(CANVAS_COCKPIT_REVOLVER_BMP);
-    g->rear_carbine = SDL_LoadBMP(CANVAS_REAR_CARBINE_BMP);
-    g->gunner_cockpit = SDL_LoadBMP(CANVAS_GUNNER_COCKPIT_BMP);
-    g->gunner_ring = SDL_LoadBMP(CANVAS_GUNNER_RING_BMP);
-    g->gunner_airframe = SDL_LoadBMP(CANVAS_GUNNER_AIRFRAME_BMP);
-    g->gunner_moving_guns = SDL_LoadBMP(CANVAS_GUNNER_MOVING_BMP);
-    g->explosion_atlas = SDL_LoadBMP(CANVAS_EXPLOSION_ATLAS_BMP);
-    g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
-    g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
-    g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
-    g->newspaper_table = SDL_LoadBMP(CANVAS_NEWSPAPER_TABLE_BMP);
-    g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
-    g->medals = SDL_LoadBMP(CANVAS_MEDALS_BMP);
-    g->mess = SDL_LoadBMP(CANVAS_MESS_BMP);
-    g->machine_cards = SDL_LoadBMP(CANVAS_MACHINE_CARDS_BMP);
-    g->office_paper = SDL_LoadBMP(CANVAS_OFFICE_PAPER_BMP);
-    g->office_stamp = SDL_LoadBMP(CANVAS_OFFICE_STAMP_BMP);
-    g->loss_card = SDL_LoadBMP(CANVAS_LOSS_CARD_BMP);
-    {
-        SDL_Surface **convert[] = {
-            &g->topdown_battlefield, &g->topdown_player,
-            &g->dogfight_background, &g->dogfight_enemy,
-            &g->pilot_cockpit, &g->pilot_cockpit_unarmed,
-            &g->pilot_cockpit_single, &g->gunner_cockpit,
-            &g->gunner_ring, &g->gunner_airframe,
-            &g->gunner_moving_guns,
-            &g->explosion_atlas, &g->topdown_explosion_atlas,
-            &g->cockpit_revolver, &g->topdown_targets,
-            &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
-            &g->medals, &g->mess, &g->loss_card, &g->machine_cards,
-            &g->office_paper, &g->office_stamp
-        };
-        int i;
-        for (i = 0; i < 24; ++i) if (*convert[i]) {
-            SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
-                                                        g->screen->format, 0);
-            if (converted) {
-                SDL_FreeSurface(*convert[i]);
-                *convert[i] = converted;
-            }
-        }
-    }
-    {
-        SDL_Surface *keyed[] = {g->topdown_player, g->dogfight_enemy,
-                                g->pilot_cockpit, g->pilot_cockpit_unarmed,
-                                g->pilot_cockpit_single,
-                                g->gunner_cockpit,
-                                g->gunner_ring, g->gunner_airframe,
-                                g->gunner_moving_guns,
-                                g->explosion_atlas,
-                                g->topdown_explosion_atlas,
-                                g->cockpit_revolver,
-                                g->topdown_targets, g->side_civilians};
-        int i;
-        for (i = 0; i < 14; ++i) if (keyed[i])
-            prepare_magenta_key(keyed[i]);
-        /* The carbine's frames stay in their 256 colours, a quarter of
-         * the memory; the generator leaves no colour blended with the
-         * key, so the key is exact: the last entry of the palette. */
-        if (g->rear_carbine && g->rear_carbine->format->BitsPerPixel == 8)
-            SDL_SetColorKey(g->rear_carbine, SDL_TRUE, 255);
-        /* The ribbons are purple silk, which the loose key would eat; the
-         * painter leaves hard edges, so the exact colour is enough. */
-        if (g->medals)
-            SDL_SetColorKey(g->medals, SDL_TRUE,
-                            SDL_MapRGB(g->medals->format, 255, 0, 255));
-        if (g->machine_cards)
-            SDL_SetColorKey(g->machine_cards, SDL_TRUE,
-                            SDL_MapRGB(g->machine_cards->format, 255, 0, 255));
-        if (g->office_stamp)
-            SDL_SetColorKey(g->office_stamp, SDL_TRUE,
-                            SDL_MapRGB(g->office_stamp->format, 255, 0, 255));
-    }
-    if (!g->topdown_battlefield || !g->topdown_player ||
-        !g->dogfight_background || !g->dogfight_enemy ||
-        !g->pilot_cockpit || !g->gunner_cockpit || !g->gunner_ring ||
-        !g->gunner_airframe || !g->gunner_moving_guns || !g->explosion_atlas)
-        fprintf(stderr, "One or more alternate-view art assets are unavailable\n");
     /* An 8-bit coverage map: it is read directly, never converted. */
     g->fonts = SDL_LoadBMP(CANVAS_FONTS_BMP);
     if (g->fonts && g->fonts->format->BytesPerPixel != 1) {
@@ -11457,23 +11687,8 @@ static int game_init(Game *g)
             CANVAS_PLAYER_TWOSEAT_BMP, CANVAS_PLAYER_LATE_BMP,
             CANVAS_ENEMY_MONO_BMP, CANVAS_ENEMY_LATE_BMP
         };
-        static const char *const top[2] = {
-            CANVAS_TOPDOWN_TWOSEAT_BMP, CANVAS_TOPDOWN_LATE_BMP
-        };
         int k;
         for (k = 0; k < 4; ++k) g->machine_sprites[k] = SDL_LoadBMP(side[k]);
-        for (k = 0; k < 2; ++k) {
-            g->topdown_machines[k] = SDL_LoadBMP(top[k]);
-            if (g->topdown_machines[k]) {
-                SDL_Surface *c = SDL_ConvertSurface(g->topdown_machines[k],
-                                                    g->screen->format, 0);
-                if (c) {
-                    SDL_FreeSurface(g->topdown_machines[k]);
-                    g->topdown_machines[k] = c;
-                }
-                prepare_magenta_key(g->topdown_machines[k]);
-            }
-        }
     }
     if (!g->player_sprites || !g->enemy_sprites)
         fprintf(stderr, "Aircraft sprite atlas unavailable; using vector fallback\n");
@@ -11497,8 +11712,7 @@ static int game_init(Game *g)
                 }
             }
     }
-    prepare_world_textures(g);
-    build_cockpit_composite(g);
+    prepare_sky(g);
     open_joystick(g);
     init_audio(g);
     set_scene(g, SCENE_TITLE);
@@ -11939,6 +12153,10 @@ static void handle_event(Game *g, SDL_Event *ev)
          ev->key.keysym.sym == SDLK_KP_ENTER) &&
         g->last_action_key && SDL_GetTicks() - g->last_action_key < 450u)
         return;
+    if (g->scene == SCENE_SETTINGS) {
+        handle_settings_key(g, ev->key.keysym.sym);
+        return;
+    }
     switch (ev->key.keysym.sym) {
     case SDLK_F9:
         toggle_fullscreen(g);
@@ -12003,6 +12221,13 @@ static void handle_event(Game *g, SDL_Event *ev)
             int has_continue = g->has_save && g->saved_lives > 0 &&
                        !g->saved_conduct[4];
             if (g->menu_selection == campaign_menu_count(g) - 1) {
+                g->confirm_overwrite = 0;
+                g->settings_row = 0;
+                g->settings_from = SCENE_MENU;
+                set_scene(g, SCENE_SETTINGS);
+                break;
+            }
+            if (g->menu_selection == campaign_menu_count(g) - 2) {
                 int i;
                 g->confirm_overwrite = 0;
                 g->scrap_index = 0;
@@ -12300,6 +12525,13 @@ int main(int argc, char **argv)
         g.kills = 2;
         g.success = 1;
         set_scene(&g, SCENE_MESS);
+    } else if (argc > 1 && strcmp(argv[1], "SETTINGS") == 0) {
+        /* The preferences page; SETTINGS ALL first loads every scene's
+         * art, as a long campaign with the art kept in memory would. */
+        g.settings_from = SCENE_TITLE;
+        set_scene(&g, SCENE_SETTINGS);
+        if (argc > 2 && strcmp(argv[2], "ALL") == 0)
+            load_asset_groups(&g, ~0u);
     } else if (argc > 2 && strcmp(argv[1], "CINEMA") == 0) {
         /* CINEMA n: chapter n's evening at the picture house. */
         g.chapter = atoi(argv[2]) % CHAPTER_COUNT;
@@ -12496,6 +12728,7 @@ int main(int argc, char **argv)
             case SCENE_CONDUCT: draw_conduct(&g); break;
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
+            case SCENE_SETTINGS: draw_settings(&g); break;
             }
             if (qa_frame_time && g.scene == SCENE_SORTIE) {
                 /* The mean over the last 64 frames, in tenths of a ms. */
@@ -12515,37 +12748,9 @@ int main(int argc, char **argv)
         SDL_Delay(8);
     }
     if (g.audio.device) SDL_CloseAudioDevice(g.audio.device);
-    if (g.title) SDL_FreeSurface(g.title);
-    if (g.title_banner) SDL_FreeSurface(g.title_banner);
+    free_asset_groups(&g, ~0u);
     if (g.title_backdrop) SDL_FreeSurface(g.title_backdrop);
-    if (g.mission_board) SDL_FreeSurface(g.mission_board);
-    if (g.fatal_memorial) SDL_FreeSurface(g.fatal_memorial);
-    if (g.field_hospital) SDL_FreeSurface(g.field_hospital);
-    if (g.journal) SDL_FreeSurface(g.journal);
-    if (g.sky) SDL_FreeSurface(g.sky);
-    if (g.battlefield) SDL_FreeSurface(g.battlefield);
-    if (g.foreground_panorama) SDL_FreeSurface(g.foreground_panorama);
-    {
-        int i;
-        for (i = 0; i < MIDGROUND_ELEMENT_COUNT; ++i)
-            if (g.midground[i]) SDL_FreeSurface(g.midground[i]);
-        for (i = 0; i < NEAR_ELEMENT_COUNT; ++i)
-            if (g.near_props[i]) SDL_FreeSurface(g.near_props[i]);
-    }
-    if (g.machine_gun_sprite) SDL_FreeSurface(g.machine_gun_sprite);
-    if (g.aa_gun_sprite) SDL_FreeSurface(g.aa_gun_sprite);
-    if (g.topdown_battlefield) SDL_FreeSurface(g.topdown_battlefield);
-    if (g.topdown_player) SDL_FreeSurface(g.topdown_player);
-    if (g.dogfight_background) SDL_FreeSurface(g.dogfight_background);
-    if (g.dogfight_enemy) SDL_FreeSurface(g.dogfight_enemy);
-    if (g.pilot_cockpit) SDL_FreeSurface(g.pilot_cockpit);
-    if (g.pilot_cockpit_unarmed) SDL_FreeSurface(g.pilot_cockpit_unarmed);
-    if (g.gunner_cockpit) SDL_FreeSurface(g.gunner_cockpit);
-    if (g.gunner_ring) SDL_FreeSurface(g.gunner_ring);
-    if (g.gunner_airframe) SDL_FreeSurface(g.gunner_airframe);
-    if (g.gunner_moving_guns) SDL_FreeSurface(g.gunner_moving_guns);
-    if (g.explosion_atlas) SDL_FreeSurface(g.explosion_atlas);
-    if (g.topdown_explosion_atlas) SDL_FreeSurface(g.topdown_explosion_atlas);
+    if (g.dawn_backdrop) SDL_FreeSurface(g.dawn_backdrop);
     if (g.fonts) SDL_FreeSurface(g.fonts);
     if (g.player_sprites) SDL_FreeSurface(g.player_sprites);
     if (g.enemy_sprites) SDL_FreeSurface(g.enemy_sprites);
@@ -12553,32 +12758,12 @@ int main(int argc, char **argv)
         int k;
         for (k = 0; k < 4; ++k)
             if (g.machine_sprites[k]) SDL_FreeSurface(g.machine_sprites[k]);
-        for (k = 0; k < 2; ++k)
-            if (g.topdown_machines[k]) SDL_FreeSurface(g.topdown_machines[k]);
     }
     if (g.audio.music_data) SDL_free(g.audio.music_data);
     if (g.audio.mess_data) SDL_free(g.audio.mess_data);
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
     if (g.audio.record_data) SDL_free(g.audio.record_data);
-    if (g.cockpit_composite) SDL_FreeSurface(g.cockpit_composite);
-    if (g.dawn_backdrop) SDL_FreeSurface(g.dawn_backdrop);
-    if (g.cockpit_composite_unarmed) SDL_FreeSurface(g.cockpit_composite_unarmed);
-    if (g.cockpit_composite_single) SDL_FreeSurface(g.cockpit_composite_single);
-    if (g.pilot_cockpit_single) SDL_FreeSurface(g.pilot_cockpit_single);
-    if (g.cockpit_revolver) SDL_FreeSurface(g.cockpit_revolver);
-    if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
-    if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
-    if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
-    if (g.newspaper_table) SDL_FreeSurface(g.newspaper_table);
-    if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
-    if (g.medals) SDL_FreeSurface(g.medals);
-    if (g.mess) SDL_FreeSurface(g.mess);
-    if (g.machine_cards) SDL_FreeSurface(g.machine_cards);
-    if (g.office_paper) SDL_FreeSurface(g.office_paper);
-    if (g.office_stamp) SDL_FreeSurface(g.office_stamp);
-    if (g.loss_card) SDL_FreeSurface(g.loss_card);
     newsreel_free(&g.newsreel);
-    free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
     if (g.fullscreen) {
