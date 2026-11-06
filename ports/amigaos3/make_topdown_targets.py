@@ -54,6 +54,11 @@ def C(w, h):
     return Canvas(w, h, light=SUN)
 
 
+def lit(colour, d):
+    """The colour lightened (or, for d < 0, darkened) by d."""
+    return tuple(max(0, min(255, v + d)) for v in colour)
+
+
 def ribs(c, x0, y0, x1, y1, n, colour, vertical=False, width=0.6):
     for k in range(1, n):
         t = k / n
@@ -93,23 +98,51 @@ def lorry(tilt=KHAKI_TILT, wreck=False, label=None):
     c = C(22, 58)
     if wreck:
         scorch(c, 11, 30, 10)
-    for y in (12, 22, 46):                       # wheels
+    for y in (12, 22, 46):                       # wheels, twinned at the back
         for x in (2.5, 19.5):
             c.part([(x - 2.4, y - 4), (x + 2.4, y + 4)], TYRE,
-                   shape="ellipse", gloss=0.1, round_=0.6)
+                   shape="ellipse", gloss=0.25, round_=0.6)
+            c.part([(x - 0.9, y - 1.2), (x + 0.9, y + 1.2)], (70, 66, 60),
+                   shape="ellipse", gloss=0.4, round_=0.2)
     body = CHAR if wreck else tilt
-    c.part([(4, 2), (18, 2), (18, 40), (4, 40)], body, gloss=0.18, round_=1.8)
     if not wreck:
-        ribs(c, 4.5, 4, 17.5, 39, 6, tuple(max(0, v - 22) for v in tilt))
-        c.line((11, 3), (11, 39), tuple(min(255, v + 18) for v in tilt), 0.6)
+        # The tilt sags between its hoops: alternate bands lit and shaded,
+        # the ridge catching the light, ropes down the sides.
+        c.part([(4, 2), (18, 2), (18, 40), (4, 40)], body, gloss=0.25,
+               grain=5, round_=1.8)
+        for k in range(6):
+            y0 = 3 + k * 6.2
+            c.part([(4.6, y0 + 3.2), (17.4, y0 + 3.2), (17.4, y0 + 6),
+                    (4.6, y0 + 6)], lit(tilt, -16), gloss=0.0, grain=3,
+                   rim=0.0, round_=1.2)
+        c.part([(4.2, 2.4), (11, 2.4), (11, 39.6), (4.2, 39.6)], lit(tilt, 14),
+               gloss=0.0, rim=0.0, grain=3, round_=1.2)   # the sunny side
+        for y in (8, 20, 32):
+            c.line((4, y), (2.6, y + 1.5), (60, 54, 40), 0.4)
+            c.line((18, y), (19.4, y + 1.5), (60, 54, 40), 0.4)
+        c.part([(4.5, 39), (17.5, 39), (17.5, 41), (4.5, 41)], TIMBER,
+               round_=0.3)                                # tailboard
     else:
+        c.part([(4, 2), (18, 2), (18, 40), (4, 40)], body, gloss=0.18,
+               grain=8, round_=1.8)
         for y in (8, 16, 24, 32):                # bare, burnt hoops
             c.line((4.5, y), (17.5, y), RUST, 0.8)
         debris(c, 22, 58, 9, [ASH, CHAR, RUST])
-    c.part([(5, 41), (17, 41), (17, 52), (5, 52)], CHAR if wreck else CAB,
-           gloss=0.2, round_=1.2)                # cab roof
-    c.part([(6, 52), (16, 52), (15.5, 57), (6.5, 57)],
-           (54, 52, 48) if not wreck else CHAR, gloss=0.25, round_=0.8)
+    # Mudguards over the front wheels, the cab roof, the bonnet with its
+    # louvres and the radiator.
+    for x in (1.2, 16.8):
+        c.part([(x, 42), (x + 4, 42), (x + 4, 50), (x, 50)],
+               CHAR if wreck else lit(CAB, -12), gloss=0.3, round_=1.4)
+    c.part([(5, 41), (17, 41), (17, 50), (5, 50)], CHAR if wreck else CAB,
+           gloss=0.3, grain=3, round_=1.2)
+    c.part([(6.5, 50), (15.5, 50), (15.2, 56.5), (6.8, 56.5)],
+           (54, 52, 48) if not wreck else CHAR, gloss=0.45, round_=0.8)
+    if not wreck:
+        for k in range(3):
+            c.line((7.4, 51.5 + k * 1.6), (9.6, 51.5 + k * 1.6), (34, 32, 30), 0.35)
+            c.line((12.4, 51.5 + k * 1.6), (14.6, 51.5 + k * 1.6), (34, 32, 30), 0.35)
+        c.line((11, 50), (11, 56.4), (90, 88, 82), 0.4)
+        c.part([(7, 56), (15, 57.5)], (120, 118, 108), round_=0.2)  # radiator
     if label and not wreck:
         img = c.image()
         img = letter_tilt(img, label)
@@ -139,22 +172,46 @@ def locomotive(wreck=False):
     c = C(26, 76)
     if wreck:
         scorch(c, 13, 40, 14)
-    c.part([(4, 4), (22, 4), (22, 62), (4, 62)], CHAR if wreck else IRON,
-           gloss=0.35, round_=2.5)                  # boiler and tender
-    if not wreck:
-        c.part([(7, 6), (19, 6), (19, 36), (7, 36)], (58, 58, 56), gloss=0.5,
-               round_=4)                            # boiler top
-        c.part([(9.5, 30), (16.5, 30), (16.5, 36), (9.5, 36)], (24, 22, 22),
-               shape="ellipse", round_=0.6)         # chimney
-        c.part([(10, 18), (16, 24)], (120, 96, 50), shape="ellipse",
-               gloss=0.6, round_=0.5)               # brass dome
-        c.part([(5, 40), (21, 40), (21, 50), (5, 50)], (40, 40, 38),
-               gloss=0.2, round_=1)                 # cab roof
-        c.part([(5, 52), (21, 52), (21, 72), (5, 72)], (52, 46, 40),
-               gloss=0.15, round_=1.5)              # tender, coal
-        debris(c, 26, 76, 0, [IRON])
-    else:
+        c.part([(4, 4), (22, 4), (22, 62), (4, 62)], CHAR, gloss=0.35,
+               round_=2.5)
         debris(c, 26, 76, 14, [ASH, CHAR, RUST, IRON], 3)
+        return c.image()
+    c.part([(3, 3), (23, 3), (23, 72), (3, 72)], (34, 34, 32), gloss=0.2,
+           round_=1.2)                                # running plate
+    c.part([(3, 2), (23, 2), (23, 4.5), (3, 4.5)], (140, 40, 30), gloss=0.3,
+           round_=0.3)                                # buffer beam
+    for x in (5, 21):
+        c.part([(x - 1.6, 0), (x + 1.6, 2.6)], (90, 90, 88), shape="ellipse",
+               round_=0.2)                            # buffers
+    # The boiler: a long cylinder lit along its upper-left flank, the dark
+    # smokebox at the front with its chimney, the dome and safety valves.
+    c.part([(6, 5), (20, 5), (20, 40), (6, 40)], (40, 44, 40), gloss=0.7,
+           grain=2, round_=6)
+    c.part([(7, 6), (11, 6), (11, 39), (7, 39)], (84, 92, 84), gloss=0.0,
+           rim=0.0, round_=1.4)                       # the sheen on the boiler
+    for y in (16, 26, 36):
+        c.line((6.4, y), (19.6, y), (120, 104, 60), 0.5)  # brass bands
+    c.part([(6, 5), (20, 5), (20, 12), (6, 12)], (24, 24, 24), gloss=0.4,
+           round_=3)                                  # smokebox
+    c.part([(10, 6.5), (16, 12.5)], (14, 14, 14), shape="ellipse", gloss=0.5,
+           round_=0.6)                                # chimney
+    c.part([(10.4, 19), (15.6, 25)], (150, 120, 56), shape="ellipse",
+           gloss=0.8, round_=0.5)                     # brass dome
+    c.part([(11.6, 31), (14.4, 34)], (150, 120, 56), shape="ellipse",
+           gloss=0.8, round_=0.3)                     # safety valves
+    # The cab roof with its vent, and the tender heaped with coal.
+    c.part([(4, 40), (22, 40), (22, 51), (4, 51)], (46, 48, 44), gloss=0.35,
+           round_=1.2)
+    c.part([(10, 43), (16, 47)], (34, 34, 32), round_=0.4)
+    c.part([(4, 53), (22, 53), (22, 73), (4, 73)], (40, 40, 38), gloss=0.3,
+           round_=1.4)
+    c.part([(6, 55), (20, 71)], (22, 22, 22), shape="ellipse", gloss=0.1,
+           grain=12, round_=2)                        # the coal
+    rng = np.random.default_rng(3)
+    for _ in range(18):
+        x, y = rng.uniform(7, 19), rng.uniform(56, 70)
+        c.part([(x - 0.8, y - 0.8), (x + 0.8, y + 0.8)], (70, 70, 72),
+               shape="ellipse", gloss=0.6, round_=0.1)
     return c.image()
 
 
@@ -162,16 +219,33 @@ def wagon(colour=(96, 70, 46), wreck=False):
     c = C(24, 58)
     if wreck:
         scorch(c, 12, 29, 12)
-    c.part([(3, 3), (21, 3), (21, 55), (3, 55)], CHAR if wreck else colour,
-           gloss=0.18, round_=1.4)
-    if not wreck:
-        ribs(c, 3.5, 4, 20.5, 54, 8, tuple(max(0, v - 20) for v in colour),
-             width=0.5)
-        c.line((12, 4), (12, 54), tuple(min(255, v + 22) for v in colour), 0.8)
-    else:
+        c.part([(3, 3), (21, 3), (21, 55), (3, 55)], CHAR, gloss=0.18,
+               round_=1.4)
         c.line((3.5, 4), (20.5, 54), RUST, 1.2)
         c.line((20.5, 4), (3.5, 54), RUST, 1.2)
         debris(c, 24, 58, 10, [ASH, CHAR, RUST])
+        return c.image()
+    for y in (1, 57):                              # couplings
+        c.line((12, y - 1), (12, y + 1), IRON, 1.0)
+    c.part([(3, 3), (21, 3), (21, 55), (3, 55)], colour, gloss=0.25, grain=6,
+           round_=1.0)
+    c.part([(3.4, 3.4), (8, 3.4), (8, 54.6), (3.4, 54.6)], lit(colour, 16),
+           gloss=0.0, rim=0.0, grain=3, round_=0.6)   # the sunny side
+    # A load under a roped tarpaulin, or open and full of crates.
+    if sum(colour) > 260:
+        c.part([(5, 6), (19, 6), (19, 52), (5, 52)], (70, 76, 56), gloss=0.35,
+               grain=4, round_=2.5)
+        for y in (14, 24, 34, 44):
+            c.line((5, y), (19, y + 0.5), (44, 46, 36), 0.5)
+    else:
+        for i in range(2):
+            for j in range(5):
+                x, y = 5.5 + i * 7, 6 + j * 9.4
+                c.part([(x, y), (x + 6, y), (x + 6, y + 8.2), (x, y + 8.2)],
+                       (150, 116, 72), gloss=0.3, round_=0.5)
+                c.line((x + 0.5, y + 4.1), (x + 5.5, y + 4.1), (110, 82, 50), 0.4)
+    for x, y in ((3, 3), (21, 3), (3, 55), (21, 55)):   # iron corner plates
+        c.part([(x - 1.1, y - 1.1), (x + 1.1, y + 1.1)], IRON, round_=0.2)
     return c.image()
 
 
@@ -194,25 +268,47 @@ def derailed():
 
 # ---- buildings -------------------------------------------------------------
 def roof(c, x0, y0, x1, y1, colour, ridge_vertical=False, tiles=True):
-    c.part([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], colour, gloss=0.22,
-           round_=1.0)
+    """A pitched roof: the face toward the sun lit, the other shaded, the
+    courses of tiles or slates across each face and the ridge capped."""
+    c.part([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], lit(colour, -10),
+           gloss=0.15, grain=6, round_=0.8)
     if ridge_vertical:
         xm = (x0 + x1) / 2
-        c.part([(x0, y0), (xm, y0), (xm, y1), (x0, y1)],
-               tuple(min(255, v + 18) for v in colour), gloss=0.1, round_=0.6)
-        c.line((xm, y0), (xm, y1), tuple(max(0, v - 40) for v in colour), 1.0)
+        c.part([(x0, y0), (xm, y0), (xm, y1), (x0, y1)], lit(colour, 22),
+               gloss=0.05, grain=5, rim=0.0, round_=0.5)
         if tiles:
-            ribs(c, x0 + 1, y0, x1 - 1, y1, int((y1 - y0) / 2.6),
-                 tuple(max(0, v - 24) for v in colour), width=0.45)
+            n = int((y1 - y0) / 2.2)
+            ribs(c, x0 + 0.5, y0, xm, y1, n, lit(colour, -6), width=0.4)
+            ribs(c, xm, y0, x1 - 0.5, y1, n, lit(colour, -34), width=0.4)
+        c.part([(xm - 0.9, y0), (xm + 0.9, y0), (xm + 0.9, y1), (xm - 0.9, y1)],
+               lit(colour, -46), gloss=0.5, round_=0.2)   # ridge tiles
     else:
         ym = (y0 + y1) / 2
-        c.part([(x0, y0), (x1, y0), (x1, ym), (x0, ym)],
-               tuple(min(255, v + 18) for v in colour), gloss=0.1, round_=0.6)
-        c.line((x0, ym), (x1, ym), tuple(max(0, v - 40) for v in colour), 1.0)
+        c.part([(x0, y0), (x1, y0), (x1, ym), (x0, ym)], lit(colour, 22),
+               gloss=0.05, grain=5, rim=0.0, round_=0.5)
         if tiles:
-            ribs(c, x0, y0 + 1, x1, y1 - 1, int((x1 - x0) / 2.6),
-                 tuple(max(0, v - 24) for v in colour), vertical=True,
-                 width=0.45)
+            n = int((x1 - x0) / 2.2)
+            ribs(c, x0, y0 + 0.5, x1, ym, n, lit(colour, -6), vertical=True,
+                 width=0.4)
+            ribs(c, x0, ym, x1, y1 - 0.5, n, lit(colour, -34), vertical=True,
+                 width=0.4)
+        c.part([(x0, ym - 0.9), (x1, ym - 0.9), (x1, ym + 0.9), (x0, ym + 0.9)],
+               lit(colour, -46), gloss=0.5, round_=0.2)
+    # Weathering: moss and soot in patches.
+    for _ in range(int((x1 - x0) * (y1 - y0) / 300)):
+        x, y = RNG.uniform(x0 + 2, x1 - 2), RNG.uniform(y0 + 2, y1 - 2)
+        moss = tuple((a * 3 + b) // 4 for a, b in zip(colour, (80, 96, 56)))
+        c.part([(x - 1.4, y - 0.8), (x + 1.4, y + 0.8)], moss,
+               shape="ellipse", gloss=0.0, rim=0.0, grain=3, round_=0.6)
+
+
+def chimney(c, x, y, w=4, h=4):
+    c.part([(x + 1.5, y + 1.5), (x + w + 3, y + h + 3)], (34, 30, 26),
+           gloss=0, rim=0, round_=0.6)                # its shadow on the roof
+    c.part([(x, y), (x + w, y), (x + w, y + h), (x, y + h)], (132, 76, 56),
+           gloss=0.35, round_=0.4)
+    c.part([(x + w / 2 - 0.9, y + h / 2 - 0.9), (x + w / 2 + 0.9, y + h / 2 + 0.9)],
+           (24, 20, 18), shape="ellipse", round_=0.2)   # the pot
 
 
 def ruin(c, x0, y0, x1, y1, wall=STONE):
@@ -228,139 +324,245 @@ def ruin(c, x0, y0, x1, y1, wall=STONE):
 def station(wreck=False):
     c = C(40, 120)
     c.part([(1, 2), (14, 2), (14, 118), (1, 118)], (138, 128, 108), gloss=0.1,
-           round_=0.6)                               # platform
-    c.line((14, 2), (14, 118), (196, 186, 160), 0.8)  # its edge
+           grain=6, round_=0.6)                       # platform
+    for y in range(6, 118, 6):
+        c.line((1.5, y), (13.5, y), (120, 110, 92), 0.35)   # flags
+    c.line((14, 2), (14, 118), (206, 196, 168), 0.9)  # its white edge
     if wreck:
         ruin(c, 16, 20, 38, 88, (150, 120, 100))
         crater(c, 26, 102, 9)
-    else:
-        roof(c, 16, 20, 38, 88, SLATE, ridge_vertical=True)
-        c.part([(18, 92), (36, 92), (36, 112), (18, 112)], (96, 94, 88),
-               gloss=0.15, round_=0.8)               # goods shed
-        ribs(c, 18, 93, 36, 111, 5, (78, 76, 72))
-        for y in (30, 58, 78):                       # chimneys
-            c.part([(29, y), (34, y + 4)], (120, 72, 54), round_=0.5)
+        return c.image()
+    for y in (12, 50, 96):                            # lamps
+        c.part([(4, y), (7, y + 3)], (40, 40, 38), shape="ellipse", round_=0.2)
+    # The platform canopy with its saw-tooth valance, then the building.
+    c.part([(6, 26), (17, 26), (17, 84), (6, 84)], (110, 112, 108), gloss=0.3,
+           round_=0.4)
+    for y in range(27, 84, 2):
+        c.line((6, y), (5, y + 1), (90, 92, 88), 0.5)
+    roof(c, 16, 20, 38, 88, SLATE, ridge_vertical=True)
+    for y in (28, 56, 80):
+        chimney(c, 28.5, y, 4.5, 3.5)
+    c.part([(18, 92), (36, 92), (36, 112), (18, 112)], (100, 98, 92),
+           gloss=0.3, round_=0.6)                     # goods shed, corrugated
+    ribs(c, 18, 93, 36, 111, 9, (80, 78, 74), vertical=True, width=0.5)
+    c.line((24, 96), (24, 110), (120, 70, 40), 0.6)   # a rust run
     return c.image()
 
 
 def hangar(wreck=False):
-    """Two Bessonneau canvas hangars side by side."""
+    """Two Bessonneau canvas hangars side by side: the canvas swelling
+    between the wooden frames, guy ropes pegged out at the sides."""
     c = C(96, 62)
     for x0 in (2, 50):
         if wreck:
             c.part([(x0, 6), (x0 + 44, 6), (x0 + 44, 56), (x0, 56)], CHAR,
                    gloss=0.0, grain=12, round_=1.5)
-            for k in range(1, 6):                    # bare burnt frames
-                x = x0 + k * 7.3
-                c.line((x, 7), (x, 55), (90, 60, 40), 1.1)
+            for k in range(1, 6):
+                y = 6 + k * 8.3
+                c.line((x0 + 1, y), (x0 + 43, y), (90, 60, 40), 1.1)
             debris(c, 96, 62, 6, [ASH, CANVAS, CHAR])
-        else:
-            c.part([(x0, 6), (x0 + 44, 6), (x0 + 44, 56), (x0, 56)], CANVAS,
-                   gloss=0.2, round_=2.5)
-            c.part([(x0, 6), (x0 + 22, 6), (x0 + 22, 56), (x0, 56)],
-                   (194, 180, 142), gloss=0.12, round_=2)
-            for k in range(1, 6):                    # the canvas folds
-                x = x0 + k * 7.3
-                c.line((x, 7), (x, 55), (150, 134, 100), 0.9)
-            c.line((x0 + 22, 6), (x0 + 22, 56), (126, 112, 84), 1.2)
-            c.part([(x0 + 4, 56), (x0 + 40, 56), (x0 + 40, 60), (x0 + 4, 60)],
-                   (70, 62, 48), round_=0.6)          # the doorway curtain
+            continue
+        for k in range(7):                            # guy ropes and pegs
+            y = 8 + k * 7.6
+            for sx, ex in ((x0, x0 - 2.4), (x0 + 44, x0 + 46.4)):
+                c.line((sx, y), (ex, y + 1), (110, 100, 80), 0.35)
+        c.part([(x0, 6), (x0 + 44, 6), (x0 + 44, 56), (x0, 56)], CANVAS,
+               gloss=0.2, grain=4, round_=2.5)
+        # Across the hangar the roof is a long barrel: lit on the sunny
+        # side, deepening to shade on the far one.
+        for k in range(10):
+            t = k / 10
+            col = lit(CANVAS, int(28 - 60 * t))
+            c.part([(x0 + 44 * t, 6.4), (x0 + 44 * (t + 0.1) + 0.3, 6.4),
+                    (x0 + 44 * (t + 0.1) + 0.3, 55.6), (x0 + 44 * t, 55.6)],
+                   col, gloss=0.0, rim=0.0, grain=3, round_=0.3)
+        for k in range(1, 6):                         # the frames
+            y = 6 + k * 8.3
+            c.line((x0 + 0.5, y), (x0 + 43.5, y), (126, 106, 74), 0.9)
+            c.line((x0 + 0.5, y + 0.8), (x0 + 43.5, y + 0.8), (216, 204, 170), 0.35)
+        c.line((x0 + 22, 6), (x0 + 22, 56), (140, 124, 92), 0.8)  # ridge
+        c.part([(x0 + 4, 56), (x0 + 40, 56), (x0 + 40, 60), (x0 + 4, 60)],
+               (70, 62, 48), round_=0.6)              # the doorway curtain
+        c.part([(x0 + 18, 56), (x0 + 26, 56), (x0 + 26, 61), (x0 + 18, 61)],
+               (44, 38, 30), round_=0.4)              # its opening
     return c.image()
 
 
 def tents(wreck=False):
+    """Bell tents: each cone lit on the sunny side, its door laced, guy
+    lines pegged out round it."""
     c = C(56, 56)
     spots = [(10, 10), (30, 8), (46, 16), (14, 32), (34, 30), (24, 48)]
     for x, y in spots:
         if wreck:
             scorch(c, x, y, 7)
             debris(c, 56, 56, 2, [ASH, CANVAS])
-        else:
-            c.part([(x - 7, y - 7), (x + 7, y + 7)], (204, 198, 176),
-                   shape="ellipse", gloss=0.25, round_=0.8)
-            for a in range(0, 360, 60):
-                r = math.radians(a)
-                c.line((x, y), (x + 6.5 * math.cos(r), y + 6.5 * math.sin(r)),
-                       (168, 160, 138), 0.5)
-            c.part([(x - 1.2, y - 1.2), (x + 1.2, y + 1.2)], TIMBER,
-                   shape="ellipse", round_=0.2)
+            continue
+        for a in range(0, 360, 45):
+            r = math.radians(a + 20)
+            c.line((x + 6.6 * math.cos(r), y + 6.6 * math.sin(r)),
+                   (x + 8.8 * math.cos(r), y + 8.8 * math.sin(r)),
+                   (120, 110, 90), 0.3)
+        c.part([(x - 7, y - 7), (x + 7, y + 7)], (196, 190, 166),
+               shape="ellipse", gloss=0.2, grain=4, round_=0.8)
+        for k in range(12):                           # the cone's panels
+            a0 = math.radians(k * 30)
+            a1 = math.radians(k * 30 + 30)
+            light = math.cos(a0 + math.radians(15) - math.atan2(-0.8, -0.6))
+            col = lit((196, 190, 166), int(26 * light))
+            c.part([(x, y), (x + 6.8 * math.cos(a0), y + 6.8 * math.sin(a0)),
+                    (x + 6.8 * math.cos(a1), y + 6.8 * math.sin(a1))], col,
+                   gloss=0.0, rim=0.0, round_=0.2)
+        c.line((x, y), (x + 4.5, y + 5), (140, 130, 104), 0.5)  # the door
+        c.part([(x - 1.2, y - 1.2), (x + 1.2, y + 1.2)], TIMBER,
+               shape="ellipse", round_=0.2)
     return c.image()
 
 
 def dump(wreck=False):
-    """An ammunition dump: shell boxes under tarpaulins in a sandbag ring."""
+    """An ammunition dump: shells stacked in rows and boxes under roped
+    tarpaulins, in a ring of sandbags."""
     c = C(72, 72)
     if wreck:
         crater(c, 36, 36, 22)
         debris(c, 72, 72, 22, [ASH, CHAR, TIMBER, SANDBAG_THEIRS], 3)
         return c.image()
-    c.part([(4, 4), (68, 68)], SANDBAG_THEIRS, shape="ellipse", gloss=0.2,
+    c.part([(4, 4), (68, 68)], SANDBAG_THEIRS, shape="ellipse", gloss=0.25,
+           grain=5, round_=2)
+    for k in range(40):                               # the bags
+        a = math.radians(k * 9)
+        for r in (29.5, 25.5):
+            x, y = 36 + r * math.cos(a), 36 + r * math.sin(a)
+            c.part([(x - 1.9, y - 1.3), (x + 1.9, y + 1.3)],
+                   lit(SANDBAG_THEIRS, int(RNG.integers(-10, 14))),
+                   shape="ellipse", gloss=0.3, round_=0.3)
+    c.part([(10, 10), (62, 62)], MUD, shape="ellipse", gloss=0.0, grain=8,
            round_=2)
-    c.part([(9, 9), (63, 63)], MUD, shape="ellipse", gloss=0.0, round_=2)
-    for i in range(3):
+    c.part([(30, 62), (42, 62), (42, 70), (30, 70)], MUD, round_=0.5)  # gap
+    for i in range(2):
         for j in range(2):
-            x, y = 16 + i * 14, 20 + j * 18
-            c.part([(x, y), (x + 11, y), (x + 11, y + 13), (x, y + 13)],
-                   (84, 92, 64), gloss=0.2, round_=1.6)   # tarpaulin
-            c.line((x + 1, y + 6.5), (x + 10, y + 6.5), (64, 70, 48), 0.6)
-    for k in range(5):
-        x = 20 + k * 7
-        c.part([(x, 54), (x + 5, 54), (x + 5, 58), (x, 58)], TIMBER,
-               round_=0.4)                             # loose shell boxes
+            x, y = 16 + i * 22, 16 + j * 20
+            c.part([(x, y), (x + 15, y), (x + 15, y + 14), (x, y + 14)],
+                   (84, 92, 64), gloss=0.35, grain=4, round_=2)   # tarpaulin
+            c.line((x + 1, y + 7), (x + 14, y + 7), (60, 66, 46), 0.6)
+            c.line((x + 7.5, y + 1), (x + 7.5, y + 13), (60, 66, 46), 0.6)
+    for row in range(2):                              # shells, noses up
+        for k in range(9):
+            x, y = 17 + k * 4.4, 52 + row * 4.4
+            c.part([(x - 1.8, y - 1.8), (x + 1.8, y + 1.8)], (176, 140, 70),
+                   shape="ellipse", gloss=0.8, round_=0.2)
+            c.part([(x - 0.7, y - 0.9), (x + 0.5, y + 0.3)], (226, 210, 160),
+                   shape="ellipse", round_=0.1)
     return c.image()
 
 
 def depot(wreck=False):
+    """A corrugated-iron store with crates and barrels stacked outside."""
     c = C(64, 42)
     if wreck:
         ruin(c, 2, 2, 62, 38, (110, 104, 92))
         return c.image()
-    c.part([(2, 2), (62, 2), (62, 38), (2, 38)], (92, 94, 90), gloss=0.25,
+    c.part([(2, 2), (50, 2), (50, 38), (2, 38)], (92, 94, 90), gloss=0.3,
            round_=0.8)
-    ribs(c, 3, 3, 61, 37, 12, (112, 114, 108), vertical=True, width=0.7)
-    c.line((2, 20), (62, 20), (70, 72, 70), 1.0)
+    c.part([(2, 2), (50, 2), (50, 20), (2, 20)], (110, 112, 106), gloss=0.1,
+           rim=0.0, round_=0.6)                       # the sunny pitch
+    ribs(c, 3, 3, 49, 37, 18, (76, 78, 74), vertical=True, width=0.5)
+    c.line((2, 20), (50, 20), (64, 66, 62), 1.0)
+    for x in (10, 23, 37):                            # rust runs
+        c.line((x, 3), (x + 0.5, 15), (120, 70, 44), 0.7)
+    for i in range(2):                                # crates
+        for j in range(3):
+            x, y = 52.5 + i * 5.5, 4 + j * 6
+            c.part([(x, y), (x + 5, y), (x + 5, y + 5), (x, y + 5)],
+                   (150, 116, 72), gloss=0.35, round_=0.3)
+    for j in range(4):                                # barrels
+        x, y = 55 + (j % 2) * 5, 24 + (j // 2) * 6
+        c.part([(x - 2.4, y - 2.4), (x + 2.4, y + 2.4)], (72, 70, 64),
+               shape="ellipse", gloss=0.6, round_=0.2)
+        c.part([(x - 0.8, y - 0.8), (x + 0.8, y + 0.8)], (40, 38, 36),
+               shape="ellipse", round_=0.1)
     return c.image()
 
 
 def farmhouse(wreck=False):
+    """A Flemish farm: the tiled house and its lean-to, the yard with its
+    midden and well, a haystack by the gable."""
     c = C(48, 42)
     if wreck:
         ruin(c, 4, 4, 44, 30, (160, 146, 120))
         crater(c, 36, 34, 6)
         return c.image()
+    c.part([(2, 26), (30, 26), (30, 40), (2, 40)], (110, 98, 74), gloss=0.0,
+           grain=8, round_=1.5)                       # the yard
+    c.part([(11, 29), (19, 37)], (76, 60, 40), shape="ellipse", gloss=0.2,
+           grain=6, round_=1)                         # the midden
+    c.part([(21, 30), (26, 35)], STONE, shape="ellipse", gloss=0.3,
+           round_=0.4)                                # the well
+    c.part([(22.4, 31.4), (24.6, 33.6)], (30, 30, 30), shape="ellipse",
+           round_=0.2)
     roof(c, 4, 4, 44, 26, TILE)
-    c.part([(30, 26), (44, 26), (44, 38), (30, 38)], (140, 70, 48),
-           gloss=0.2, round_=0.6)                     # lean-to
-    c.part([(8, 30), (24, 40)], (110, 98, 70), shape="ellipse", round_=2)
-    c.part([(35, 7), (39, 11)], (120, 80, 64), round_=0.3)  # chimney
+    c.part([(30, 26), (44, 26), (44, 38), (30, 38)], lit(TILE, -16),
+           gloss=0.2, grain=5, round_=0.6)            # lean-to
+    ribs(c, 30, 26, 44, 38, 6, lit(TILE, -36), vertical=True, width=0.4)
+    chimney(c, 35, 6, 4, 4)
+    c.part([(2.5, 28.5), (9.5, 38.5)], (176, 156, 96), shape="ellipse",
+           gloss=0.3, grain=6, round_=1)              # haystack
     return c.image()
 
 
 def church(wreck=False):
-    """The church in its churchyard, with headstones and a yew."""
+    """The church in its churchyard: nave and transepts under slate, the
+    apse round at the east end, the tower's spire a lit and shaded
+    pyramid, paths between the graves and a yew."""
     c = C(86, 116)
     c.part([(2, 2), (84, 2), (84, 114), (2, 114)], GRASS, gloss=0.05,
            grain=10, round_=1.5)
-    c.line((2, 2), (84, 2), STONE, 1.2)
-    c.line((84, 2), (84, 114), STONE, 1.2)
-    c.line((2, 114), (84, 114), STONE, 1.2)
-    c.line((2, 2), (2, 114), STONE, 1.2)
-    for k in range(14):                              # headstones
-        x, y = 8 + (k % 7) * 10, 84 + (k // 7) * 12
-        c.part([(x, y), (x + 4, y), (x + 4, y + 2.5), (x, y + 2.5)],
-               (178, 172, 156), round_=0.3)
-    c.part([(62, 60), (78, 76)], (44, 60, 40), shape="ellipse", gloss=0.1,
-           round_=2)                                  # yew
+    for a, b in (((2, 2), (84, 2)), ((84, 2), (84, 114)), ((2, 114), (84, 114)),
+                 ((2, 2), (2, 114))):
+        c.line(a, b, STONE, 1.4)
+    c.part([(40, 76), (44, 76), (44, 114), (40, 114)], (150, 138, 110),
+           gloss=0.0, grain=6, round_=0.5)            # the path to the porch
+    for k in range(18):                               # headstones and crosses
+        x, y = 8 + (k % 9) * 8.6, 86 + (k // 9) * 13
+        if abs(x - 42) < 5:
+            continue
+        c.part([(x + 1, y + 1), (x + 5, y + 4)], (40, 46, 30), gloss=0, rim=0,
+               round_=0.3)
+        if k % 3 == 1:
+            c.part([(x + 1.4, y - 1), (x + 2.6, y - 1), (x + 2.6, y + 3.5),
+                    (x + 1.4, y + 3.5)], (186, 180, 164), round_=0.2)
+            c.part([(x, y), (x + 4, y), (x + 4, y + 1.2), (x, y + 1.2)],
+                   (186, 180, 164), round_=0.2)
+        else:
+            c.part([(x, y), (x + 4, y), (x + 4, y + 2.5), (x, y + 2.5)],
+                   (178, 172, 156), gloss=0.3, round_=0.3)
+    for (x, y, r) in ((70, 66, 9), (12, 66, 7)):      # yews
+        c.part([(x - r + 2, y - r + 2), (x + r + 3, y + r + 3)], (34, 40, 28),
+               shape="ellipse", gloss=0, rim=0, round_=2)
+        c.part([(x - r, y - r), (x + r, y + r)], (44, 62, 40), shape="ellipse",
+               gloss=0.2, grain=8, round_=2)
     if wreck:
         ruin(c, 30, 10, 54, 76, STONE)
         ruin(c, 18, 30, 66, 44, STONE)
         crater(c, 20, 66, 8)
         return c.image()
-    roof(c, 30, 14, 54, 76, SLATE, ridge_vertical=True)   # nave
+    c.part([(31, 66), (53, 66), (53, 78), (31, 78)], SLATE, gloss=0.3,
+           round_=8)                                  # the apse, rounded
+    roof(c, 30, 14, 54, 72, SLATE, ridge_vertical=True)   # nave
     roof(c, 16, 32, 68, 44, SLATE)                    # transepts
-    c.part([(32, 2), (52, 2), (52, 16), (32, 16)], STONE, gloss=0.3,
-           round_=0.6)                                # tower
-    c.part([(36, 5), (48, 13)], (90, 92, 96), round_=0.5)
+    c.part([(38, 76), (46, 76), (46, 82), (38, 82)], STONE, gloss=0.3,
+           round_=0.5)                                # the porch
+    # The tower, and its spire as four lit and shaded faces.
+    c.part([(32, 2), (52, 2), (52, 18), (32, 18)], STONE, gloss=0.3, grain=4,
+           round_=0.6)
+    cx, cy = 42, 10
+    faces = (((33, 3), (51, 3), 30), ((51, 3), (51, 17), -28),
+             ((51, 17), (33, 17), -42), ((33, 17), (33, 3), 16))
+    for a, b, d in faces:
+        c.part([a, b, (cx, cy)], lit((96, 98, 104), d), gloss=0.1,
+               rim=0.0, round_=0.2)
+    c.part([(cx - 1, cy - 1), (cx + 1, cy + 1)], (196, 170, 90),
+           shape="ellipse", gloss=0.8, round_=0.2)    # the weathercock
     return c.image()
 
 
