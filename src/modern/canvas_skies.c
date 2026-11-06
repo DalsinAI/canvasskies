@@ -11544,7 +11544,10 @@ static void draw_cinema(Game *g)
              1, PIX_PACK(200, 190, 170));
         rect(s, CINEMA_SCREEN_X + 10, CINEMA_SCREEN_Y + REEL_H * 3 / 2 - 11,
              REEL_W * 3 / 2 - 20, 1, PIX_PACK(200, 190, 170));
-        font_text(g, FONT_SUBHEAD, 320 - font_width(FONT_SUBHEAD, title) / 2,
+        /* A long title drops to the smaller face to stay on the screen. */
+        FontId face = font_width(FONT_SUBHEAD, title) > REEL_W * 3 / 2 - 24 ?
+                      FONT_LABEL : FONT_SUBHEAD;
+        font_text(g, face, 320 - font_width(face, title) / 2,
                   CINEMA_SCREEN_Y + 96, title, PIX_PACK(226, 218, 200));
     } else {
         /* The frame, half as large again, in sepia, the lamp flickering. */
