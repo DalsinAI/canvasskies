@@ -3077,14 +3077,15 @@ static int current_mission_goal(const Game *g)
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
             goal = chapters[g->chapter].enemy_count;
-        if (mode == MISSION_GUNNER_3D && goal > 2) goal = 2;
+        /* The rear seat meets a stream of attackers for three minutes. */
+        if (mode == MISSION_GUNNER_3D) goal = goal + 2 > 5 ? 5 : goal + 2;
         if (mode == MISSION_DOGFIGHT_3D && goal > 4) goal = 4;
         return goal;
     }
     if (mode == MISSION_SIDE) {
         /* Two groups of targets: the order is never met by the first
-         * alone.  1914's sorties carry three tasks, two of them to do. */
-        if (g->chapter == 0) return 2;
+         * alone.  1914's sorties carry four tasks, three of them to do. */
+        if (g->chapter == 0) return 3;
         return chapters[g->chapter].goal +
                (g->chapter == CHAPTER_COUNT - 1 ? 1 : 2);
     }
@@ -3183,7 +3184,7 @@ static int side_village_today(const Game *g)
  * stretch of their country, and a second group beyond it; in 1914 the
  * observers' three tasks instead, spread along the same road. */
 #define SIDE_APPROACH 5600.0f
-#define SIDE_BETWEEN 6000.0f
+#define SIDE_BETWEEN 7000.0f
 #define SIDE_SPACING 560.0f
 static void side_layout(Game *g)
 {
@@ -3191,15 +3192,16 @@ static void side_layout(Game *g)
     int goal = current_mission_goal(g), n, k, first;
     g->task_total = 0;
     if (g->chapter == 0) {
+        /* Four pieces of work, a column always among them. */
         static const int tasks[3] = {TASK_MARK, TASK_DROP, TASK_PHOTO};
-        for (k = 0; k < 3; ++k) {
+        for (k = 0; k < 4; ++k) {
             Target *t = &g->targets[k];
             t->active = 1;
-            t->task = tasks[(k + g->mission) % 3];
-            t->world_x = SIDE_APPROACH + (float)k * 4600.0f;
+            t->task = k == 3 ? TASK_MARK : tasks[(k + g->mission) % 3];
+            t->world_x = SIDE_APPROACH + (float)k * 5000.0f;
         }
-        g->task_end = g->targets[2].world_x + 300.0f;
-        g->task_total = 3;
+        g->task_end = g->targets[3].world_x + 300.0f;
+        g->task_total = 4;
         return;
     }
     /* The first group falls one short of the order, so the second must
@@ -4310,27 +4312,27 @@ static const TopdownMix topdown_mixes[MIX_COUNT] = {
      {"STRAFE THE COLUMNS ON THE ROAD WEST.",
       "AMBULANCES ON THE ROAD: HOLD FIRE.",
       "REFUGEES AND FARMS BEYOND: TAKE CARE."}},
-    {{SEG_HQ, SEG_COLUMN, SEG_NONE},
+    {{SEG_HQ, SEG_COLUMN, SEG_BATTERY},
      {"CARRY THE GENERAL'S NOTE TO CORPS HEADQUARTERS.",
       "B DROPS THE MESSAGE BAG ON THE TENTS.",
       "MARK ANY COLUMN ON THE ROAD BEYOND: FLY OVER IT."}},
-    {{SEG_COLUMN, SEG_COLUMN, SEG_NONE},
+    {{SEG_COLUMN, SEG_BATTERY, SEG_COLUMN},
      {"GREY COLUMNS ARE ON THE ROADS.",
-      "MARK EACH ONE: FLY STRAIGHT OVER IT.",
-      "RIFLES WILL BE RAISED AT YOU. KEEP MOVING."}},
-    {{SEG_COLUMN, SEG_BATTERY, SEG_NONE},
+      "MARK EACH ONE: FLY STRAIGHT OVER IT, AND",
+      "PHOTOGRAPH THE BATTERY: HOLD LEVEL OVER IT."}},
+    {{SEG_COLUMN, SEG_BATTERY, SEG_HQ},
      {"FIND THE GAP ON THEIR FLANK.",
       "MARK THE COLUMN, THEN PHOTOGRAPH THE BATTERY:",
       "HOLD THE MACHINE LEVEL OVER THE GUNS."}},
-    {{SEG_BATTERY, SEG_HQ, SEG_NONE},
+    {{SEG_BATTERY, SEG_HQ, SEG_COLUMN},
      {"PHOTOGRAPH THE BATTERY ON THE ROAD NORTH:",
       "HOLD THE MACHINE LEVEL OVER THE GUNS.",
       "THEN DROP THE REPORT AT HEADQUARTERS WITH B."}},
-    {{SEG_HQ, SEG_BATTERY, SEG_NONE},
+    {{SEG_HQ, SEG_BATTERY, SEG_COLUMN},
      {"THE ORDER SAYS THE FIRING ENDS AT ELEVEN.",
       "DROP IT ON THEIR HEADQUARTERS WITH B,",
       "THEN PHOTOGRAPH THE BATTERY STILL IN ACTION."}},
-    {{SEG_COLUMN, SEG_HQ, SEG_NONE},
+    {{SEG_COLUMN, SEG_HQ, SEG_BATTERY},
      {"THE NEGOTIATORS' TRAIN IS IN THE FOREST.",
       "MARK THE COLUMNS FALLING BACK BESIDE IT,",
       "THEN DROP OUR MESSAGE ON HEADQUARTERS WITH B."}}
@@ -4491,7 +4493,7 @@ static void td_build_segment(Game *g, int seg, float from, float to)
  * over the lines, each group of targets, and the stretch between them. */
 #define TD_APPROACH 3800.0f
 #define TD_SEGMENT 2900.0f
-#define TD_BETWEEN 3600.0f
+#define TD_BETWEEN 4000.0f
 
 /* Lays out the sortie's segments and sets the objective: three in five of
  * its military targets, so it can be won without destroying everything,
@@ -6006,8 +6008,8 @@ static void start_run_home(Game *g)
     if (g->leg != LEG_OUT) return;
     g->leg = LEG_HOME;
     g->leg_time = 0.0f;
-    g->home_line_at = view_end + 1800.0f;
-    g->field_at = view_end + 3300.0f;
+    g->home_line_at = view_end + 2400.0f;
+    g->field_at = view_end + 4300.0f;
     show_notice(g, g->objectives >= current_mission_goal(g) ?
                 "TASK DONE: HOME" : "TURN FOR HOME");
     /* What lay further on is left to another day. */
@@ -6516,7 +6518,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                         flight_clamp(dt * 4.0f, 0.0f, 1.0f);
     if (!qa_still) g->scroll += g->airspeed * dt;
     /* A tank for a raid with two halves and a run home. */
-    g->fuel -= dt * 0.36f;
+    g->fuel -= dt * 0.30f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
     if (mission_armed(g) && g->ammunition > 0 &&
@@ -7936,7 +7938,7 @@ static void gunner_spawn_wave(Game *g, int count, int behind)
     int i, k = 0;
     for (i = 0; i < MAX_ENEMIES && k < count; ++i) {
         if (g->enemies[i].active) continue;
-        gunner_place_enemy(g, i, 1900.0f + (float)k * 520.0f);
+        gunner_place_enemy(g, i, 2300.0f + (float)k * 480.0f);
         ++k;
     }
     g->wave_clock = 0.0f;
@@ -7950,9 +7952,9 @@ static void gunner_spawn_wave(Game *g, int count, int behind)
 static int gunner_wave_size(const Game *g, int wave)
 {
     if (!mission_armed(g)) return 1;
-    if (wave == 0) return perspective_spawn_count(g);
-    if (wave == 1) return 2;
-    return 1 + g->chapter / 3;
+    if (wave == 0) return perspective_spawn_count(g) > 2 ? 2 :
+                          perspective_spawn_count(g);
+    return 1;
 }
 
 /* Returns 1 when the sortie is over. */
@@ -7963,7 +7965,6 @@ static int update_gunner_legs(Game *g, float dt)
     if (g->sortie_clock == 0.0f) {
         int i;
         for (i = 0; i < MAX_ENEMIES; ++i) g->enemies[i].active = 0;
-        g->waves = mission_armed(g) ? 4 + g->chapter / 3 : 5;
         g->archie_clock = 3.0f;
     }
     g->sortie_clock += dt;
@@ -7975,31 +7976,36 @@ static int update_gunner_legs(Game *g, float dt)
     if (g->archie_clock <= 0.0f) {
         if (!(armistice_quiet(g) && g->mission >= 9)) archie_fire_2d(g);
         g->archie_clock = (5.5f + random_unit(g) * 4.0f) * pace *
-                          (alive ? 1.8f : 1.0f) * (g->chapter == 0 ? 1.5f : 1.0f);
+                          (alive ? 1.8f : 0.7f) * (g->chapter == 0 ? 1.3f : 1.0f);
     }
     if (g->leg == LEG_OUT) {
+        /* A steady stream of attackers rather than set waves with lulls
+         * between: the next comes in as soon as the sky astern is clear,
+         * and one more joins if the last is taking his time. */
         if (g->wave == 0) {
-            if (g->leg_time > 9.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
-        } else if ((alive == 0 && !enemies_falling(g) && g->wave_clock > 4.0f) ||
-                   g->wave_clock > 45.0f || g->sortie_clock > 170.0f) {
-            if ((alive == 0 && g->wave >= g->waves) || g->sortie_clock > 170.0f) {
+            if (g->leg_time > 6.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
+        } else if (g->sortie_clock > 175.0f ||
+                   g->wave >= (mission_armed(g) ? 12 : 8)) {
+            if (alive == 0 || g->wave_clock > 30.0f) {
                 g->leg = LEG_HOME;
                 g->leg_time = 0.0f;
                 show_notice(g, "TOM TURNS FOR HOME");
-            } else if (g->wave < g->waves && (alive == 0 || g->wave_clock > 45.0f)) {
-                if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
-                if (alive || SDL_GetTicks() - g->mission_clear_at > 7000u) {
-                    g->mission_clear_at = 0;
-                    gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
-                }
             }
+        } else if (alive == 0 && !enemies_falling(g)) {
+            if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
+            if (SDL_GetTicks() - g->mission_clear_at > 2500u &&
+                g->wave_clock > 7.0f) {
+                g->mission_clear_at = 0;
+                gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
+            }
+        } else if (alive < 2 && g->wave_clock > 14.0f) {
+            g->mission_clear_at = 0;
+            gunner_spawn_wave(g, 1, 0);
         }
     } else {
-        if (mission_armed(g) && g->chapter >= 1 && g->wave <= g->waves &&
-            g->leg_time > 4.0f && g->leg_time - dt <= 4.0f) {
-            ++g->waves;
+        if (mission_armed(g) && g->chapter >= 1 &&
+            g->leg_time > 4.0f && g->leg_time - dt <= 4.0f)
             gunner_spawn_wave(g, 1, 1);
-        }
         if ((g->leg_time > 28.0f && alive == 0 && !enemies_falling(g)) ||
             g->leg_time > 45.0f)
             return 1;
@@ -8153,12 +8159,20 @@ static const uint8_t *qa_gunner_keys(Game *g, const uint8_t *keys)
         d = abs(sx - (int)g->player_x) + abs(sy - (int)g->player_y);
         if (d < best) { best = d; tx = sx; ty = sy; }
     }
-    if (tx < (int)g->player_x - 6) fake[SDL_SCANCODE_LEFT] = 1;
-    if (tx > (int)g->player_x + 6) fake[SDL_SCANCODE_RIGHT] = 1;
-    if (ty < (int)g->player_y - 6) fake[SDL_SCANCODE_UP] = 1;
-    if (ty > (int)g->player_y + 6) fake[SDL_SCANCODE_DOWN] = 1;
-    if (best < 24 && !gunner_tail_blocks_shot(g, (int)g->player_x, (int)g->player_y))
-        fake[SDL_SCANCODE_SPACE] = 1;
+    /* A man, not a machine: he follows the target a little behind it and
+     * fires once he has held it in the sight for half a second. */
+    {
+        static uint32_t held_since;
+        uint32_t now = SDL_GetTicks();
+        if (tx < (int)g->player_x - 14) fake[SDL_SCANCODE_LEFT] = 1;
+        if (tx > (int)g->player_x + 14) fake[SDL_SCANCODE_RIGHT] = 1;
+        if (ty < (int)g->player_y - 14) fake[SDL_SCANCODE_UP] = 1;
+        if (ty > (int)g->player_y + 14) fake[SDL_SCANCODE_DOWN] = 1;
+        if (best >= 30) held_since = now;
+        if (best < 30 && now - held_since > 500u &&
+            !gunner_tail_blocks_shot(g, (int)g->player_x, (int)g->player_y))
+            fake[SDL_SCANCODE_SPACE] = 1;
+    }
     return fake;
 }
 
@@ -8558,7 +8572,7 @@ static void update_side_sortie(Game *g, float dt, const uint8_t *keys)
     }
     if (!qa_still) g->scroll += g->airspeed * dt;
     /* A tank for the way out, both groups of targets and the way home. */
-    g->fuel -= dt * 0.35f;
+    g->fuel -= dt * 0.30f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = fabsf(g->player_vy) / 120.0f;
     g->audio.other_engine = 0.0f;
