@@ -35,7 +35,12 @@ Three evenings, one picture each:
 
 Rendered at four times the size (so that a face of a dozen pixels still
 has its brow, eyes, nose and mouth in it), filtered down and dithered to
-RGB565.  Each evening takes about a minute and some 650 MB.
+RGB565.  The men are drawn in a scene of their own and laid into the
+room (lamplit_men): lit as a painter would light them, mostly dark
+shapes with a warm rim from the lamp and the stove, their edges softened
+a touch, under the room's smoke; pipe and cigarette smoke drifts up
+through the lamp's glow and the corners of the room fall into shadow.
+Each evening takes about a minute and a half and some 850 MB.
 Writes assets/canvas-skies/mess.bmp, mess-rowdy.bmp and mess-wake.bmp.
 
   make_mess.py [quiet|rowdy|wake ...] [--preview DIR]
@@ -78,7 +83,7 @@ MOODS = {
     "quiet": dict(lamp=(1.9, 1.45, 0.9), reach=220, stove=(1.3, 0.6, 0.22),
                   smoke=1.0, exposure=1.0, seed=1),
     "rowdy": dict(lamp=(2.4, 1.85, 1.15), reach=250, stove=(1.4, 0.66, 0.24),
-                  smoke=1.25, exposure=1.08, seed=2),
+                  smoke=1.7, exposure=1.08, seed=2),
     "wake":  dict(lamp=(1.05, 0.7, 0.36), reach=180, stove=(1.25, 0.52, 0.18),
                   smoke=0.8, exposure=0.95, seed=3),
 }
@@ -384,9 +389,11 @@ def on_table(sc, mood):
 
 
 # ---- the officers ------------------------------------------------------------
-def officers(sc, mood):
+def officers(sc, room_sc, mood):
     """The squadron, each man made and posed with the figure kit
-    (figurekit.py): his own build, face and kit from his seed."""
+    (figurekit.py): his own build, face and kit from his seed.  The men
+    go into their own scene 'sc', lit for lamplight (see lamplit_men);
+    the chair and the dog belong to the room."""
     far, near = 446, 372
     fy, ny = floor_y(far), 294            # the near side sit a little lower
     S, SN = 1.25 * 13, 1.4 * 13           # pixels to a head-height
@@ -435,13 +442,13 @@ def officers(sc, mood):
         man(42, "head", 466, fy, far, S, -0.15)
         man(43, "clasp", 502, ny, near, SN, math.pi - 0.2)
         # His chair, pushed back from the table, his cap on its back.
-        b = Body(sc, (390, ny - 1.9 * 13 * 1.4, near - 4), 1.4,
+        b = Body(room_sc, (390, ny - 1.9 * 13 * 1.4, near - 4), 1.4,
                  math.pi + 0.3)
         bentwood(b, cap=True)
         # The CO alone at the board, his back half to us, hands behind.
         man(20, "behind", 240, floor_y(436), 436, S, math.pi / 2 + 0.3, co)
         man(44, "warm", *stove[:3], S, math.pi / 2 - 0.1, bow=22)
-    dog(sc, 74, floor_y(404) - 7, 404, 1.2)
+    dog(room_sc, 74, floor_y(404) - 7, 404, 1.2)
 
 
 # ---- our own table, nearest -------------------------------------------------
@@ -521,6 +528,115 @@ def near_table(sc, mood):
     sc.glow((616, stub - 4), 5, (255, 200, 110), 1.2)
 
 
+# ---- the men by lamplight ----------------------------------------------------
+# How the men are lit, per evening: the lamp's share of plain light on
+# them, its rim, the stove's, the light everywhere else, and how much
+# their edges are softened (in pixels of the finished picture).  The
+# figures are the kit's (figurekit.py) unchanged; only the light and the
+# softness are the painter's.
+MEN = {
+    "quiet": dict(lamp=0.9, rim=3.6, stove=0.9, ambient=0.014, soft=0.7),
+    "rowdy": dict(lamp=1.1, rim=3.8, stove=0.9, ambient=0.018, soft=0.85),
+    "wake":  dict(lamp=0.32, rim=3.0, stove=1.0, ambient=0.006, soft=0.75),
+}
+
+
+def soften(a, r, passes=3):
+    """A near-Gaussian blur of an (H, W[, C]) array: 'passes' box blurs
+    of half-width r, each done along both axes with running sums."""
+    if r < 1:
+        return a
+    out = a.astype(np.float32)
+    for _ in range(passes):
+        for ax in (0, 1):
+            c = np.cumsum(out, axis=ax, dtype=np.float64)
+            pad = [(0, 0)] * out.ndim
+            pad[ax] = (r + 1, r)
+            c = np.pad(c, pad, mode="edge")
+            n = out.shape[ax]
+            hi = np.take(c, np.arange(n) + 2 * r + 1, axis=ax)
+            lo = np.take(c, np.arange(n), axis=ax)
+            if ax == 0:
+                lo[:r + 1] = 0
+            else:
+                lo[:, :r + 1] = 0
+            out = ((hi - lo) / (2 * r + 1)).astype(np.float32)
+    return out
+
+
+def lamplit_men(sc, mood):
+    """Draws the squadron in a scene of their own, lit as a painter
+    would light men in a smoky hut: little plain light, so they read
+    mostly as dark shapes, a face catching the lamp only on the side
+    toward it; a warm rim of light round heads, shoulders and raised
+    arms from the lamp (set back over the table, among them) and from
+    the stove.  Then their edges are softened a touch and they are laid
+    into the room where nothing nearer hides them, before the smoke."""
+    k, m = MOODS[mood], MEN[mood]
+    amb = m["ambient"]
+    men = Scene(W, H, ss=SS, ambient=(amb, amb * 0.85, amb * 0.7))
+    men.point_rim = m["rim"] / max(m["lamp"], 0.1)
+    lamp_col = np.array(k["lamp"]) * m["lamp"]
+    men.point((LAMP[0], LAMP[1] + 30, 438), tuple(lamp_col), k["reach"])
+    men.point((28, 234, 440), tuple(np.array(k["stove"]) * m["stove"]), 110)
+    officers(men, sc, mood)
+    vis = np.isfinite(men.z) & (men.z < sc.z)
+    r = int(round(m["soft"] * SS))
+    a = soften(vis.astype(np.float32), r)
+    rgb = soften(np.where(vis[..., None], men.rgb, 0), r)
+    sc.rgb = sc.rgb * (1 - a[..., None]) + rgb
+    sc.z = np.where(vis, men.z, sc.z)
+
+
+def pipe_smoke(sc, mood, lamp_col):
+    """Pipe and cigarette smoke: thin ribbons rising from each pipe and
+    each cigarette left in an ashtray, curling and spreading as they go,
+    lit where they drift through the lamp's glow."""
+    sources = {
+        "quiet": [(466, 186, 1.0), (424, 236, 0.8), (262, 168, 0.5)],
+        "rowdy": [(440, 236, 0.9), (330, 230, 0.6), (560, 196, 0.6)],
+        "wake":  [(448, 236, 1.1), (96, 196, 0.7)],
+    }[mood]
+    d = np.zeros((H * SS, W * SS), np.float32)
+    rng = np.random.default_rng(len(mood))
+    for x0, y0, amount in sources:
+        ph = rng.uniform(0, 6)
+        drift = rng.uniform(-0.25, 0.25)
+        for i in range(140):
+            t = i / 139
+            rise = t * rng.uniform(90, 120)
+            x = x0 + drift * rise + 6 * t * math.sin(t * 9 + ph) + \
+                3 * math.sin(t * 23 + ph * 2)
+            y = y0 - rise
+            w = 0.8 + 7 * t ** 1.4                    # spreading as it goes
+            dens = amount * (1 - t) ** 1.2 * 0.06 / (0.4 + 0.25 * w)
+            cx, cy, R = x * SS, y * SS, int(w * SS * 2.5) + 1
+            x0i, x1i = max(0, int(cx) - R), min(W * SS, int(cx) + R)
+            y0i, y1i = max(0, int(cy) - R), min(H * SS, int(cy) + R)
+            if x0i >= x1i or y0i >= y1i:
+                continue
+            yy, xx = np.mgrid[y0i:y1i, x0i:x1i].astype(np.float32)
+            d[y0i:y1i, x0i:x1i] += dens * np.exp(
+                -((xx - cx) ** 2 + (yy - cy) ** 2) / (w * SS) ** 2)
+    curl = fbm(H * SS, W * SS, 70 + len(mood), 4, 14)
+    d *= 0.5 + curl
+    yy, xx = np.mgrid[0:H * SS, 0:W * SS].astype(np.float32) / SS
+    glow = 0.35 + 1.4 * np.exp(-((np.hypot(xx - LAMP[0], yy - LAMP[1] - 10)
+                                  / 170) ** 2))
+    col = np.array(lamp_col, np.float32) * 0.5
+    sc.rgb = sc.rgb * (1 - 0.3 * np.clip(d, 0, 1)[..., None]) + \
+        (d * glow)[..., None] * col
+
+
+def dark_edges(sc, mood):
+    """Deeper shadow toward the edges and corners of the room, where the
+    lamp does not reach; the wake darkest."""
+    k = {"quiet": 0.5, "rowdy": 0.4, "wake": 0.62}[mood]
+    yy, xx = np.mgrid[0:H * SS, 0:W * SS].astype(np.float32) / SS
+    r = np.hypot((xx - LAMP[0]) / 380, (yy - 170) / 300)
+    sc.rgb *= (1 - k * np.clip((r - 0.45) / 0.7, 0, 1) ** 1.5)[..., None]
+
+
 # ---- smoke and the finish ----------------------------------------------------
 def shade_under_table(sc):
     """The renderer casts no shadows, so lay the one that matters by hand:
@@ -577,11 +693,13 @@ def render(mood):
     piano(sc, mood)
     table(sc, mood)
     on_table(sc, mood)
-    officers(sc, mood)
     lamp(sc, mood)
     near_table(sc, mood)
+    lamplit_men(sc, mood)
     shade_under_table(sc)
     haze(sc, mood, k["lamp"])
+    pipe_smoke(sc, mood, k["lamp"])
+    dark_edges(sc, mood)
     img = sc.finish(exposure=k["exposure"])
     # Keep the boards under the evening's lines dark enough to read on.
     a = np.asarray(img).astype(np.float32)
