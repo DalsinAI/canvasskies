@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paint import Canvas, KEY, rot  # noqa: E402
+import trenches  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ATLAS = ROOT / "assets" / "canvas-skies" / "topdown-targets.bmp"
@@ -759,30 +760,10 @@ def tile_rail():
 
 
 def tile_trench(ours=False, step=0):
-    """A fire trench running up the screen, zigzagged by its traverses.
-    step 0 and 1 alternate so the zigzag continues from tile to tile."""
-    c = C(72, 64)
-    bag = SANDBAG_OURS if ours else SANDBAG_THEIRS
-    off = 14 if step else -14
-    # The trench floor: duckboards along a zigzag between two bays.
-    pts_l = [(22 + off, -2), (22 + off, 22), (22 - off, 42), (22 - off, 66)]
-    pts_r = [(x + 22, y) for x, y in pts_l]
-    c.part([(36 + off - 18, -2), (36 + off + 6, -2), (36 + off + 6, 22),
-            (36 - off + 6, 42), (36 - off + 6, 66), (36 - off - 18, 66),
-            (36 - off - 18, 42), (36 + off - 18, 22)], (66, 54, 40),
-           gloss=0.0, grain=10, rim=0.7, round_=0.8)
-    for y in range(0, 64, 5):
-        x = 36 + (off if y < 22 else -off if y > 42 else off * (1 - (y - 22) / 10))
-        c.line((x - 14, y), (x + 2, y), (110, 86, 58), 0.6)
-    # Parapet and parados of sandbags along both sides.
-    for side in (-1, 1):
-        for y in range(0, 64, 4):
-            x = 36 + (off if y < 22 else -off if y > 42 else off * (1 - (y - 22) / 10))
-            x = x - 6 + side * 13
-            c.part([(x - 3, y), (x + 3, y), (x + 3, y + 3.4), (x - 3, y + 3.4)],
-                   bag, gloss=0.2, grain=6, round_=0.5)
-    del pts_l, pts_r
-    return c.image()
+    """A stretch of fire trench running up the screen, lit from the air
+    (trenches.py); step 0 and 1 alternate, the second with a
+    communication trench and heavier shelling."""
+    return trenches.tile(ours, step, (31 if ours else 17) + step)
 
 
 SPRITES = [

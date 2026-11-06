@@ -66,3 +66,8 @@ rendered by `ports/amigaos3/make_mess.py` on the same renderer.
 
 `explosion-atlas.bmp` and `topdown-explosion-atlas.bmp` are re-cut from
 their painted `-source.png` files by `ports/amigaos3/make_explosion_atlases.py`.
+
+The top-down trench tiles in `topdown-targets.bmp` are lit height fields
+built by `ports/amigaos3/trenches.py`.  `foreground-panorama.bmp` is the
+painted ground (`foreground-panorama-base.bmp`) with fire trenches and
+wire set into it by `ports/amigaos3/make_side_trenches.py`.

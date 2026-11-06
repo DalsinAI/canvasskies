@@ -93,10 +93,10 @@ static const short topdown_sprite_rect[TD_SPRITE_COUNT][4] = {
     {346, 311, 6, 6}, /* TD_FOOTBALL */
     {353, 311, 44, 64}, /* TD_TILE_ROAD */
     {398, 311, 34, 64}, /* TD_TILE_RAIL */
-    {433, 311, 72, 64}, /* TD_TILE_TRENCH_A */
-    {0, 392, 72, 64}, /* TD_TILE_TRENCH_B */
-    {73, 392, 72, 64}, /* TD_TILE_OURS_A */
-    {146, 392, 72, 64}, /* TD_TILE_OURS_B */
+    {0, 392, 160, 96}, /* TD_TILE_TRENCH_A */
+    {161, 392, 160, 96}, /* TD_TILE_TRENCH_B */
+    {322, 392, 160, 96}, /* TD_TILE_OURS_A */
+    {0, 489, 160, 96}, /* TD_TILE_OURS_B */
 };
 
 #endif
