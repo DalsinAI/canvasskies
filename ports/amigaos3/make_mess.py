@@ -388,8 +388,8 @@ def officers(sc, mood):
         officer(sc, 322, fy, far, S, 0.15, "glass", rng, turn=0.35)
         officer(sc, 374, fy, far, S, -0.1, "talk", rng, turn=-0.25)
         officer(sc, 426, fy, far, S, 0.0, "drink", rng, lift=0.2)
-        officer(sc, 478, fy, far, S, -0.3, "rest", rng, turn=-0.4,
-                bow=0.15)
+        officer(sc, 478, fy, far, S, -0.3, "pipe", rng, turn=-0.4,
+                bow=0.1, moustache="full")
         # The CO with a glass at the head of the table.
         officer(sc, 256, floor_y(430), 430, S, -0.5, "sglass", rng,
                 seated=False, turn=-0.2, **co)
@@ -402,10 +402,11 @@ def officers(sc, mood):
         # By the stove, his hands to it.
         officer(sc, *stove_man[:3], S, math.pi / 2 - 0.25, "warm", rng)
     elif mood == "rowdy":
-        officer(sc, 322, fy, far, S, 0.2, "raise", rng, lift=0.35)
-        officer(sc, 374, fy, far, S, 0.0, "cheer", rng, lift=0.45)
-        officer(sc, 426, fy, far, S, -0.1, "drink", rng, lift=0.3)
-        officer(sc, 478, fy, far, S, -0.2, "raise", rng, lift=0.3,
+        officer(sc, 322, fy, far, S, 0.2, "raise", rng, lift=0.2)
+        officer(sc, 374, fy, far, S, 0.0, "cheer", rng, lift=0.3,
+                style="shirt", sing=True)
+        officer(sc, 426, fy, far, S, -0.1, "drink", rng, lift=0.2)
+        officer(sc, 478, fy, far, S, -0.2, "raise", rng, lift=0.15,
                 turn=-0.3)
         # On the table, making his speech to the lamp.
         officer(sc, 452, TOP[0] + 5, top_z(TOP[0] + 5), S, -0.25, "sraise",
@@ -420,11 +421,12 @@ def officers(sc, mood):
         officer(sc, 566, floor_y(452), 452, S, math.pi - 0.2, "piano", rng,
                 lift=0.2)
         officer(sc, 620, floor_y(458), 458, S, -0.6, "lean", rng,
-                seated=False, lift=0.45)
+                seated=False, lift=0.45, sing=True)
         officer(sc, *stove_man[:3], S, -0.9, "raise", rng, lift=0.25)
     else:
         # Fewer of us.  Heads down; nobody at the piano.
-        officer(sc, 340, fy, far, S, 0.1, "clasp", rng, bow=0.6)
+        officer(sc, 340, fy, far, S, 0.1, "clasp", rng, bow=0.6,
+                hair=(36, 28, 22))
         officer(sc, 466, fy, far, S, -0.15, "head", rng, bow=0.5,
                 turn=0.2)
         officer(sc, 502, ny, near, SN, math.pi - 0.2, "clasp", rng,
