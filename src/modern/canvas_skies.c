@@ -728,6 +728,7 @@ typedef struct {
     Scene scene;
     int running;
     int fullscreen;
+    uint32_t window_restore_at;  /* back from full screen: tidy up then */
     int redraw_static;
     int qa_hold;
     int qa_diary_all;   /* test entry: turn every diary page in turn */
@@ -1566,11 +1567,56 @@ static void present_frame(Game *g)
     SDL_UpdateWindowSurface(g->window);
 }
 
+/* Full screen covers the desktop at its own resolution and scales the
+ * picture into it.  A real mode change (SDL_WINDOW_FULLSCREEN) is never
+ * undone by SDL on AmigaOS: leaving it, or quitting from it, left the
+ * display in 640x480 with Workbench's 800x600 bitmap behind it, so the
+ * Workbench came back as four squashed copies in stripes. */
+/* Leaving full screen restores Workbench's mode but not its contents:
+ * whatever the game drew stays on the Workbench screen outside our window.
+ * A borderless window over the whole screen, opened and closed at once,
+ * makes Intuition repaint everything beneath it. */
+static void refresh_desktop(void)
+{
+    SDL_DisplayMode mode;
+    SDL_Window *cover;
+    int w = 1920, h = 1200;
+    if (SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.w > 0 && mode.h > 0) {
+        w = mode.w;
+        h = mode.h;
+    }
+    cover = SDL_CreateWindow("", 0, 0, w, h, SDL_WINDOW_BORDERLESS);
+    if (cover) SDL_DestroyWindow(cover);
+}
+
 static void toggle_fullscreen(Game *g)
 {
-    uint32_t flags = g->fullscreen ? 0u : SDL_WINDOW_FULLSCREEN;
-    if (SDL_SetWindowFullscreen(g->window, flags) == 0) {
-        g->fullscreen = !g->fullscreen;
+    if (g->fullscreen) {
+        /* SDL brings a window back from full screen without its border,
+         * drawing over where its title bar should be, so a fresh window
+         * replaces it.  The game draws into its own surface, so nothing
+         * else depends on the window. */
+        SDL_Window *window = SDL_CreateWindow("Canvas Skies",
+            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+            SCREEN_W, SCREEN_H, SDL_WINDOW_HIDDEN);
+        if (!window) {
+            fprintf(stderr, "Canvas Skies window failed: %s\n",
+                    SDL_GetError());
+            return;
+        }
+        SDL_SetWindowFullscreen(g->window, 0);
+        SDL_DestroyWindow(g->window);
+        g->window = window;
+        g->fullscreen = 0;
+        /* SDL restores Workbench's mode a little after the call returns;
+         * the desktop is repainted and the window shown once it has. */
+        g->window_restore_at = SDL_GetTicks() + 400u;
+        g->window_surface = NULL;
+        g->redraw_static = 1;
+        return;
+    }
+    if (SDL_SetWindowFullscreen(g->window, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0) {
+        g->fullscreen = 1;
         g->window_surface = SDL_GetWindowSurface(g->window);
         g->redraw_static = 1;
     } else {
@@ -12395,6 +12441,14 @@ int main(int argc, char **argv)
     }
     previous = SDL_GetTicks();
     while (g.running) {
+        if (g.window_restore_at && SDL_GetTicks() >= g.window_restore_at) {
+            g.window_restore_at = 0;
+            refresh_desktop();
+            SDL_ShowWindow(g.window);
+            SDL_RaiseWindow(g.window);
+            g.window_surface = SDL_GetWindowSurface(g.window);
+            g.redraw_static = 1;
+        }
         SDL_Event ev;
         uint32_t now;
         float dt;
@@ -12527,6 +12581,10 @@ int main(int argc, char **argv)
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
+    if (g.fullscreen) {
+        SDL_SetWindowFullscreen(g.window, 0);
+        refresh_desktop();
+    }
     SDL_DestroyWindow(g.window);
     SDL_Quit();
     return 0;
