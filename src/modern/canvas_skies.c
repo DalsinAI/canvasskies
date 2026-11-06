@@ -140,6 +140,9 @@
 #ifndef CANVAS_MEDALS_BMP
 #define CANVAS_MEDALS_BMP "assets/canvas-skies/medals.bmp"
 #endif
+#ifndef CANVAS_LOSS_CARD_BMP
+#define CANVAS_LOSS_CARD_BMP "assets/canvas-skies/loss-card.bmp"
+#endif
 #ifndef CANVAS_MESS_BMP
 #define CANVAS_MESS_BMP "assets/canvas-skies/mess.bmp"
 #endif
@@ -679,6 +682,7 @@ typedef struct {
     SDL_Surface *cinema_hut;        /* the picture house, its screen dark */
     SDL_Surface *medals;            /* the decorations and the office crest */
     SDL_Surface *mess;              /* the squadron mess by lamplight */
+    SDL_Surface *loss_card;         /* the empty chair, by candlelight */
     Newsreel newsreel;
     int cinema_reel_slot;
     int cinema_seen;                /* chapter + 1 whose reels were shown */
@@ -6374,16 +6378,21 @@ static void draw_loss_card(Game *g)
         "AND NOBODY SAT DOWN IN HIS PLACE."
     };
     int i;
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(12, 9, 8));
-    /* A candle and the empty chair, drawn in a few strokes. */
-    blend_circle(s, 470, 170, 70, 120, 80, 30, 60);
-    rect(s, 468, 150, 4, 26, PIX_PACK(220, 206, 170));
-    circle(s, 470, 146, 3, PIX_PACK(255, 214, 120));
-    rect(s, 380, 210, 70, 8, PIX_PACK(70, 46, 30));
-    rect(s, 380, 140, 8, 150, PIX_PACK(70, 46, 30));
-    rect(s, 442, 218, 8, 72, PIX_PACK(70, 46, 30));
-    rect(s, 380, 140, 70, 8, PIX_PACK(84, 56, 36));
-    rect(s, 380, 218, 8, 72, PIX_PACK(70, 46, 30));
+    if (g->loss_card) {
+        /* The rendered room: his empty chair, the candle, his pipe. */
+        SDL_BlitSurface(g->loss_card, NULL, s, NULL);
+    } else {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(12, 9, 8));
+        /* A candle and the empty chair, drawn in a few strokes. */
+        blend_circle(s, 470, 170, 70, 120, 80, 30, 60);
+        rect(s, 468, 150, 4, 26, PIX_PACK(220, 206, 170));
+        circle(s, 470, 146, 3, PIX_PACK(255, 214, 120));
+        rect(s, 380, 210, 70, 8, PIX_PACK(70, 46, 30));
+        rect(s, 380, 140, 8, 150, PIX_PACK(70, 46, 30));
+        rect(s, 442, 218, 8, 72, PIX_PACK(70, 46, 30));
+        rect(s, 380, 140, 70, 8, PIX_PACK(84, 56, 36));
+        rect(s, 380, 218, 8, 72, PIX_PACK(70, 46, 30));
+    }
     for (i = 0; i < 4; ++i)
         if (elapsed > 600u + (uint32_t)i * 1100u)
             typewriter_text(g, 60, 150 + i * 26, lines[i], 7, 11,
@@ -11212,6 +11221,7 @@ static int game_init(Game *g)
     g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
     g->medals = SDL_LoadBMP(CANVAS_MEDALS_BMP);
     g->mess = SDL_LoadBMP(CANVAS_MESS_BMP);
+    g->loss_card = SDL_LoadBMP(CANVAS_LOSS_CARD_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -11223,10 +11233,10 @@ static int game_init(Game *g)
             &g->explosion_atlas, &g->topdown_explosion_atlas,
             &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
             &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
-            &g->medals, &g->mess
+            &g->medals, &g->mess, &g->loss_card
         };
         int i;
-        for (i = 0; i < 21; ++i) if (*convert[i]) {
+        for (i = 0; i < 22; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11981,7 +11991,8 @@ int main(int argc, char **argv)
      * starts the game normally on the player's campaign. */
     if (argc > 1) {
         static const char *const qa_modes[] = {
-            "AIRSHIP", "AWARD", "CHAPTER_SUCCESS", "CINEMA", "COURTMARTIAL", "DEATH",
+            "AIRSHIP", "AWARD", "CHAPTER_SUCCESS", "CINEMA", "COURTMARTIAL",
+            "DAWN", "DEATH", "LOSS",
             "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
             "GUNNER", "HOSPITAL", "MACHINES", "MESS", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN",
@@ -12062,6 +12073,17 @@ int main(int argc, char **argv)
         g.victories = 9;
         g.pending_award = 1 << (atoi(argv[2]) % 5);
         set_scene(&g, SCENE_AWARD);
+    } else if (argc > 1 && strcmp(argv[1], "DAWN") == 0) {
+        /* Dawn at the hangars before a 1916 sortie. */
+        g.chapter = 2;
+        g.mission = 1;
+        set_scene(&g, SCENE_DAWN);
+    } else if (argc > 1 && strcmp(argv[1], "LOSS") == 0) {
+        /* The evening Gridpipe Thyne does not come back. */
+        g.chapter = 4;
+        g.mission = 9;
+        set_scene(&g, SCENE_STORY);
+        g.story_stage = 1;
     } else if (argc > 1 && strcmp(argv[1], "MESS") == 0) {
         /* The mess after a good day: seven on the board, two of them new. */
         g.chapter = 2;
@@ -12322,6 +12344,7 @@ int main(int argc, char **argv)
     if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
     if (g.medals) SDL_FreeSurface(g.medals);
     if (g.mess) SDL_FreeSurface(g.mess);
+    if (g.loss_card) SDL_FreeSurface(g.loss_card);
     newsreel_free(&g.newsreel);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
