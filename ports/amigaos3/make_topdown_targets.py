@@ -649,6 +649,90 @@ def dugout(wreck=False):
     return c.image()
 
 
+def aa_pit():
+    """An anti-aircraft gun in its sandbagged pit, the barrel cocked high
+    so from above it shows short, foreshortened toward the sky."""
+    c = C(44, 44)
+    c.part([(2, 2), (42, 42)], SANDBAG_THEIRS, shape="ellipse", gloss=0.25,
+           grain=5, round_=1.5)
+    for k in range(18):
+        a = math.radians(k * 20)
+        x, y = 22 + 17.5 * math.cos(a), 22 + 17.5 * math.sin(a)
+        c.part([(x - 2.2, y - 1.5), (x + 2.2, y + 1.5)],
+               lit(SANDBAG_THEIRS, int(RNG.integers(-14, 16))),
+               shape="ellipse", gloss=0.35, round_=0.3)
+    c.part([(8, 8), (36, 36)], MUD, shape="ellipse", gloss=0.0, grain=8,
+           round_=1)
+    for a in (0.6, 2.2, 3.8, 5.3):                    # the outriggers
+        c.line((22, 22), (22 + 12 * math.cos(a), 22 + 12 * math.sin(a)),
+               IRON, 1.6)
+    c.part([(16, 16), (28, 28)], (62, 64, 58), shape="ellipse", gloss=0.6,
+           round_=0.6)                                # the mounting
+    c.part([(19, 6), (25, 6), (25, 22), (19, 22)], (52, 54, 50), gloss=0.6,
+           round_=1.2)                                # the barrel, cocked up
+    c.part([(20, 4), (24, 8)], (24, 24, 24), shape="ellipse", round_=0.3)
+    for k in range(4):                                # ready shells
+        c.part([(30 + k * 2.4, 32), (32 + k * 2.4, 34)], (176, 140, 70),
+               shape="ellipse", gloss=0.8, round_=0.1)
+    return c.image()
+
+
+def convoy_lorry():
+    """A grey lorry from the convoy, running across the screen."""
+    return lorry(GERMAN_GREY).rotate(90, expand=True)
+
+
+def aerodrome():
+    """Their aerodrome: two sheds with a strip of trodden grass before
+    them and two machines parked nose to tail."""
+    c = C(110, 80)
+    c.part([(2, 30), (108, 30), (108, 78), (2, 78)], (98, 108, 62),
+           gloss=0.0, grain=8, round_=2)              # the field
+    c.part([(4, 36), (106, 36), (106, 44), (4, 44)], (124, 114, 80),
+           gloss=0.0, grain=6, round_=1)              # the apron
+    for x0 in (8, 60):
+        roof(c, x0, 4, x0 + 42, 32, (104, 84, 62))
+        c.part([(x0 + 6, 32), (x0 + 36, 32), (x0 + 36, 35), (x0 + 6, 35)],
+               (30, 26, 22), round_=0.4)              # the open doors
+    for (x, y) in ((28, 60), (82, 64)):               # parked Albatros-types
+        c.part([(x - 20, y - 4), (x + 20, y - 4), (x + 20, y + 3),
+                (x - 20, y + 3)], (150, 136, 100), gloss=0.3, round_=1)
+        c.part([(x - 2.5, y - 10), (x + 2.5, y - 10), (x + 1.6, y + 14),
+                (x - 1.6, y + 14)], (140, 40, 34), gloss=0.4, round_=1)
+        c.part([(x - 8, y + 11), (x + 8, y + 11), (x + 8, y + 15),
+                (x - 8, y + 15)], (150, 136, 100), gloss=0.3, round_=0.6)
+        for side in (-1, 1):
+            cross(c, x + side * 15, y - 0.5, 3)
+    return c.image()
+
+
+def cross(c, x, y, r):
+    c.part([(x - r, y - r), (x + r, y + r)], (230, 226, 214), round_=0.1)
+    w = r * 0.42
+    c.part([(x - w, y - r), (x + w, y - r), (x + w, y + r), (x - w, y + r)],
+           (24, 22, 22), round_=0.05)
+    c.part([(x - r, y - w), (x + r, y - w), (x + r, y + w), (x - r, y + w)],
+           (24, 22, 22), round_=0.05)
+
+
+def man(coat, cap):
+    """A soldier seen from above: shoulders in his greatcoat, the cap or
+    helmet over his head, an arm out."""
+    c = C(12, 12)
+    c.part([(1.5, 3.5), (10.5, 8.5)], coat, shape="ellipse", gloss=0.35,
+           grain=3, round_=0.3)
+    c.part([(8.5, 6), (11.5, 9.5)], coat, shape="ellipse", round_=0.2)
+    c.part([(3.5, 3), (8.5, 8)], cap, shape="ellipse", gloss=0.5, round_=0.2)
+    return c.image()
+
+
+def football():
+    c = C(6, 6)
+    c.part([(1, 1), (5, 5)], (150, 110, 70), shape="ellipse", gloss=0.6,
+           round_=0.1)
+    return c.image()
+
+
 # ---- ground tiles (each repeats vertically) --------------------------------
 def tile_road():
     c = C(44, 64)
@@ -721,6 +805,11 @@ SPRITES = [
     ("TD_MG", mg_post()), ("TD_MG_WRECK", mg_post(True)),
     ("TD_MG_OURS", mg_post(ours=True)),
     ("TD_DUGOUT", dugout()), ("TD_DUGOUT_WRECK", dugout(True)),
+    ("TD_AA_PIT", aa_pit()), ("TD_CONVOY", convoy_lorry()),
+    ("TD_AERODROME", aerodrome()),
+    ("TD_MAN_OURS", man((118, 104, 66), (96, 86, 54))),
+    ("TD_MAN_THEIRS", man((100, 106, 98), (72, 76, 70))),
+    ("TD_FOOTBALL", football()),
     ("TD_TILE_ROAD", tile_road()), ("TD_TILE_RAIL", tile_rail()),
     ("TD_TILE_TRENCH_A", tile_trench(False, 0)),
     ("TD_TILE_TRENCH_B", tile_trench(False, 1)),

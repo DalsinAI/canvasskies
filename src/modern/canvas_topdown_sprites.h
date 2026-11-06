@@ -36,6 +36,12 @@ typedef enum {
     TD_MG_OURS,
     TD_DUGOUT,
     TD_DUGOUT_WRECK,
+    TD_AA_PIT,
+    TD_CONVOY,
+    TD_AERODROME,
+    TD_MAN_OURS,
+    TD_MAN_THEIRS,
+    TD_FOOTBALL,
     TD_TILE_ROAD,
     TD_TILE_RAIL,
     TD_TILE_TRENCH_A,
@@ -79,12 +85,18 @@ static const short topdown_sprite_rect[TD_SPRITE_COUNT][4] = {
     {0, 311, 38, 38}, /* TD_MG_OURS */
     {39, 311, 32, 32}, /* TD_DUGOUT */
     {72, 311, 32, 32}, /* TD_DUGOUT_WRECK */
-    {105, 311, 44, 64}, /* TD_TILE_ROAD */
-    {150, 311, 34, 64}, /* TD_TILE_RAIL */
-    {185, 311, 72, 64}, /* TD_TILE_TRENCH_A */
-    {258, 311, 72, 64}, /* TD_TILE_TRENCH_B */
-    {331, 311, 72, 64}, /* TD_TILE_OURS_A */
-    {404, 311, 72, 64}, /* TD_TILE_OURS_B */
+    {105, 311, 44, 44}, /* TD_AA_PIT */
+    {150, 311, 58, 22}, /* TD_CONVOY */
+    {209, 311, 110, 80}, /* TD_AERODROME */
+    {320, 311, 12, 12}, /* TD_MAN_OURS */
+    {333, 311, 12, 12}, /* TD_MAN_THEIRS */
+    {346, 311, 6, 6}, /* TD_FOOTBALL */
+    {353, 311, 44, 64}, /* TD_TILE_ROAD */
+    {398, 311, 34, 64}, /* TD_TILE_RAIL */
+    {433, 311, 72, 64}, /* TD_TILE_TRENCH_A */
+    {0, 392, 72, 64}, /* TD_TILE_TRENCH_B */
+    {73, 392, 72, 64}, /* TD_TILE_OURS_A */
+    {146, 392, 72, 64}, /* TD_TILE_OURS_B */
 };
 
 #endif

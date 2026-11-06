@@ -7627,12 +7627,50 @@ static void draw_top_plane(SDL_Surface *s, int x, int y, int enemy)
     line(s, x + 7, y - 27, x - 7, y - 21, dark);
 }
 
+/* A small atlas sprite set straight down, with no shadow of its own. */
+static void td_blit_plain(Game *g, int sprite, int cx, int cy)
+{
+    const short *r = topdown_sprite_rect[sprite];
+    SDL_Rect src = {r[0], r[1], r[2], r[3]};
+    SDL_Rect dst = {cx - r[2] / 2, cy - r[3] / 2, r[2], r[3]};
+    if (g->topdown_targets) SDL_BlitSurface(g->topdown_targets, &src, g->screen, &dst);
+}
+
 static void draw_top_target(Game *g, int x, int y, Target *target)
 {
     SDL_Surface *s = g->screen;
     uint32_t earth = rgb(s, 74, 58, 39);
     uint32_t iron = rgb(s, 47, 48, 42);
     uint32_t sand = rgb(s, 139, 112, 73);
+    if (g->topdown_targets) {
+        /* The painted sprites (make_topdown_targets.py). */
+        if (target->type == 3) {
+            float t = (float)SDL_GetTicks() * 0.0016f + (float)x;
+            int k;
+            for (k = 0; k < 14; ++k) {
+                uint32_t h = scene_hash((uint32_t)(k * 7919 + x));
+                int dx = (int)(h % 90u) - 45, dy = (int)((h >> 8) % 40u) - 20;
+                dx += (int)(sinf(t * 0.7f + (float)k) * 3.0f);
+                td_blit_plain(g, (k & 1) ? TD_MAN_OURS : TD_MAN_THEIRS,
+                              x + dx, y + dy);
+            }
+            td_blit_plain(g, TD_FOOTBALL, x + (int)(sinf(t) * 26.0f),
+                          y + (int)(cosf(t * 1.3f) * 9.0f));
+            return;
+        }
+        if (target->type == 4) {
+            td_blit(g, TD_AERODROME, x, y);
+            if (g->pudding_delivered) {
+                blend_circle(s, x, y + 2, 8, 70, 40, 24, 255);
+                blend_circle(s, x, y - 1, 4, 236, 232, 220, 255);
+                circle(s, x + 1, y - 3, 1, rgb(s, 170, 30, 30));
+            }
+            return;
+        }
+        td_blit(g, target->type == 2 ? TD_CONVOY :
+                   target->type == 1 ? TD_AA_PIT : TD_MG, x, y);
+        return;
+    }
     if (target->type == 3) {
         /* Men of both armies out between the wire, and a football. */
         float t = (float)SDL_GetTicks() * 0.0016f + (float)x;
