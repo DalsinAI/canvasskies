@@ -135,11 +135,12 @@ def table(sc):
 def propeller(sc):
     def lam(q, n):
         return 0.82 + 0.18 * (np.sin(q[..., 1] * 14) > 0)
+    # High on the wall, well clear of the gramophone's horn below it.
     for side in (-1, 1):
-        sc.ellipsoid((540 + side * 36, 108 - side * 5, 500), (6, 40, 3),
-                     (128, 84, 44), R=rot_z(math.pi / 2 - 0.14), spec=0.6,
+        sc.ellipsoid((552 + side * 31, 72 - side * 4, 500), (5.5, 34, 3),
+                     (128, 84, 44), R=rot_z(math.pi / 2 - 0.13), spec=0.6,
                      shine=24, texture=lam)
-    sc.ellipsoid((540, 108, 497), (8, 8, 5), (60, 44, 30), spec=0.5)
+    sc.ellipsoid((552, 72, 497), (7, 7, 5), (60, 44, 30), spec=0.5)
 
 
 def stove(sc):

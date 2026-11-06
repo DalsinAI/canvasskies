@@ -11637,8 +11637,12 @@ static void draw_cinema(Game *g)
         pix_t lut[16];
         int flicker = (int)(scene_hash(now / 90u) % 18u);
         for (x = 0; x < 16; ++x) {
-            int v = x * 15 + 8 - flicker;
+            /* The screen is the brightest thing in the hall: the 16 grey
+             * steps run from a lifted black to full white on an eased
+             * curve, so shadows keep their detail. */
+            int v = 14 + (int)(241.0f * powf((float)x / 15.0f, 0.8f)) - flicker;
             if (v < 0) v = 0;
+            if (v > 255) v = 255;
             lut[x] = PIX_PACK(v * 236 / 240, v * 214 / 240, v * 172 / 240);
         }
         if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
