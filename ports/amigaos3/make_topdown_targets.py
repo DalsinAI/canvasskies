@@ -735,6 +735,27 @@ def football():
 
 
 # ---- ground tiles (each repeats vertically) --------------------------------
+def seamless(img):
+    """The painter lights every part from the low sun, so a tile comes out
+    a shade lighter at its top than at its foot, and a strip of them shows
+    a seam at every join.  Even each row out to the tile's own mean."""
+    a = np.asarray(img).astype(np.float32)
+    key = np.all(a == np.array(KEY, np.float32), axis=2)
+    out = a.copy()
+    whole = a[~key].mean(axis=0)
+    for y in range(a.shape[0]):
+        row = ~key[y]
+        if row.sum() < 2:
+            continue
+        out[y, row] = a[y, row] * (whole / np.maximum(a[y, row].mean(axis=0), 1.0))
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    out[key] = KEY
+    # Never let a corrected pixel fall on the key itself.
+    hit = np.all(out == np.array(KEY, np.uint8), axis=2) & ~key
+    out[hit] = (254, 1, 250)
+    return Image.fromarray(out)
+
+
 def tile_road():
     c = C(44, 64)
     c.part([(2, -2), (42, -2), (42, 66), (2, 66)], (122, 106, 78), gloss=0.05,
@@ -743,7 +764,7 @@ def tile_road():
         c.line((x, 0), (x, 64), (96, 82, 60), 2.2)
     c.line((2, 0), (2, 64), (84, 74, 54), 1.0)
     c.line((42, 0), (42, 64), (84, 74, 54), 1.0)
-    return c.image()
+    return seamless(c.image())
 
 
 def tile_rail():
@@ -756,7 +777,7 @@ def tile_rail():
     for x in (10, 24):                               # rails
         c.line((x, 0), (x, 64), (150, 148, 140), 1.3)
         c.line((x + 0.7, 0), (x + 0.7, 64), (70, 66, 60), 0.6)
-    return c.image()
+    return seamless(c.image())
 
 
 def tile_trench(ours=False, step=0):
