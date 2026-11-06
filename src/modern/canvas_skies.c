@@ -9487,13 +9487,16 @@ static void draw_mess(Game *g)
         "TOM SINGS. NOBODY HAS THE HEART TO STOP HIM.",
         "THE COLONEL LOOKS IN, SAYS WELL DONE, AND LEAVES US TO IT."
     };
-    /* The same moments on a night with an empty chair in it. */
-    static const char *const quiet_toasts[4] = {
-        "SOMEBODY RAISES A GLASS TO THE MACHINES THAT CAME HOME.",
-        "SOMEONE PUTS ON A RECORD, THEN TAKES IT OFF AGAIN.",
-        "TOM SITS BY THE STOVE. NOBODY ASKS HIM TO SING.",
-        "THE COLONEL LOOKS IN, STANDS A WHILE AT THE BOARD, AND GOES."
+    /* A night with an empty chair in it: the squadron still drinks, but
+     * soberly, and to him.  One toast a night, from these. */
+    static const char *const wake_toasts[4] = {
+        "%s STANDS AND RAISES HIS GLASS: TO ABSENT FRIENDS.",
+        "%s FILLS HIS GLASS AND SETS IT AT THE EMPTY PLACE.",
+        "THE COLONEL RAISES HIS GLASS TO THE BOARD. WE STAND WITH HIM.",
+        "%s SINGS ONE VERSE, QUIETLY. NOBODY JOINS IN, AND NOBODY STOPS HIM."
     };
+    char toast[96];
+    const char *toaster = "TOM";
     static const char *const close_lines[3] = {
         "THE GRAMOPHONE PLAYS UNTIL THE NEEDLE GIVES OUT.",
         "SOMEONE OPENS THE LAST BOTTLE FROM THE CHRISTMAS HAMPER.",
@@ -9518,8 +9521,21 @@ static void draw_mess(Game *g)
     lines[0] = "THE MESS, THAT EVENING.";
     lines[1] = first;
     /* Bluebottle's speech waits until he is out of the sick bay. */
-    lines[2] = mood == MESS_WAKE ? quiet_toasts[pick & 3u] :
-               toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u : (pick & 3u)];
+    if (mood == MESS_WAKE) {
+        /* Whoever is still at the table gives it, never the man missing. */
+        int k;
+        for (k = 0; k < 3; ++k)
+            if (k != wingman_hit(g) && !wingman_sick(g, k)) {
+                toaster = allied_pilot_names[k];
+                break;
+            }
+        if ((pick & 3u) == 3u) toaster = "TOM";
+        snprintf(toast, sizeof(toast), wake_toasts[pick & 3u], toaster);
+        lines[2] = toast;
+    } else {
+        lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u :
+                          (pick & 3u)];
+    }
     lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
                mood == MESS_WAKE ? "NOBODY SITS IN HIS CHAIR." :
                                    close_lines[(pick >> 4) % 3u];
