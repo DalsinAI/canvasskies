@@ -51,8 +51,9 @@ and wrecked) is painted the same way by
 string, and the blank top copy with its halftone, screened from our own
 `title.bmp`) is painted by `ports/amigaos3/make_newspaper_table.py`.
 
-`cinema-hut.bmp` (the Y.M.C.A. picture house) is painted by
-`ports/amigaos3/make_cinema_hut.py`. The film in `newsreels.bin` is real
+`cinema-hut.bmp` (the Y.M.C.A. picture house) is rendered by
+`ports/amigaos3/make_cinema_hut.py` with our own small renderer
+(`scene3d.py`, figures from `figures3d.py`); no outside textures. The film in `newsreels.bin` is real
 period footage; its sources and licences are listed in
 `CANVAS_SKIES_SOURCES.md`.
 
@@ -60,5 +61,8 @@ period footage; its sources and licences are listed in
 seat) is painted by `ports/amigaos3/make_cockpit_cellule.py`.
 
 `medals.bmp` (the five decorations and the office crest) is painted by
-`ports/amigaos3/make_medals.py`, and `mess.bmp` (the squadron mess) by
-`ports/amigaos3/make_mess.py`.
+`ports/amigaos3/make_medals.py`, and `mess.bmp` (the squadron mess) is
+rendered by `ports/amigaos3/make_mess.py` on the same renderer.
+
+`explosion-atlas.bmp` and `topdown-explosion-atlas.bmp` are re-cut from
+their painted `-source.png` files by `ports/amigaos3/make_explosion_atlases.py`.
