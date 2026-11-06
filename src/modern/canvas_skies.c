@@ -864,6 +864,10 @@ static float wrap_angle(float angle);
 static Vec3 flight_rotate_from_ned(const FlightState *f, float north,
                                    float east, float down);
 
+/* QA: "SIDE n VILLAGE STILL" stops the scroll with the farm, the church
+ * and the cart standing side by side in view. */
+static int qa_still;
+
 static int is_perspective_mode(MissionMode mode)
 {
     return mode == MISSION_DOGFIGHT_3D || mode == MISSION_GUNNER_3D;
@@ -4377,7 +4381,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
     if (g->player_x > SCREEN_W - 34.0f) g->player_x = SCREEN_W - 34.0f;
     if (g->player_y < 86.0f) g->player_y = 86.0f;
     if (g->player_y > SCREEN_H - 38.0f) g->player_y = SCREEN_H - 38.0f;
-    g->scroll += g->airspeed * dt;
+    if (!qa_still) g->scroll += g->airspeed * dt;
     g->fuel -= dt * 1.08f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
@@ -4616,7 +4620,7 @@ static void update_perspective_sortie(Game *g, float dt,
             firing = 0;
         }
     }
-    g->scroll += g->airspeed * dt * 1.16f;
+    if (!qa_still) g->scroll += g->airspeed * dt * 1.16f;
     g->fuel -= dt * 1.2f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = gunner ? 0.35f :
@@ -5539,7 +5543,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         g->audio.blast = 0;
         g->audio.crash = 7200;
     }
-    g->scroll += g->airspeed * dt;
+    if (!qa_still) g->scroll += g->airspeed * dt;
     g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f);
     if (g->fuel < 0.0f) g->fuel = 0.0f;
     g->audio.engine_speed = g->airspeed;
@@ -5836,7 +5840,7 @@ static void update_sortie(Game *g, float dt, const uint8_t *keys)
         if (fabsf(g->player_vy) > 45.0f) g->health -= 3;
         g->player_vy = -8.0f;
     }
-    g->scroll += g->airspeed * dt;
+    if (!qa_still) g->scroll += g->airspeed * dt;
     g->fuel -= dt * 1.05f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = fabsf(g->player_vy) / 120.0f;
@@ -12090,9 +12094,21 @@ int main(int argc, char **argv)
                     break;
             }
             g.qa_hold = argc > 3;
+            qa_still = argc > 4 && strcmp(argv[4], "STILL") == 0;
         }
         reset_sortie(&g);
         set_scene(&g, SCENE_SORTIE);
+        if (qa_still) {
+            int i;
+            for (i = 0; i < MAX_TARGETS; ++i) {
+                Target *t = &g.targets[i];
+                if (!t->active) continue;
+                t->world_x = t->civilian == SC_FARM ? g.scroll + 150.0f :
+                             t->civilian == SC_CHURCH ? g.scroll + 330.0f :
+                             t->civilian == SC_CART ? g.scroll + 520.0f :
+                             g.scroll + 5000.0f;
+            }
+        }
     } else if (argc > 1 && (strcmp(argv[1], "TRUCE") == 0 ||
                             strcmp(argv[1], "AIRSHIP") == 0 ||
                             strcmp(argv[1], "GOTHA") == 0)) {
