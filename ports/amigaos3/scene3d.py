@@ -72,6 +72,11 @@ class Scene:
         self.ambient = np.array(ambient, np.float32)
         self.points = []        # (pos (x,y,z) at 1x, colour, reach)
         self.dirs = []          # (direction toward the light, colour)
+        # Point lights put a rim on solids that ask for one only when this
+        # is set: a man between us and the mess lamp shows as a dark shape
+        # with his shoulders and hair edged in light.  Off by default, so
+        # the rooms rendered before it came in are unchanged.
+        self.point_rim = 0.0
 
     # -- lights ------------------------------------------------------------
     def point(self, pos, colour, reach):
@@ -104,6 +109,10 @@ class Scene:
             fall = 1.0 / (1.0 + (dist / reach) ** 2)
             lam = np.clip((n * l).sum(-1, keepdims=True), 0, 1)
             out = out + albedo * col * lam * fall
+            if rim and self.point_rim:
+                edge = (1 - np.clip((n * view).sum(-1), 0, 1)) ** 3
+                out = out + col * fall * rim * self.point_rim * (
+                    edge * np.clip((n * l).sum(-1) + 0.15, 0, 1))[:, None]
             if spec:
                 hv = normalize(l + view)
                 out = out + col * spec * fall * (
