@@ -54,6 +54,14 @@ surviving aircraft's drawings.
 and wrecked) is painted the same way by
 `ports/amigaos3/make_side_civilians.py`.
 
+`riflemen.bmp` (the enemy's riflemen in field grey, in the covered spiked
+helmet of 1914 and the steel helmet of 1916, side on and from above) is
+original art for this game, rendered on the host by
+`ports/amigaos3/make_riflemen.py` with our own small renderer
+(`scene3d.py`): each man is built of simple lit solids, lit from the upper
+left and filtered down with hard edges. No photograph or other game's art
+was used.
+
 `newspaper-table.bmp` (the mess table, the newsvendor's bundle and its
 string, and the blank top copy with its halftone, screened from our own
 `title.bmp`) is painted by `ports/amigaos3/make_newspaper_table.py`.
