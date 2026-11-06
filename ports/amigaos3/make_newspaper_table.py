@@ -11,6 +11,7 @@ Writes assets/canvas-skies/newspaper-table.bmp (640x400).
 Top copy: x 44..596, y 8..392.  Halftone block: x 266..467, y 140..238.
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from paint import Canvas  # noqa: E402
+from scene3d import SS, Scene, planks  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets" / "canvas-skies"
@@ -28,60 +29,84 @@ PHOTO = (266, 140, 467, 238)
 
 
 def table():
-    """Dark oak planks, the lamplight falling from the upper right."""
-    w, h = 640, 400
-    yy, xx = np.mgrid[0:h, 0:w]
-    base = np.zeros((h, w, 3), np.float32)
-    plank = (yy // 58) % 2
-    grain = np.sin(xx * 0.045 + np.sin(yy * 0.11 + xx * 0.004) * 2.4) * 8
-    for c, v in enumerate((70, 46, 30)):
-        base[..., c] = v + plank * 6 + grain
-    base += RNG.normal(0, 4, (h, w, 1))
-    for y in range(58, h, 58):                       # plank joints
-        base[y - 1:y + 1] *= 0.55
-    light = np.exp(-(((xx - 560) / 420.0) ** 2 + ((yy - 40) / 360.0) ** 2))
-    base *= (0.45 + 0.75 * light)[..., None]
-    return Image.fromarray(np.clip(base, 0, 255).astype(np.uint8))
+    """An oak table under the lamp (scene3d.py): boards with their grain,
+    knots and joints, the light pooling from the upper right."""
+    sc = Scene(640, 400, ambient=(0.06, 0.045, 0.035))
+    sc.point((560, 30, -260), (2.2, 1.6, 0.95), 420)
+    a, n, _ = planks(400 * SS, 640 * SS, 111, base=(104, 66, 38),
+                     widths=(52, 66), vertical=False, nails=False)
+    sc.surface(np.ones((400 * SS, 640 * SS), bool), 500, a, normals=n,
+               spec=0.35, shine=26)
+    return Image.fromarray(np.asarray(sc.finish()))
 
 
 def bundle(img):
-    """The stack beneath, a little larger than the top copy and offset to
-    the lower right, its edges showing as layers of greyer newsprint."""
+    """The stack beneath: sheets laid a little skew, each edge lit on top
+    and dark beneath, the pile's shadow cast to the lower right."""
     d = ImageDraw.Draw(img, "RGBA")
     x0, y0, x1, y1 = TOP
-    d.rectangle((x0 + 12, y0 + 14, x1 + 22, y1 + 8), fill=(10, 8, 6, 140))
-    for k in range(7, 0, -1):                        # sheets, deepest first
-        g = 196 - k * 9
-        off = k * 2
-        d.rectangle((x0 + 4 + off, y0 + 4 + off, x1 + 6 + off, y1 + 2 + off),
-                    fill=(g, g - 4, g - 14))
-        d.line((x0 + 4 + off, y1 + 2 + off, x1 + 6 + off, y1 + 2 + off),
-               fill=(g - 40, g - 44, g - 50))
+    d.polygon([(x0 + 16, y0 + 18), (x1 + 26, y0 + 22), (x1 + 22, y1 + 14),
+               (x0 + 10, y1 + 12)], fill=(8, 6, 4, 150))
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    for k in range(9, 0, -1):                        # sheets, deepest first
+        ang = math.radians(RNG.normal(0, 0.9))
+        off = k * 1.8
+        pts = [(x0 + 3, y0 + 3), (x1 + 6, y0 + 3), (x1 + 6, y1 + 3),
+               (x0 + 3, y1 + 3)]
+        pts = [((x - cx) * math.cos(ang) - (y - cy) * math.sin(ang) + cx + off,
+                (x - cx) * math.sin(ang) + (y - cy) * math.cos(ang) + cy + off)
+               for x, y in pts]
+        g = int(222 - k * 7)
+        d.polygon(pts, fill=(g, g - 3, g - 12))
+        d.line([pts[3], pts[2]], fill=(g - 70, g - 72, g - 76), width=1)
+        d.line([pts[1], pts[2]], fill=(g - 46, g - 48, g - 54), width=1)
     return img
 
 
 def string(img):
-    """Coarse string tied round the bundle and over the top copy's margins,
-    crossed and knotted at its lower right corner, the ends trailing onto
-    the table."""
-    c = Canvas(640, 400, light=(-0.4, -0.9))
-    twine, shade = (196, 170, 120), (120, 96, 62)
+    """Hairy twine (scene3d.py): two strands twisted together, tied round
+    the bundle both ways and knotted at the lower right corner, a bow's
+    loops and the frayed ends trailing onto the table."""
+    sc = Scene(640, 400, ambient=(0.25, 0.22, 0.18))
+    sc.point((560, 30, -260), (1.6, 1.25, 0.85), 420)
+    sc.direction((-0.4, -0.8, -0.5), (0.5, 0.45, 0.4))
     x0, y0, x1, y1 = TOP
-    cx, cy = x1 - 12, y1 - 7                         # the crossing
-    for (a, b) in (((cx, y0 - 4), (cx, y1 + 16)),    # round the bundle, upright
-                   ((x0 - 4, cy), (x1 + 24, cy))):   # and across
-        c.line((a[0] + 1, a[1] + 1.5), (b[0] + 1, b[1] + 1.5), shade, 3.6)
-        c.line(a, b, twine, 3.0)
-    c.part([(cx - 6, cy - 5), (cx + 6, cy + 5)], (170, 142, 96),
-           shape="ellipse", gloss=0.3, round_=1.0)  # the knot
-    c.line((cx + 4, cy + 3), (cx + 26, cy + 14), twine, 2.6)   # loose ends
-    c.line((cx + 2, cy + 4), (cx + 12, cy + 24), twine, 2.6)
-    layer = c.image()
-    key = np.all(np.asarray(layer) == (255, 0, 255), axis=2)
-    out = np.asarray(img).copy()
-    lay = np.asarray(layer)
-    out[~key] = lay[~key]
-    return Image.fromarray(out)
+    cx, cy = x1 - 14, y1 - 8                         # the crossing
+
+    def cord(pts, r=1.7, step=0.7):
+        pts = np.array(pts, np.float32)
+        for (ax, ay), (bx, by) in zip(pts[:-1], pts[1:]):
+            n = max(2, int(math.hypot(bx - ax, by - ay) / step))
+            for t in np.linspace(0, 1, n, endpoint=False):
+                x, y = ax + (bx - ax) * t, ay + (by - ay) * t
+                ph = (x + y) * 0.9
+                for strand in (0, math.pi):
+                    o = 0.55 * r * math.sin(ph + strand)
+                    tone = 1.0 + 0.12 * math.cos(ph * 3 + strand)
+                    sc.ellipsoid((x + o * 0.7, y - o * 0.7, 40 - 0.3 *
+                                  math.cos(ph + strand)), (r * 0.62,) * 3,
+                                 tuple(v * tone for v in (190, 160, 108)),
+                                 spec=0.15)
+    cord([(cx, y0 - 6), (cx, y1 + 18)])
+    cord([(x0 - 6, cy), (x1 + 26, cy)])
+    for loop in ((cx, cy, -1), (cx, cy, 1)):         # the bow's loops
+        ang = np.linspace(0, 2 * math.pi, 22)
+        lx, ly, s_ = loop
+        cord([(lx + s_ * (7 + 7 * math.cos(a_)) , ly - 3 + 4 * math.sin(a_))
+              for a_ in ang], r=1.5)
+    sc.ellipsoid((cx, cy, 36), (4.5, 4.0, 3.5), (176, 146, 98), spec=0.2)
+    cord([(cx + 2, cy + 3), (cx + 14, cy + 12), (cx + 24, cy + 22)], r=1.4)
+    cord([(cx - 1, cy + 4), (cx + 4, cy + 16), (cx + 2, cy + 30)], r=1.4)
+    drawn = np.isfinite(sc.z)
+    layer = np.asarray(sc.finish())
+    hit = np.asarray(Image.fromarray(drawn.astype(np.uint8) * 255).resize(
+        (640, 400), Image.BOX)) > 110
+    shadow = np.zeros_like(hit)
+    shadow[2:, 2:] = hit[:-2, :-2]
+    out = np.asarray(img).astype(np.float32)
+    out[shadow & ~hit] *= 0.6
+    out[hit] = layer[hit]
+    return Image.fromarray(out.astype(np.uint8))
 
 
 def top_copy(img):

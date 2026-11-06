@@ -366,3 +366,65 @@ def shade_height(height, albedo, scale, sun=(-0.55, -0.7, 0.62),
         refl = sky * (0.55 + 0.45 * (1 - n[..., 2]))[..., None] * 0.9
         out = np.where(wet[..., None], refl * 0.8 + albedo * 0.2, out)
     return out
+
+
+def axis_frame(axis):
+    """A rotation whose local z runs along 'axis' (for ellipsoid / cone)."""
+    a = np.array(axis, np.float32)
+    a /= np.linalg.norm(a)
+    x = np.array([1, 0, 0], np.float32)
+    if abs(a[0]) > 0.9:
+        x = np.array([0, 1, 0], np.float32)
+    y = np.cross(a, x)
+    y /= np.linalg.norm(y)
+    x = np.cross(y, a)
+    return np.stack([x, y, a], 1)
+
+
+def cone(sc, centre, axis, half_len, r_near, r_far, albedo, spec=0.0,
+         shine=16, rim=0.0, texture=None):
+    """A lit truncated cone (a tapering cylinder) about 'axis', from
+    -half_len (radius r_near) to +half_len (r_far), all at 1x.
+    'texture(z, ang)' gets the position along the axis (-1..1) and the
+    angle round it, and returns an albedo multiplier."""
+    R = axis_frame(axis)
+    c = np.array(centre, np.float32) * SS
+    L = half_len * SS
+    r0, r1 = r_near * SS, r_far * SS
+    k = (r1 - r0) / (2 * L)
+    a0 = r0 + k * L
+    ext = (L + max(r0, r1)) * 1.05
+    x0, x1 = int(max(0, c[0] - ext)), int(min(sc.w, c[0] + ext + 1))
+    y0, y1 = int(max(0, c[1] - ext)), int(min(sc.h, c[1] + ext + 1))
+    if x0 >= x1 or y0 >= y1:
+        return
+    yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+    o = np.stack([xx - c[0], yy - c[1], -c[2] + 0 * xx], -1) @ R
+    d = np.array([0, 0, 1], np.float32) @ R
+    rho = lambda z: a0 + k * z                              # noqa: E731
+    A = d[0] ** 2 + d[1] ** 2 - (k * d[2]) ** 2
+    B = 2 * (o[..., 0] * d[0] + o[..., 1] * d[1] - k * d[2] * rho(o[..., 2]))
+    C = o[..., 0] ** 2 + o[..., 1] ** 2 - rho(o[..., 2]) ** 2
+    disc = B * B - 4 * A * C
+    ok = disc >= 0
+    sq = np.sqrt(np.maximum(disc, 0))
+    best = np.full(xx.shape, np.inf, np.float32)
+    for t in ((-B - sq) / (2 * A), (-B + sq) / (2 * A)):
+        z = o[..., 2] + t * d[2]
+        good = ok & (np.abs(z) <= L) & (rho(z) > 0) & (t < best)
+        best = np.where(good, t, best)
+    hit = np.isfinite(best) & (best < sc.z[y0:y1, x0:x1])
+    if not hit.any():
+        return
+    t = np.where(hit, best, 0)
+    q = o + t[..., None] * d
+    nl = np.stack([q[..., 0], q[..., 1], -k * rho(q[..., 2])], -1)
+    n = normalize(nl @ R.T)
+    pos = np.stack([xx, yy, t], -1)
+    alb = np.broadcast_to(np.array(albedo, np.float32) / 255.0,
+                          n.shape).copy()
+    if texture is not None:
+        alb *= texture(q[..., 2] / L, np.arctan2(q[..., 1], q[..., 0]))[..., None]
+    sc.rgb[y0:y1, x0:x1][hit] = sc.light(pos[hit], n[hit], alb[hit], spec,
+                                         shine, rim)
+    sc.z[y0:y1, x0:x1][hit] = t[hit]

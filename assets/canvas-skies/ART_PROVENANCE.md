@@ -74,3 +74,8 @@ wire set into it by `ports/amigaos3/make_side_trenches.py`.
 
 `loss-card.bmp` (the empty chair) is rendered by
 `ports/amigaos3/make_loss_card.py`.
+
+`machine-cards.bmp` (the papers of the new-machines cards) is painted by
+`ports/amigaos3/make_cards.py`; `office-paper.bmp` and `office-stamp.bmp`
+(the adjutant's desk, the foolscap and the rubber stamp) by
+`ports/amigaos3/make_office_paper.py`.
