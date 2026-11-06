@@ -68,8 +68,15 @@ period footage; its sources and licences are listed in
 seat) is painted by `ports/amigaos3/make_cockpit_cellule.py`.
 
 `medals.bmp` (the five decorations and the office crest) is painted by
-`ports/amigaos3/make_medals.py`, and `mess.bmp` (the squadron mess) is
-rendered by `ports/amigaos3/make_mess.py` on the same renderer.
+`ports/amigaos3/make_medals.py`.
+
+The squadron mess is rendered by `ports/amigaos3/make_mess.py` on the
+same renderer as the picture house, in three evenings: `mess.bmp` (an
+ordinary good evening), `mess-rowdy.bmp` (the night of a victory) and
+`mess-wake.bmp` (the night of a loss).  The officers, the dog, the flying
+helmet, the map and everything else in the room are built from the
+renderer's own lit solids and surfaces (figures from `figures3d.py`); no
+outside textures, photographs or figures are used.
 
 `explosion-atlas.bmp` and `topdown-explosion-atlas.bmp` are re-cut from
 their painted `-source.png` files by `ports/amigaos3/make_explosion_atlases.py`.
