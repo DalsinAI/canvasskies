@@ -56,11 +56,55 @@ def cross(c, x, y, r, upright=True):
            BLACK, round_=0.1, rim=0.1)
 
 
+def aerofoil(c, R, le, chord, y, thick, colour, under=None, **kw):
+    """A wing seen end-on along its span: a rounded leading edge, the
+    camber rising over the front third, a fine trailing edge."""
+    top, bottom = [], []
+    for k in range(9):
+        t = k / 8
+        x = le - chord * t
+        hump = thick * (1.0 - t) ** 0.5 * (0.7 + 1.2 * t * (1 - t))
+        top.append((x, y - hump * 0.75))
+        bottom.append((x, y + hump * 0.35))
+    if under:
+        # Seen from a little below: the doped underside shows as a pale band.
+        belly = [(x, yb + thick * 0.55 * (1 - k / 9)) for k, (x, yb) in
+                 enumerate(bottom)]
+        c.part(R(bottom + belly[::-1]), under, gloss=0.2, grain=3, round_=0.3)
+    c.part(R(top + bottom[::-1]), colour, gloss=0.45, round_=0.4, **kw)
+    lit = tuple(min(255, v + 36) for v in colour)
+    c.line(R([top[1]])[0], R([top[-2]])[0], lit, 0.5)    # sun on the top
+
+
+def fuselage(c, R, top, bottom, colour):
+    c.part(R(top + bottom[::-1]), colour, gloss=0.22, grain=4, round_=1.0)
+
+
+def strut(c, R, p0, p1, colour=WOOD, w=2.2):
+    c.part([R([p0])[0], R([p1])[0], w], colour, shape="capsule", gloss=0.35,
+           round_=0.3)
+
+
+def rudder(c, R, pts, colours=None, colour=None):
+    if colours:                                    # the British stripes
+        xs = [x for x, _ in pts]
+        x0, x1 = min(xs), max(xs)
+        c.part(R(pts), colours[2], gloss=0.15, round_=0.8)
+        for k, col in enumerate(colours[:2]):
+            xa = x0 + (x1 - x0) * k / 3
+            xb = x0 + (x1 - x0) * (k + 1) / 3
+            clipped = [(min(max(x, xa), xb), y) for x, y in pts]
+            c.part(R(clipped), col, gloss=0.15, round_=0.3)
+    else:
+        c.part(R(pts), colour, gloss=0.15, round_=0.8)
+
+
 def side_frame(kind, frame):
-    """One side-on frame, facing right, nose up by the frame's pitch."""
-    # Painted on a slightly larger canvas and filtered down to 96x48, with
-    # the body drawn a little shorter and deeper than its sketch so the
-    # machine has the chunky profile of the existing Sopwith and Albatros.
+    """One side-on frame, facing right, nose up by the frame's pitch.
+
+    Proportions follow the real machines: seen from the side a wing shows
+    only its chord, a fifth or so of the fuselage, with the upper plane
+    staggered forward of the lower."""
     c = Canvas(110, 55, light=(0.2, -1.0))
     pitch = (2 - frame) * STEP
     o = (55, 27.5)
@@ -69,165 +113,177 @@ def side_frame(kind, frame):
         return rot([(55 + (x - 48) * 0.92, 27.5 + (y - 19) * 1.2)
                     for x, y in pts], -pitch, o)
 
-    if kind == "twoseat":
-        body, wing = CLEAR_DOPE, CLEAR_DOPE
-        c.part(R([(8, 19), (24, 16.5), (60, 13.5), (80, 14.5), (86, 19),
-                  (86, 27), (60, 29.5), (24, 24.5), (8, 21.5)]), body,
-               gloss=0.2, round_=1.2)
-        c.part(R([(78, 16), (90, 18), (90, 27), (78, 27)]), METAL, gloss=0.4,
-               round_=0.8)                         # engine cowling
-        for x in (50, 64):                         # two cockpits
-            c.part(R([(x - 4, 14), (x + 4, 14), (x + 3, 16), (x - 3, 16)]), DARK,
-                   round_=0.5)
-        c.part(R([(30, 1.5), (88, 0.5), (88, 4.5), (30, 5.5)]), wing,
-               gloss=0.25, round_=0.8)             # upper wing, seen edge on
-        c.part(R([(30, 28.5), (84, 28.5), (84, 32), (30, 32)]), wing,
-               gloss=0.25, round_=0.8)             # lower wing
-        # Two bays each side, as on the B.E.2: the near struts stand in two
-        # front-and-rear pairs, the far pair a shade behind them; short
-        # cabane struts carry the centre section over the front cockpit.
-        for x in (40, 50, 66, 76):
-            c.line(R([(x + 1.5, 4.5)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.9)
-        for x in (38, 48, 64, 74):
-            c.line(R([(x, 4.5)])[0], R([(x - 2, 28.5)])[0], WOOD, 2.6)
-        for x in (70, 78):
-            c.line(R([(x, 4.5)])[0], R([(x - 2, 15)])[0], WOOD, 2.0)
-        c.part(R([(8, 9), (16, 9), (20, 17), (8, 18)]), wing, round_=0.8)  # fin
-        for k, col in enumerate((BLUE, WHITE, RED)):          # rudder stripes
-            c.part(R([(2 + k * 2.4, 10), (4.4 + k * 2.4, 10), (4.4 + k * 2.4, 22),
-                      (2 + k * 2.4, 22)]), col, round_=0.2, rim=0.1)
-        roundel(c, *R([(38, 21.5)])[0], 5.0)
-        wheel_x = (74, 64)
-    elif kind == "late":
-        body, wing = PC10, PC10
-        c.part(R([(8, 19.5), (26, 16.5), (66, 12.5), (86, 13.5), (88, 20),
-                  (86, 28.5), (60, 30), (26, 24.5), (8, 21.5)]), body,
-               gloss=0.22, round_=1.4)
-        c.part(R([(82, 13), (90, 14), (90, 28), (82, 28)]), METAL, gloss=0.45,
-               round_=0.6)                         # the flat radiator nose
-        c.part(R([(56, 12.5), (62, 12.5), (61, 15), (57, 15)]), DARK,
-               round_=0.4)
-        c.part(R([(60, -1), (72, -1), (72, 0.5), (60, 0.5)]), DARK,
-               round_=0.2)                         # the wing gun
-        c.part(R([(36, 0.5), (84, 0), (84, 4), (36, 4.5)]), wing, gloss=0.25,
+    stripes = (BLUE, WHITE, RED)
+    if kind == "twoseat":                          # a B.E.2 type
+        body = CLEAR_DOPE
+        rudder(c, R, [(2, 8), (8, 7), (10, 12), (10, 22), (3, 22), (1, 15)],
+               stripes)
+        c.part(R([(8, 10), (12, 9.5), (18, 17), (8, 17)]), body, gloss=0.2,
+               round_=0.8)                         # fin
+        aerofoil(c, R, 20, 9, 19.5, 1.6, body)     # tailplane
+        fuselage(c, R, [(8, 18), (30, 16), (56, 14), (76, 14), (86, 16)],
+                 [(8, 22.5), (30, 26.5), (56, 30), (76, 30), (86, 26)], body)
+        c.part(R([(82, 15), (90, 16.5), (90, 24), (82, 25)]), METAL,
+               gloss=0.45, round_=1.0)             # engine and its cowl
+        c.part(R([(84, 10), (86, 10), (86.5, 15), (84, 15)]), DARK,
+               round_=0.3)                         # exhaust stack
+        for x in (50, 64):
+            c.part(R([(x - 4, 13.6), (x + 4, 13.6), (x + 3, 15.6),
+                      (x - 3, 15.6)]), DARK, round_=0.5)
+        upper, lower = (78, 26, 2.5), (76, 26, 31.0)
+        struts = ((74, 3.4, 72, 30.4), (57, 3.4, 55, 30.4))
+        cabanes = ((78, 3.4, 80, 14.2), (68, 3.4, 68, 14.0))
+        roundel(c, *R([(36, 20.5)])[0], 4.6)
+        wheel_x = (74, 66)
+    elif kind == "late":                           # an S.E.5 type
+        body = PC10
+        rudder(c, R, [(3, 8), (9, 7.5), (11, 12), (11, 22), (4, 22), (2, 15)],
+               stripes)
+        c.part(R([(9, 9), (14, 9), (20, 16.5), (9, 16.5)]), body, gloss=0.2,
                round_=0.8)
-        c.part(R([(40, 28.5), (82, 28.5), (82, 32), (40, 32)]), wing,
-               gloss=0.25, round_=0.8)
-        # One bay, a front and rear strut each side, and the cabanes.
-        for x in (54, 76):
-            c.line(R([(x + 1.5, 4)])[0], R([(x - 1, 28.5)])[0], (60, 44, 30), 1.9)
-        for x in (52, 74):
-            c.line(R([(x, 4)])[0], R([(x - 2.5, 28.5)])[0], WOOD, 2.7)
-        for x in (72, 80):
-            c.line(R([(x, 4)])[0], R([(x - 2, 13.5)])[0], WOOD, 2.0)
-        c.part(R([(6, 8), (16, 8), (22, 17), (6, 19)]), body, round_=1.0)
-        for k, col in enumerate((BLUE, WHITE, RED)):
-            c.part(R([(2 + k * 2.4, 9), (4.4 + k * 2.4, 9), (4.4 + k * 2.4, 22),
-                      (2 + k * 2.4, 22)]), col, round_=0.2, rim=0.1)
-        roundel(c, *R([(40, 21.5)])[0], 5.2)
-        wheel_x = (78, 70)
-    elif kind == "mono":
-        body, wing = STREAKED, STREAKED
-        c.part(R([(8, 19.5), (26, 17), (66, 13.5), (82, 14.5), (86, 20),
-                  (84, 27.5), (62, 29), (26, 24.5), (8, 21.5)]), body,
-               gloss=0.2, round_=1.4)
-        c.part(R([(80, 14), (90, 17), (90, 26), (80, 28)]), METAL, gloss=0.5,
-               round_=2.0)                         # the round rotary cowl
-        c.part(R([(58, 12.5), (64, 12.5), (63, 15), (59, 15)]), DARK,
+        aerofoil(c, R, 22, 10, 19.0, 1.6, body)
+        fuselage(c, R, [(9, 17.5), (30, 15.5), (58, 12.5), (80, 12.5), (88, 14)],
+                 [(9, 22.5), (30, 27), (58, 30.5), (80, 30.5), (88, 28.5)], body)
+        c.part(R([(84, 13), (90, 13.5), (90, 27.5), (84, 28)]), METAL,
+               gloss=0.45, round_=0.6)             # the flat radiator nose
+        for k in range(4):
+            c.line(R([(89.4, 15 + k * 3.5)])[0], R([(85, 15 + k * 3.5)])[0],
+                   (70, 68, 64), 0.4)              # shutters
+        c.part(R([(56, 12.3), (62, 12.3), (61, 14.6), (57, 14.6)]), DARK,
                round_=0.4)
-        c.part(R([(50, 14), (80, 14), (80, 16.5), (50, 16.5)]), wing,
-               gloss=0.25, round_=0.6)             # the shoulder wing
-        c.line(R([(62, 13)])[0], R([(62, 4)])[0], DARK, 2.4)   # the pylon
-        c.line(R([(62, 4)])[0], R([(44, 14)])[0], (60, 56, 50), 0.6)
-        c.line(R([(62, 4)])[0], R([(82, 14)])[0], (60, 56, 50), 0.6)
-        c.line(R([(68, 36)])[0], R([(50, 16.5)])[0], (60, 56, 50), 0.6)  # landing
-        c.line(R([(68, 36)])[0], R([(80, 16.5)])[0], (60, 56, 50), 0.6)
-        c.line(R([(62, 5)])[0], R([(52, 14)])[0], (60, 56, 50), 0.5)
-        c.line(R([(62, 5)])[0], R([(76, 14)])[0], (60, 56, 50), 0.5)
-        c.part(R([(6, 10), (14, 9), (20, 18), (6, 20)]), WHITE, round_=1.2)
-        cross(c, *R([(12, 14.5)])[0], 4.2)
-        cross(c, *R([(38, 21.5)])[0], 4.6)
+        c.part(R([(58, -0.6), (73, -0.6), (73, 0.8), (58, 0.8)]), DARK,
+               round_=0.2)                         # Lewis on the top plane
+        c.part(R([(62, -2.4), (66, -2.4), (66, -0.6), (62, -0.6)]), DARK,
+               round_=0.3)                         # its drum
+        upper, lower = (76, 24, 2.2), (72, 22, 31.0)
+        struts = ((72, 3.0, 69, 30.4), (56, 3.0, 53, 30.4))
+        cabanes = ((76, 3.0, 79, 12.8), (66, 3.0, 67, 12.6))
+        roundel(c, *R([(38, 21)])[0], 4.8)
+        wheel_x = (78, 72)
+    elif kind == "mono":                           # a Fokker E type
+        body = STREAKED
+        rudder(c, R, [(2, 14), (4, 8.5), (9, 8), (12, 12), (11, 21), (5, 22),
+                      (2, 19)], colour=WHITE)      # the comma rudder
+        cross(c, *R([(7, 15)])[0], 3.6)
+        aerofoil(c, R, 22, 9, 19.0, 1.4, body)
+        fuselage(c, R, [(10, 18), (30, 16.5), (58, 14), (78, 14.5), (84, 16)],
+                 [(10, 22), (30, 26), (58, 29.5), (78, 29.5), (84, 26.5)], body)
+        c.part(R([(80, 14.5), (90, 16.5), (90, 25.5), (80, 27)]), METAL,
+               gloss=0.55, round_=2.2)             # the rotary's cowl
+        c.part(R([(57, 13), (63, 13), (62, 15.2), (58, 15.2)]), DARK,
+               round_=0.4)
+        aerofoil(c, R, 80, 24, 14.6, 3.0, body,
+                 (150, 176, 196))                  # the shoulder wing
+        strut(c, R, (62, 4), (62, 13.5), DARK, 1.6)          # the pylon
+        for a_, b_ in (((62, 4), (46, 14.5)), ((62, 4), (78, 14.5)),
+                       ((68, 36), (52, 15.5)), ((68, 36), (78, 15.5))):
+            c.line(R([a_])[0], R([b_])[0], (60, 56, 50), 0.55)
+        cross(c, *R([(36, 20)])[0], 4.2)
+        upper = lower = None
+        struts = cabanes = ()
         wheel_x = (74, 68)
-    else:                                          # "late" enemy biplane
-        body = LOZENGE[0]
-        c.part(R([(8, 19.5), (26, 16.5), (66, 12.5), (84, 13.5), (88, 20),
-                  (86, 28.5), (60, 30), (26, 24.5), (8, 21.5)]),
-               (150, 140, 108), gloss=0.2, round_=1.2)
-        c.part(R([(78, 13), (90, 14), (90, 28), (78, 28)]), METAL, gloss=0.45,
-               round_=0.6)
-        c.part(R([(56, 12), (62, 12), (61, 15), (57, 15)]), DARK, round_=0.4)
-        c.part(R([(34, 1), (82, 1), (82, 4), (34, 4)]), body, gloss=0.2,
-               round_=0.8)                         # thick square upper wing
-        c.part(R([(42, 28.5), (78, 28.5), (78, 31.5), (42, 31.5)]),
-               LOZENGE[1], gloss=0.2, round_=0.8)
-        for x in (74, 80):                         # cabanes
-            c.line(R([(x, 4)])[0], R([(x - 2, 13.5)])[0], DARK, 2.0)
-        for x in (52, 72):                         # N-struts
-            c.line(R([(x, 4)])[0], R([(x - 3, 28.5)])[0], DARK, 2.6)
-        c.line(R([(52, 4)])[0], R([(69, 28.5)])[0], DARK, 2.0)
-        c.part(R([(6, 9), (16, 9), (22, 18), (6, 20)]), WHITE, round_=1.2)
-        cross(c, *R([(12, 14.5)])[0], 4.2)
-        cross(c, *R([(40, 21.5)])[0], 4.6)
-        wheel_x = (74, 68)
-    # Detail common to every type: panel lines down the fuselage, a lit
-    # longeron, the pilot's leather helmet and goggles in the cockpit,
-    # louvres and an exhaust on the cowling, rigging wires between the wings.
+    else:                                          # a Fokker D.VII type
+        body = (150, 140, 108)
+        c.part(R([(2, 9), (7, 7), (12, 7.5), (13, 21.5), (4, 22), (2, 16)]),
+               WHITE, gloss=0.15, round_=0.6)      # fin and rudder
+        cross(c, *R([(8, 14.5)])[0], 3.8)
+        aerofoil(c, R, 24, 10, 19.0, 1.8, LOZENGE[1])
+        fuselage(c, R, [(10, 17.5), (30, 15.5), (58, 12.5), (80, 13), (88, 14)],
+                 [(10, 22.5), (30, 27), (58, 30.5), (80, 30.5), (88, 28)], body)
+        c.part(R([(82, 13), (90, 14), (90, 27), (82, 28)]), METAL, gloss=0.45,
+               round_=0.8)                         # the car-type radiator
+        for k in range(5):
+            c.line(R([(89.5, 15 + k * 2.6)])[0], R([(85, 15 + k * 2.6)])[0],
+                   (70, 68, 64), 0.35)
+        c.part(R([(56, 12.2), (62, 12.2), (61, 14.6), (57, 14.6)]), DARK,
+               round_=0.4)
+        upper, lower = (78, 26, 1.8), (74, 22, 31.0)
+        struts = ((74, 2.6, 69, 30.3), (58, 2.6, 56, 30.3))
+        cabanes = ((78, 2.6, 80, 13.2), (68, 2.6, 69, 12.8))
+        cross(c, *R([(40, 21)])[0], 4.4)
+        wheel_x = (76, 70)
+    # The planes: the lower first, then struts, then the upper over them.
+    # The gap closes up a little from the true one, and the lower plane
+    # hangs just under the belly, as on the painted Sopwith, so both read
+    # as wings at sprite size.
+    gap = 2.5
+    if upper:
+        upper = (upper[0], upper[1], upper[2] + gap)
+        lower = (lower[0], lower[1], lower[2] + 1.6)
+        struts = tuple((a, b + gap, c_, d + 1.6) for a, b, c_, d in struts)
+        cabanes = tuple((a, b + gap, c_, d) for a, b, c_, d in cabanes)
+    thick = 5.0 if kind == "enemy_late" else 4.0
+    wing_colour = LOZENGE[0] if kind == "enemy_late" else body
+    under = (150, 176, 196) if kind in ("enemy_late", "mono") else \
+        (214, 204, 170)
+    if lower:
+        aerofoil(c, R, lower[0], lower[1], lower[2], thick * 1.6, under, under)
+    for x0, y0, x1, y1 in cabanes:
+        strut(c, R, (x0, y0), (x1, y1), DARK if kind == "enemy_late" else WOOD,
+              1.3)
+    for x0, y0, x1, y1 in struts:
+        strut(c, R, (x0, y0), (x1, y1), DARK if kind == "enemy_late" else WOOD)
+    if kind == "enemy_late":                       # the N: a diagonal
+        strut(c, R, (struts[1][0], struts[1][1]), (struts[0][2], struts[0][3]),
+              DARK, 1.3)
+    if upper:
+        aerofoil(c, R, upper[0], upper[1], upper[2], thick, wing_colour, under)
+        # Flying and landing wires across the bay.
+        if kind != "enemy_late":
+            c.line(R([(struts[1][2], struts[1][3])])[0], R([(struts[0][0], struts[0][1])])[0],
+                   (96, 90, 80), 0.32)
+            c.line(R([(struts[1][0], struts[1][1])])[0], R([(struts[0][2], struts[0][3])])[0],
+                   (96, 90, 80), 0.32)
     body_dark = tuple(max(0, v - 34) for v in body)
     body_lit = tuple(min(255, v + 30) for v in body)
-    # The belly in shadow, the sun on the top decking.
-    c.part(R([(26, 23.5), (60, 26.5), (84, 25.5), (86, 27.5), (60, 29.6),
-              (26, 24.4)]), tuple(int(v * 0.62) for v in body), gloss=0.0,
-           grain=5, rim=0.2, round_=0.6)
-    c.part(R([(26, 16.8), (60, 13.9), (80, 14.8), (80, 15.8), (60, 15.2),
-              (26, 17.6)]), body_lit, gloss=0.1, grain=4, rim=0.1, round_=0.4)
-    for x in range(22, 80, 9):
-        c.line(R([(x, 16)])[0], R([(x, 26)])[0], body_dark, 0.45)
-    c.line(R([(18, 17.5)])[0], R([(78, 15)])[0], body_lit, 0.6)
-    c.line(R([(18, 24.5)])[0], R([(76, 27)])[0], body_dark, 0.6)
-    cockpit = {"twoseat": 64, "late": 59, "mono": 61, "enemy_late": 59}[kind]
-    hx, hy = R([(cockpit, 12.2)])[0]
-    c.part([(hx - 2.4, hy - 2.6), (hx + 2.4, hy + 1.8)], (84, 56, 34),
+    # The longerons: sun along the top decking, the belly in shade.
+    c.line(R([(18, 17.4)])[0], R([(78, 14.6)])[0], body_lit, 0.6)
+    c.line(R([(18, 21.6)])[0], R([(76, 26.4)])[0], body_dark, 0.6)
+    for x in range(24, 76, 10):
+        c.line(R([(x, 17)])[0], R([(x, 24)])[0], body_dark, 0.35)
+    cockpit = {"twoseat": 64, "late": 59, "mono": 60, "enemy_late": 59}[kind]
+    hx, hy = R([(cockpit, 12.0)])[0]
+    c.part([(hx - 2.3, hy - 2.5), (hx + 2.3, hy + 1.8)], (84, 56, 34),
            shape="ellipse", gloss=0.3, grain=3, rim=0.25, round_=0.2)
-    gx, gy = R([(cockpit + 1.6, 11.6)])[0]
+    gx, gy = R([(cockpit + 1.6, 11.4)])[0]
     c.part([(gx - 0.9, gy - 0.7), (gx + 0.9, gy + 0.7)], (190, 200, 210),
            shape="ellipse", gloss=0.6, round_=0.1)
     if kind == "twoseat":                          # the observer behind him
         ox, oy = R([(50, 12.2)])[0]
         c.part([(ox - 2.2, oy - 2.4), (ox + 2.2, oy + 1.8)], (74, 52, 34),
                shape="ellipse", gloss=0.3, round_=0.2)
-    for k in range(3):                             # cowling louvres
-        x = 80 + k * 2.4
-        c.line(R([(x, 17)])[0], R([(x, 25)])[0], (70, 68, 64), 0.4)
-    c.line(R([(76, 26.5)])[0], R([(68, 28.5)])[0], (54, 46, 40), 1.0)  # exhaust
-    if kind != "mono":
-        # Flying wires from the lower wing root up to the outer strut top,
-        # landing wires from the centre section down to the strut foot.
-        c.line(R([(60, 29.5)])[0], R([(44, 3.5)])[0], (54, 50, 46), 0.6)
-        c.line(R([(70, 4)])[0], R([(46, 29.0)])[0], (54, 50, 46), 0.6)
-    # Weathering: oil streaks back from the cowling, scuffs on the fabric.
-    for k in range(4):
-        y = 18 + k * 2.0
-        c.line(R([(74, y)])[0], R([(56 - k * 3, y + 0.6)])[0],
-               tuple(max(0, v - 50) for v in body), 0.35)
-    if kind != "mono":
-        for x in range(36, 84, 5):                 # rib tapes on the wings
-            c.line(R([(x, 1.4)])[0], R([(x, 3.6)])[0], (220, 210, 180), 0.35)
-            c.line(R([(x, 28.8)])[0], R([(x, 31.2)])[0], (220, 210, 180), 0.35)
-    # Undercarriage and wheels.
+    c.line(R([(78, 25.6)])[0], R([(68, 27.4)])[0], (54, 46, 40), 0.9)  # exhaust
+    if kind != "twoseat":
+        # The fixed gun on the decking, its muzzle where the tracers start.
+        mx, my = MUZZLE[kind]
+        c.part(R([(mx - 18, my - 1.1), (mx, my - 0.9), (mx, my + 0.9),
+                  (mx - 18, my + 1.3)]), (52, 54, 58), gloss=0.5, round_=0.3)
+        c.part(R([(mx - 18, my - 1.8), (mx - 9, my - 1.6), (mx - 9, my + 1.6),
+                  (mx - 18, my + 1.8)]), (36, 38, 42), gloss=0.4,
+               round_=0.3)                         # its breech
+
+    for k in range(3):                             # oil streaks
+        y = 18 + k * 2.2
+        c.line(R([(76, y)])[0], R([(58 - k * 4, y + 0.6)])[0],
+               tuple(max(0, v - 46) for v in body), 0.35)
+    # Undercarriage: a V of struts to the axle, the wheel with its hub.
     a, b = wheel_x
-    c.line(R([(a, 27)])[0], R([(b, 38)])[0], DARK, 0.9)
-    c.line(R([(a - 8, 27)])[0], R([(b, 38)])[0], DARK, 0.9)
-    wx, wy = R([(b, 38)])[0]
-    c.part([(wx - 5.5, wy - 5.5), (wx + 5.5, wy + 5.5)], (40, 38, 36), shape="ellipse",
-           gloss=0.15, round_=0.3)
-    c.part([(wx - 1.6, wy - 1.6), (wx + 1.6, wy + 1.6)], METAL,
-           shape="ellipse", round_=0.2)
-    # The tailskid and the spinning propeller, a blur of brown.
-    sx, sy = R([(10, 22)])[0]
-    c.line((sx, sy), (sx - 3, sy + 4), DARK, 0.8)
-    px, py = R([(92, 21)])[0]
-    c.part([(px - 1.4, py - 12), (px + 1.4, py + 12)], (140, 110, 70),
+    strut(c, R, (a, 28.5), (b, 36.5), DARK, 1.4)
+    strut(c, R, (a - 9, 28.5), (b, 36.5), DARK, 1.4)
+    wx, wy = R([(b, 37)])[0]
+    c.part([(wx - 5.2, wy - 5.2), (wx + 5.2, wy + 5.2)], (40, 38, 36),
+           shape="ellipse", gloss=0.2, round_=0.3)
+    c.part([(wx - 3.4, wy - 3.4), (wx + 3.4, wy + 3.4)], (150, 140, 116),
+           shape="ellipse", gloss=0.3, round_=0.2)     # the doped wheel cover
+    c.part([(wx - 1.2, wy - 1.2), (wx + 1.2, wy + 1.2)], METAL,
+           shape="ellipse", round_=0.1)
+    sx, sy = R([(10, 21.5)])[0]
+    c.line((sx, sy), (sx - 3, sy + 4), DARK, 0.8)  # the tailskid
+    px, py = R([(92, 20.5)])[0]
+    c.part([(px - 1.3, py - 12), (px + 1.3, py + 12)], (140, 110, 70),
            shape="ellipse", gloss=0.0, grain=4, rim=0.0, round_=0.2)
+    c.part([(px - 1.4, py - 1.8), (px + 1.6, py + 1.8)], METAL,
+           shape="ellipse", gloss=0.5, round_=0.2)     # the boss
     return c.image((96, 48))
 
 
@@ -262,44 +318,69 @@ def side_atlas(kind, enemy):
 
 
 def top_view(kind):
-    """From directly above, nose to the top."""
+    """From directly above, nose to the top: the upper plane over the
+    lower, which shows behind it by the stagger; a fuselage swelling at
+    the cockpits and tapering to the tail."""
     c = Canvas(78, 79, light=(-0.6, -0.8))
     if kind == "twoseat":
-        wing, body, span, chord = CLEAR_DOPE, CLEAR_DOPE, 37, 12
+        wing, body, span, chord, lower_span = CLEAR_DOPE, CLEAR_DOPE, 37, 12, 33
     else:
-        wing, body, span, chord = PC10, PC10, 34, 11
-    cx = 39
-    c.part([(cx - span, 20), (cx + span, 20), (cx + span, 20 + chord),
-            (cx - span, 20 + chord)], wing, gloss=0.2, round_=2.0)
+        wing, body, span, chord, lower_span = PC10, PC10, 34, 11, 30
+    shade = tuple(int(v * 0.72) for v in wing)
+    cx, le = 39, 19
+
+    def plane(y, half, colour, **kw):
+        # Raked tips: the leading edge runs out further than the trailing.
+        c.part([(cx - half + 3, y), (cx + half - 3, y), (cx + half, y + 2.5),
+                (cx + half - 1.5, y + chord), (cx - half + 1.5, y + chord),
+                (cx - half, y + 2.5)], colour, **kw)
+
+    plane(le + 4, lower_span, shade, gloss=0.15, grain=4, round_=1.2)
+    # The tailplane and elevators, with the fin a thin line along the middle.
+    c.part([(cx - 13, 62), (cx + 13, 62), (cx + 14, 65), (cx + 12, 70),
+            (cx - 12, 70), (cx - 14, 65)], wing, gloss=0.25, grain=3,
+           round_=1.5)
+    c.line((cx - 12, 66.5), (cx + 12, 66.5), shade, 0.5)
+    # The fuselage: widest at the cockpits, tapering away to the sternpost.
+    c.part([(cx - 4.5, 6), (cx + 4.5, 6), (cx + 5, 24), (cx + 4.4, 42),
+            (cx + 1.6, 72), (cx - 1.6, 72), (cx - 4.4, 42), (cx - 5, 24)],
+           body, gloss=0.35, grain=4, round_=1.6)
+    c.line((cx + 2.8, 26), (cx + 1, 70), tuple(int(v * 0.8) for v in body), 0.5)
+    c.line((cx, 60), (cx, 73), DARK, 0.7)          # the fin from above
+    plane(le, span, wing, gloss=0.3, grain=4, round_=1.2)
     for k in range(1, 12):                         # rib tapes
         x = cx - span + k * span * 2 / 12
-        c.line((x, 21), (x, 19 + chord), tuple(max(0, v - 18) for v in wing),
-               0.5)
-    c.part([(cx - 4, 8), (cx + 4, 8), (cx + 3, 66), (cx - 3, 66)], body,
-           gloss=0.25, round_=2.0)
-    c.part([(cx - 4.5, 4), (cx + 4.5, 4), (cx + 4.5, 11), (cx - 4.5, 11)],
-           METAL, gloss=0.45, round_=1.5)
-    c.part([(cx - 14, 62), (cx + 14, 62), (cx + 12, 70), (cx - 12, 70)], wing,
-           gloss=0.2, round_=1.5)                  # tailplane
-    c.part([(cx - 3, 26), (cx + 3, 26), (cx + 3, 31), (cx - 3, 31)], DARK,
-           round_=1.0)                             # cockpit
-    if kind == "twoseat":
-        c.part([(cx - 3, 36), (cx + 3, 36), (cx + 3, 41), (cx - 3, 41)], DARK,
-               round_=1.0)
-    # Strut stations: the tops of the front and rear interplane struts (and,
-    # on the two-seater, the outer bay too), with the shadow they cast.
+        if abs(x - cx) > 5:
+            c.line((x, le + 1), (x, le + chord - 1),
+                   tuple(min(255, v + 14) for v in wing), 0.35)
+    for side in (-1, 1):                           # ailerons
+        c.line((cx + side * span * 0.55, le + chord * 0.7),
+               (cx + side * (span - 1.5), le + chord * 0.7), shade, 0.5)
+    c.part([(cx - 4, le + 1), (cx + 4, le + 1), (cx + 4, le + chord - 1),
+            (cx - 4, le + chord - 1)], shade, gloss=0.1,
+           round_=0.6)                             # the centre-section cut-out
+    c.part([(cx - 4.6, 2), (cx + 4.6, 2), (cx + 5, 9), (cx - 5, 9)], METAL,
+           gloss=0.55, round_=2.0)                 # the cowl
+    for y in (26, 36) if kind == "twoseat" else (31,):
+        c.part([(cx - 3, y), (cx + 3, y + 5)], DARK, shape="ellipse",
+               round_=0.6)                         # cockpits
+        c.part([(cx - 1.8, y + 0.6), (cx + 1.8, y + 3.6)], (84, 56, 34),
+               shape="ellipse", gloss=0.4, round_=0.3)  # a leather helmet
+    if kind == "late":
+        c.part([(cx - 1, le - 3), (cx + 1, le - 3), (cx + 1, le + 6),
+                (cx - 1, le + 6)], DARK, round_=0.2)    # the Lewis gun
     stations = (0.38, 0.72) if kind == "twoseat" else (0.6,)
     for f in stations:
         for side in (-1, 1):
-            for y in (20 + chord * 0.25, 20 + chord * 0.72):
+            for y in (le + chord * 0.25, le + chord * 0.72):
                 x = cx + side * span * f
                 c.part([(x + 1, y + 1), (x + 3.4, y + 3.4)], (40, 34, 28),
                        shape="ellipse", gloss=0.0, rim=0.0, round_=0.2)
                 c.part([(x - 1.2, y - 1.2), (x + 1.2, y + 1.2)], (84, 56, 36),
                        shape="ellipse", gloss=0.4, round_=0.1)
-    for x in (cx - span * 0.82, cx + span * 0.82):
-        roundel(c, x, 20 + chord / 2, chord * 0.42)
-    c.part([(cx - 16, 1), (cx + 16, 3.5)], (140, 110, 70), shape="ellipse",
+    for x in (cx - span * 0.8, cx + span * 0.8):
+        roundel(c, x, le + chord / 2, chord * 0.4)
+    c.part([(cx - 16, 0.5), (cx + 16, 3)], (140, 110, 70), shape="ellipse",
            gloss=0.0, rim=0.0, round_=0.2)         # propeller disc
     return c.image()
 
