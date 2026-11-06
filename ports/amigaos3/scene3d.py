@@ -65,8 +65,12 @@ def rot_y(a):
 
 
 class Scene:
-    def __init__(self, w, h, ambient=(0.05, 0.045, 0.04)):
-        self.w, self.h = w * SS, h * SS
+    def __init__(self, w, h, ambient=(0.05, 0.045, 0.04), ss=SS):
+        # 'ss' is how many samples a side each final pixel gets: the rooms
+        # are drawn at twice the size, figures that must read as people at
+        # four times.
+        self.ss = ss
+        self.w, self.h = w * ss, h * ss
         self.rgb = np.zeros((self.h, self.w, 3), np.float32)
         self.z = np.full((self.h, self.w), np.inf, np.float32)
         self.ambient = np.array(ambient, np.float32)
@@ -80,8 +84,8 @@ class Scene:
 
     # -- lights ------------------------------------------------------------
     def point(self, pos, colour, reach):
-        self.points.append((np.array(pos, np.float32) * SS,
-                            np.array(colour, np.float32), reach * SS))
+        self.points.append((np.array(pos, np.float32) * self.ss,
+                            np.array(colour, np.float32), reach * self.ss))
 
     def direction(self, d, colour):
         self.dirs.append((normalize(np.array(d, np.float32)),
@@ -126,8 +130,8 @@ class Scene:
         (HxW) from the local position q (in radii units) and normal.
         'clip_y' cuts away whatever lies below that local y (radii units,
         -1..1, y downward), so a helmet can be a dome."""
-        c = np.array(centre, np.float32) * SS
-        r = np.array(radii, np.float32) * SS
+        c = np.array(centre, np.float32) * self.ss
+        r = np.array(radii, np.float32) * self.ss
         R = np.eye(3, dtype=np.float32) if R is None else R
         ext = r.max() * 1.02
         x0, x1 = int(max(0, c[0] - ext)), int(min(self.w, c[0] + ext + 1))
@@ -165,7 +169,7 @@ class Scene:
         """A face over 'mask' (full-size bool array) at depth 'z' (scalar
         or array), albedo (H,W,3 in 0..1 or a colour), lit from its
         normal (or per-pixel 'normals')."""
-        zz = np.broadcast_to(np.asarray(z, np.float32) * SS, mask.shape)
+        zz = np.broadcast_to(np.asarray(z, np.float32) * self.ss, mask.shape)
         m = mask & (zz < self.z)
         if not m.any():
             return
@@ -185,16 +189,16 @@ class Scene:
                  rim=0.0, texture=None):
         """An upright cylinder (a stove, a flue, a bottle's body) from y0
         to y1 at 1x, its front face lit round its curve."""
-        cx, r = x * SS, radius * SS
+        cx, r = x * self.ss, radius * self.ss
         x0, x1 = int(max(0, cx - r)), int(min(self.w, cx + r + 1))
-        ya, yb = int(max(0, y0 * SS)), int(min(self.h, y1 * SS))
+        ya, yb = int(max(0, y0 * self.ss)), int(min(self.h, y1 * self.ss))
         if x0 >= x1 or ya >= yb:
             return
         yy, xx = np.mgrid[ya:yb, x0:x1].astype(np.float32)
         u = (xx - cx) / r
         hit = np.abs(u) <= 1
         nz = -np.sqrt(np.clip(1 - u * u, 0, 1))
-        t = z * SS + nz * r
+        t = z * self.ss + nz * r
         hit &= t < self.z[ya:yb, x0:x1]
         if not hit.any():
             return
@@ -203,15 +207,15 @@ class Scene:
         alb = np.broadcast_to(np.array(albedo, np.float32) / 255.0,
                               n.shape).copy()
         if texture is not None:
-            alb *= texture(u, (yy / SS - y0) / max(1e-6, y1 - y0))[..., None]
+            alb *= texture(u, (yy / self.ss - y0) / max(1e-6, y1 - y0))[..., None]
         self.rgb[ya:yb, x0:x1][hit] = self.light(pos[hit], n[hit], alb[hit],
                                                  spec, shine, rim)
         self.z[ya:yb, x0:x1][hit] = t[hit]
 
     def glow(self, centre, radius, colour, strength=1.0):
         """Additive light: a flame, a lamp mantle, a fire door."""
-        cx, cy = centre[0] * SS, centre[1] * SS
-        r = radius * SS
+        cx, cy = centre[0] * self.ss, centre[1] * self.ss
+        r = radius * self.ss
         x0, x1 = int(max(0, cx - r * 3)), int(min(self.w, cx + r * 3))
         y0, y1 = int(max(0, cy - r * 3)), int(min(self.h, cy + r * 3))
         yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
@@ -224,7 +228,7 @@ class Scene:
         """Tone-map, filter down to 1x and dither to RGB565."""
         x = 1.0 - np.exp(-self.rgb * exposure * 1.6)
         img = Image.fromarray(np.clip(x * 255 + 0.5, 0, 255).astype(np.uint8))
-        img = img.resize((self.w // SS, self.h // SS), Image.LANCZOS)
+        img = img.resize((self.w // self.ss, self.h // self.ss), Image.LANCZOS)
         return dither565(img)
 
 
@@ -252,14 +256,14 @@ def dither565(img):
 
 # ---- materials ---------------------------------------------------------------
 def planks(h, w, seed, base=(118, 82, 50), widths=(18, 30), vertical=True,
-           soot_top=0.0, wear=None, nails=True):
+           soot_top=0.0, wear=None, nails=True, ss=SS):
     """Boards of rough-sawn timber: returns (albedo 0..1 HxWx3, normals
     HxWx3, gap mask).  Each board has its own width and tone, grain lines
     that swirl round its knots, nail heads in rows, and a dark gap with a
     lit edge on one side and a shadowed edge on the other."""
     rng = np.random.default_rng(seed)
     if not vertical:
-        a, n, g = planks(w, h, seed, base, widths, True, 0.0, None, nails)
+        a, n, g = planks(w, h, seed, base, widths, True, 0.0, None, nails, ss)
         a, n, g = a.transpose(1, 0, 2), n.transpose(1, 0, 2)[..., [1, 0, 2]], g.T
     else:
         yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -271,7 +275,7 @@ def planks(h, w, seed, base=(118, 82, 50), widths=(18, 30), vertical=True,
         fine = fbm(h, w, seed + 2, 3, 24)
         x = 0
         while x < w:
-            bw = int(rng.integers(widths[0], widths[1]) * SS)
+            bw = int(rng.integers(widths[0], widths[1]) * ss)
             sl = slice(x, min(w, x + bw))
             u = (xx[:, sl] - x) / bw              # 0..1 across the board
             tone = rng.normal(1.0, 0.09)
@@ -279,11 +283,11 @@ def planks(h, w, seed, base=(118, 82, 50), widths=(18, 30), vertical=True,
                             rng.normal(1, 0.05)])
             # Grain: lines along the board, pushed round the knots.
             phase = u * rng.uniform(9, 16) + warp[:, sl] * 3.0
-            for _ in range(rng.integers(0, 3) if bw > 12 * SS else 0):
+            for _ in range(rng.integers(0, 3) if bw > 12 * ss else 0):
                 ky = rng.uniform(0, h)
                 kx = rng.uniform(0.2, 0.8)
-                d = np.sqrt(((u - kx) * bw / (5 * SS)) ** 2 +
-                            ((yy[:, sl] - ky) / (9 * SS)) ** 2)
+                d = np.sqrt(((u - kx) * bw / (5 * ss)) ** 2 +
+                            ((yy[:, sl] - ky) / (9 * ss)) ** 2)
                 phase += 2.4 * np.exp(-d * d) * np.sign(u - kx)
                 knot = np.exp(-(d * 1.6) ** 2)
                 a[:, sl] -= knot[..., None] * 0.35
@@ -296,14 +300,14 @@ def planks(h, w, seed, base=(118, 82, 50), widths=(18, 30), vertical=True,
             gap = (u > 0.97)
             g[:, sl] |= gap
             # Nail heads in rows.
-            for ny in (np.arange(rng.uniform(20, 60), h / SS,
+            for ny in (np.arange(rng.uniform(20, 60), h / ss,
                                  rng.uniform(80, 120)) if nails else ()):
                 for nx in (0.18, 0.82):
-                    cy, cx = ny * SS, x + nx * bw
+                    cy, cx = ny * ss, x + nx * bw
                     d2 = (xx[:, sl] - cx) ** 2 + (yy[:, sl] - cy) ** 2
-                    head = d2 < (1.6 * SS) ** 2
+                    head = d2 < (1.6 * ss) ** 2
                     a[:, sl][head] = np.array([0.16, 0.15, 0.14])
-                    shine = d2 < (0.6 * SS) ** 2
+                    shine = d2 < (0.6 * ss) ** 2
                     a[:, sl][shine & head] = np.array([0.4, 0.38, 0.34])
             x += bw
         a[g] *= 0.12
@@ -405,9 +409,9 @@ def cone(sc, centre, axis, half_len, r_near, r_far, albedo, spec=0.0,
     'texture(z, ang)' gets the position along the axis (-1..1) and the
     angle round it, and returns an albedo multiplier."""
     R = axis_frame(axis)
-    c = np.array(centre, np.float32) * SS
-    L = half_len * SS
-    r0, r1 = r_near * SS, r_far * SS
+    c = np.array(centre, np.float32) * sc.ss
+    L = half_len * sc.ss
+    r0, r1 = r_near * sc.ss, r_far * sc.ss
     k = (r1 - r0) / (2 * L)
     a0 = r0 + k * L
     ext = (L + max(r0, r1)) * 1.05
