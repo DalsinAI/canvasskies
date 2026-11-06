@@ -55,3 +55,10 @@ string, and the blank top copy with its halftone, screened from our own
 `ports/amigaos3/make_cinema_hut.py`. The film in `newsreels.bin` is real
 period footage; its sources and licences are listed in
 `CANVAS_SKIES_SOURCES.md`.
+
+`cockpit-cellule.bmp` (the wings, struts and wires seen from the pilot's
+seat) is painted by `ports/amigaos3/make_cockpit_cellule.py`.
+
+`medals.bmp` (the five decorations and the office crest) is painted by
+`ports/amigaos3/make_medals.py`, and `mess.bmp` (the squadron mess) by
+`ports/amigaos3/make_mess.py`.
