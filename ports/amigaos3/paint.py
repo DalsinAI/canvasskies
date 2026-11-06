@@ -49,7 +49,7 @@ class Canvas:
             mask_img = mask_img.point(lambda v: 255 if v > 127 else 0)
             mask_img = mask_img.filter(ImageFilter.GaussianBlur(SS * 0.5))
         mask = np.asarray(mask_img, np.float32) / 255.0
-        if mask.max() == 0:
+        if mask.max() <= 0.5:          # nothing left but a soft sliver
             return
         # Light falls across the part along LIGHT; the far side is darker.
         ys, xs = np.nonzero(mask > 0.5)
