@@ -155,7 +155,7 @@ class Scene:
         alb = np.broadcast_to(np.array(albedo, np.float32) / 255.0,
                               q.shape).copy()
         if texture is not None:
-            alb *= texture(q, n)[..., None]
+            alb *= colour_map(texture(q, n))
         col = self.light(pos[hit], n[hit], alb[hit], spec, shine, rim)
         self.rgb[y0:y1, x0:x1][hit] = col
         self.z[y0:y1, x0:x1][hit] = t[hit]
@@ -226,6 +226,14 @@ class Scene:
         img = Image.fromarray(np.clip(x * 255 + 0.5, 0, 255).astype(np.uint8))
         img = img.resize((self.w // SS, self.h // SS), Image.LANCZOS)
         return dither565(img)
+
+
+def colour_map(t):
+    """A texture's answer as an albedo multiplier: a plain (H,W) array
+    darkens or lightens the solid's own colour; an (H,W,3) array paints
+    each pixel its own colour (a face, a tunic with its pockets)."""
+    t = np.asarray(t)
+    return t[..., None] if t.ndim == 2 else t
 
 
 def dither565(img):
@@ -433,7 +441,8 @@ def cone(sc, centre, axis, half_len, r_near, r_far, albedo, spec=0.0,
     alb = np.broadcast_to(np.array(albedo, np.float32) / 255.0,
                           n.shape).copy()
     if texture is not None:
-        alb *= texture(q[..., 2] / L, np.arctan2(q[..., 1], q[..., 0]))[..., None]
+        alb *= colour_map(texture(q[..., 2] / L,
+                                  np.arctan2(q[..., 1], q[..., 0])))
     sc.rgb[y0:y1, x0:x1][hit] = sc.light(pos[hit], n[hit], alb[hit], spec,
                                          shine, rim)
     sc.z[y0:y1, x0:x1][hit] = t[hit]
