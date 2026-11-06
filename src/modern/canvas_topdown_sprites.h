@@ -58,14 +58,14 @@ static const short topdown_sprite_rect[TD_SPRITE_COUNT][4] = {
     {263, 0, 24, 58}, /* TD_WAGON_WRECK */
     {288, 0, 40, 120}, /* TD_STATION */
     {329, 0, 40, 120}, /* TD_STATION_WRECK */
-    {370, 0, 96, 62}, /* TD_HANGAR */
-    {0, 121, 96, 62}, /* TD_HANGAR_WRECK */
-    {97, 121, 56, 56}, /* TD_TENTS */
-    {154, 121, 56, 56}, /* TD_TENTS_WRECK */
-    {211, 121, 72, 72}, /* TD_DUMP */
-    {284, 121, 72, 72}, /* TD_DUMP_WRECK */
-    {357, 121, 64, 42}, /* TD_DEPOT */
-    {422, 121, 64, 42}, /* TD_DEPOT_WRECK */
+    {370, 0, 108, 66}, /* TD_HANGAR */
+    {0, 121, 108, 66}, /* TD_HANGAR_WRECK */
+    {109, 121, 56, 56}, /* TD_TENTS */
+    {166, 121, 56, 56}, /* TD_TENTS_WRECK */
+    {223, 121, 72, 72}, /* TD_DUMP */
+    {296, 121, 72, 72}, /* TD_DUMP_WRECK */
+    {369, 121, 64, 42}, /* TD_DEPOT */
+    {434, 121, 64, 42}, /* TD_DEPOT_WRECK */
     {0, 194, 48, 42}, /* TD_FARM */
     {49, 194, 48, 42}, /* TD_FARM_WRECK */
     {98, 194, 86, 116}, /* TD_CHURCH */

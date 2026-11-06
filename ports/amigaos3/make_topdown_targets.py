@@ -270,27 +270,27 @@ def derailed():
 def roof(c, x0, y0, x1, y1, colour, ridge_vertical=False, tiles=True):
     """A pitched roof: the face toward the sun lit, the other shaded, the
     courses of tiles or slates across each face and the ridge capped."""
-    c.part([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], lit(colour, -10),
-           gloss=0.15, grain=6, round_=0.8)
+    c.part([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], lit(colour, -42),
+           gloss=0.1, grain=6, round_=0.8)
     if ridge_vertical:
         xm = (x0 + x1) / 2
-        c.part([(x0, y0), (xm, y0), (xm, y1), (x0, y1)], lit(colour, 22),
-               gloss=0.05, grain=5, rim=0.0, round_=0.5)
+        c.part([(x0, y0), (xm, y0), (xm, y1), (x0, y1)], lit(colour, 40),
+               gloss=0.05, grain=5, rim=0.0, round_=0.3)
         if tiles:
             n = int((y1 - y0) / 2.2)
-            ribs(c, x0 + 0.5, y0, xm, y1, n, lit(colour, -6), width=0.4)
-            ribs(c, xm, y0, x1 - 0.5, y1, n, lit(colour, -34), width=0.4)
+            ribs(c, x0 + 0.5, y0, xm, y1, n, lit(colour, 18), width=0.4)
+            ribs(c, xm, y0, x1 - 0.5, y1, n, lit(colour, -62), width=0.4)
         c.part([(xm - 0.9, y0), (xm + 0.9, y0), (xm + 0.9, y1), (xm - 0.9, y1)],
                lit(colour, -46), gloss=0.5, round_=0.2)   # ridge tiles
     else:
         ym = (y0 + y1) / 2
-        c.part([(x0, y0), (x1, y0), (x1, ym), (x0, ym)], lit(colour, 22),
-               gloss=0.05, grain=5, rim=0.0, round_=0.5)
+        c.part([(x0, y0), (x1, y0), (x1, ym), (x0, ym)], lit(colour, 40),
+               gloss=0.05, grain=5, rim=0.0, round_=0.3)
         if tiles:
             n = int((x1 - x0) / 2.2)
-            ribs(c, x0, y0 + 0.5, x1, ym, n, lit(colour, -6), vertical=True,
+            ribs(c, x0, y0 + 0.5, x1, ym, n, lit(colour, 18), vertical=True,
                  width=0.4)
-            ribs(c, x0, ym, x1, y1 - 0.5, n, lit(colour, -34), vertical=True,
+            ribs(c, x0, ym, x1, y1 - 0.5, n, lit(colour, -62), vertical=True,
                  width=0.4)
         c.part([(x0, ym - 0.9), (x1, ym - 0.9), (x1, ym + 0.9), (x0, ym + 0.9)],
                lit(colour, -46), gloss=0.5, round_=0.2)
@@ -303,8 +303,9 @@ def roof(c, x0, y0, x1, y1, colour, ridge_vertical=False, tiles=True):
 
 
 def chimney(c, x, y, w=4, h=4):
-    c.part([(x + 1.5, y + 1.5), (x + w + 3, y + h + 3)], (34, 30, 26),
-           gloss=0, rim=0, round_=0.6)                # its shadow on the roof
+    c.part([(x + 1, y + 1), (x + w + 1, y + 1), (x + w + 5, y + h + 4),
+            (x + 5, y + h + 4)], (24, 22, 20), gloss=0, rim=0,
+           round_=0.4)                                # its shadow on the roof
     c.part([(x, y), (x + w, y), (x + w, y + h), (x, y + h)], (132, 76, 56),
            gloss=0.35, round_=0.4)
     c.part([(x + w / 2 - 0.9, y + h / 2 - 0.9), (x + w / 2 + 0.9, y + h / 2 + 0.9)],
@@ -350,41 +351,44 @@ def station(wreck=False):
 
 
 def hangar(wreck=False):
-    """Two Bessonneau canvas hangars side by side: the canvas swelling
-    between the wooden frames, guy ropes pegged out at the sides."""
-    c = C(96, 62)
-    for x0 in (2, 50):
+    """Two Bessonneau canvas hangars side by side.  Each roof is a barrel
+    running front to back: light along the crown, falling away to dark at
+    both eaves, with the frames as darker seams across it; guy ropes run
+    out to pegs well clear of the canvas."""
+    c = C(108, 66)
+    for x0 in (8, 58):
         if wreck:
-            c.part([(x0, 6), (x0 + 44, 6), (x0 + 44, 56), (x0, 56)], CHAR,
+            c.part([(x0, 6), (x0 + 42, 6), (x0 + 42, 56), (x0, 56)], CHAR,
                    gloss=0.0, grain=12, round_=1.5)
             for k in range(1, 6):
                 y = 6 + k * 8.3
-                c.line((x0 + 1, y), (x0 + 43, y), (90, 60, 40), 1.1)
-            debris(c, 96, 62, 6, [ASH, CANVAS, CHAR])
+                c.line((x0 + 1, y), (x0 + 41, y), (90, 60, 40), 1.1)
+            debris(c, 108, 66, 6, [ASH, CANVAS, CHAR])
             continue
-        for k in range(7):                            # guy ropes and pegs
-            y = 8 + k * 7.6
-            for sx, ex in ((x0, x0 - 2.4), (x0 + 44, x0 + 46.4)):
-                c.line((sx, y), (ex, y + 1), (110, 100, 80), 0.35)
-        c.part([(x0, 6), (x0 + 44, 6), (x0 + 44, 56), (x0, 56)], CANVAS,
-               gloss=0.2, grain=4, round_=2.5)
-        # Across the hangar the roof is a long barrel: lit on the sunny
-        # side, deepening to shade on the far one.
-        for k in range(10):
-            t = k / 10
-            col = lit(CANVAS, int(28 - 60 * t))
-            c.part([(x0 + 44 * t, 6.4), (x0 + 44 * (t + 0.1) + 0.3, 6.4),
-                    (x0 + 44 * (t + 0.1) + 0.3, 55.6), (x0 + 44 * t, 55.6)],
-                   col, gloss=0.0, rim=0.0, grain=3, round_=0.3)
-        for k in range(1, 6):                         # the frames
+        for k in range(6):                            # guy ropes and pegs
+            y = 9 + k * 9
+            for sx, ex in ((x0 + 1, x0 - 6), (x0 + 41, x0 + 48)):
+                c.line((sx, y), (ex, y + 2), (178, 160, 118), 0.9)
+                c.part([(ex - 1, y + 1), (ex + 1, y + 3)], (40, 32, 22),
+                       shape="ellipse", round_=0.2)
+        for k in range(14):                           # the barrel
+            t0, t1 = k / 14, (k + 1) / 14
+            crown = 1 - abs((t0 + t1) - 1)            # 1 on the crown, 0 at eaves
+            sun = 0.12 * (1 - (t0 + t1))              # the sun from the left
+            col = lit(CANVAS, int(-70 + 110 * crown ** 0.8 + 80 * sun))
+            c.part([(x0 + 42 * t0, 6), (x0 + 42 * t1 + 0.4, 6),
+                    (x0 + 42 * t1 + 0.4, 56), (x0 + 42 * t0, 56)],
+                   col, gloss=0.0, rim=0.0, grain=3, round_=0.2)
+        for k in range(1, 6):                         # the frames, as seams
             y = 6 + k * 8.3
-            c.line((x0 + 0.5, y), (x0 + 43.5, y), (126, 106, 74), 0.9)
-            c.line((x0 + 0.5, y + 0.8), (x0 + 43.5, y + 0.8), (216, 204, 170), 0.35)
-        c.line((x0 + 22, 6), (x0 + 22, 56), (140, 124, 92), 0.8)  # ridge
-        c.part([(x0 + 4, 56), (x0 + 40, 56), (x0 + 40, 60), (x0 + 4, 60)],
+            c.line((x0 + 0.5, y), (x0 + 41.5, y), (98, 82, 56), 1.1)
+            c.line((x0 + 8, y + 0.9), (x0 + 34, y + 0.9), (226, 214, 180), 0.4)
+        c.line((x0, 6), (x0, 56), (70, 60, 44), 1.0)  # the eaves
+        c.line((x0 + 42, 6), (x0 + 42, 56), (60, 52, 38), 1.0)
+        c.part([(x0 + 4, 56), (x0 + 38, 56), (x0 + 38, 60), (x0 + 4, 60)],
                (70, 62, 48), round_=0.6)              # the doorway curtain
-        c.part([(x0 + 18, 56), (x0 + 26, 56), (x0 + 26, 61), (x0 + 18, 61)],
-               (44, 38, 30), round_=0.4)              # its opening
+        c.part([(x0 + 16, 56), (x0 + 26, 56), (x0 + 26, 61), (x0 + 16, 61)],
+               (34, 30, 24), round_=0.4)              # its opening
     return c.image()
 
 
@@ -725,7 +729,32 @@ SPRITES = [
 ]
 
 
+def pop(img):
+    """Push a target off the mud at 1x: a little more contrast, and its
+    silhouette edged in a dark line."""
+    a = np.asarray(img).astype(np.float32)
+    key = np.all(a == KEY, axis=2)
+    if key.all():
+        return img
+    mean = a[~key].mean(axis=0)
+    a = np.where(key[..., None], a, np.clip((a - mean) * 1.25 + mean, 0, 255))
+    solid = ~key
+    inner = solid.copy()
+    inner[1:, :] &= solid[:-1, :]
+    inner[:-1, :] &= solid[1:, :]
+    inner[:, 1:] &= solid[:, :-1]
+    inner[:, :-1] &= solid[:, 1:]
+    edge = solid & ~inner
+    a[edge] *= 0.5
+    out = a.astype(np.uint8)
+    out[key] = KEY
+    return Image.fromarray(out)
+
+
 def main():
+    global SPRITES
+    SPRITES = [(n, img if n.startswith("TD_TILE") else pop(img))
+               for n, img in SPRITES]
     # Shelf packing into a 512-wide atlas.
     width, x, y, shelf = 512, 0, 0, 0
     places = []

@@ -4210,7 +4210,8 @@ static void td_update(Game *g, float dt, uint32_t now)
     }
 }
 
-/* A sprite from the painted atlas with its shadow cast to the lower right. */
+/* A sprite from the painted atlas with its shadow cast to the lower right,
+ * dark and well out from it so each target stands up off the mud. */
 static void td_blit(Game *g, int sprite, int cx, int cy)
 {
     SDL_Surface *s = g->screen, *a = g->topdown_targets;
@@ -4224,7 +4225,7 @@ static void td_blit(Game *g, int sprite, int cx, int cy)
     SDL_GetColorKey(a, &key);
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
     for (y = 0; y < r[3]; ++y) {
-        int ty = dst.y + y + 5;
+        int ty = dst.y + y + 6;
         const pix_t *row;
         pix_t *out;
         if (ty < 0 || ty >= s->h) continue;
@@ -4232,9 +4233,9 @@ static void td_blit(Game *g, int sprite, int cx, int cy)
                               (r[1] + y) * a->pitch) + r[0];
         out = PIX_ROW(s, ty);
         for (x = 0; x < r[2]; ++x) {
-            int tx = dst.x + x + 4;
+            int tx = dst.x + x + 5;
             if (row[x] == (pix_t)key || tx < 0 || tx >= s->w) continue;
-            out[tx] = pix_mix(out[tx], PIX_PACK(20, 18, 14), 12);
+            out[tx] = pix_mix(out[tx], PIX_PACK(16, 14, 10), 19);
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
