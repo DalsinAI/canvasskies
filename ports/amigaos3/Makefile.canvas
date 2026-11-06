@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -48,6 +48,7 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/topdown-explosion-atlas.bmp\" \
 	-DCANVAS_TOPDOWN_TARGETS_BMP=\"PROGDIR:assets/canvas-skies/topdown-targets.bmp\" \
 	-DCANVAS_SIDE_CIVILIANS_BMP=\"PROGDIR:assets/canvas-skies/side-civilians.bmp\" \
+	-DCANVAS_RIFLEMEN_BMP=\"PROGDIR:assets/canvas-skies/riflemen.bmp\" \
 	-DCANVAS_NEWSPAPER_TABLE_BMP=\"PROGDIR:assets/canvas-skies/newspaper-table.bmp\" \
 	-DCANVAS_CINEMA_HUT_BMP=\"PROGDIR:assets/canvas-skies/cinema-hut.bmp\" \
 	-DCANVAS_COCKPIT_CELLULE_BMP=\"PROGDIR:assets/canvas-skies/cockpit-cellule.bmp\" \
