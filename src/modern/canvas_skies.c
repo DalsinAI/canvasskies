@@ -7247,10 +7247,11 @@ static void draw_ground_gun(Game *g, int sx, int ty, Target *target)
         SDL_Rect dst = {sx - sprite->w / 2, ty + 12 - sprite->h, 0, 0};
         SDL_BlitSurface(sprite, NULL, s, &dst);
         if (flash) {
-            if (target->type)
-                circle(s, sx + 20, ty - 57, 7, rgb(s, 255, 177, 54));
-            else
-                circle(s, sx + 49, ty - 24, 6, rgb(s, 255, 210, 78));
+            /* The muzzle flash as a glow round a white-hot core. */
+            int fx = target->type ? sx + 20 : sx + 49;
+            int fy = target->type ? ty - 57 : ty - 24;
+            blend_circle(s, fx, fy, target->type ? 16 : 11, 255, 170, 60, 230);
+            blend_circle(s, fx, fy, target->type ? 6 : 4, 255, 246, 200, 255);
         }
         return;
     }
@@ -7409,7 +7410,9 @@ static void draw_explosion_frame(Game *g, SDL_Surface *atlas, int frame,
                                  int ground_profile, uint8_t alpha)
 {
     SDL_Surface *dst = g->screen;
-    const int cell = 96;
+    /* Four by four frames; the atlases are cut at 160 pixels a cell
+     * (make_explosion_atlases.py) so big bursts are barely scaled up. */
+    const int cell = atlas ? atlas->w / 4 : 96;
     int source_x = (frame & 3) * cell;
     int source_y = (frame >> 2) * cell;
     int left = center_x - draw_size / 2;
@@ -7561,13 +7564,16 @@ static void draw_aircraft_smoke(Game *g, int x, int y, int health,
                                  (seed & 15u)) * (3.0f + phase * 5.0f));
         int px = x + trail_direction * distance;
         int py = y - 2 - (int)(phase * 20.0f) + wobble;
-        int radius = 5 + (int)(phase * (health < 42 ? 14.0f : 10.0f));
-        uint8_t grey = (uint8_t)(54 + (int)(phase * 66.0f));
-        circle(s, px, py, radius, rgb(s, grey, grey, grey - 5));
-        circle(s, px - trail_direction * radius / 3, py - radius / 3,
-               radius * 2 / 3, rgb(s, grey + 19, grey + 18, grey + 14));
-        circle(s, px + trail_direction * radius / 3, py + radius / 5,
-               radius / 2, rgb(s, grey - 9, grey - 10, grey - 13));
+        int radius = 6 + (int)(phase * (health < 42 ? 16.0f : 12.0f));
+        /* Soft puffs that thin as they age: a dark body of smoke, its
+         * crown lit by the sky, the oldest drifting off almost clear. */
+        int alpha = (int)((1.0f - phase * 0.8f) * (health < 42 ? 255.0f : 215.0f));
+        uint8_t grey = (uint8_t)(34 + (int)(phase * 66.0f));
+        blend_circle(s, px, py, radius, grey, grey, (uint8_t)(grey - 4),
+                     (uint8_t)alpha);
+        blend_circle(s, px - trail_direction * radius / 4, py - radius / 3,
+                     radius * 2 / 3, (uint8_t)(grey + 40), (uint8_t)(grey + 38),
+                     (uint8_t)(grey + 32), (uint8_t)(alpha * 3 / 5));
     }
 }
 
@@ -7579,11 +7585,12 @@ static void draw_player_damage(Game *g)
     draw_aircraft_smoke(g, (int)g->player_x, (int)g->player_y,
                         g->health, -1, 0x4e454444u);
     if (g->health < 42) {
+        /* Fire licking back from the engine: a soft glow, a hot core. */
         int flicker = (now / 45) & 3;
-        circle(s, (int)g->player_x - 28, (int)g->player_y + 2,
-               7 + flicker, rgb(s, 237, 89, 24));
-        circle(s, (int)g->player_x - 26, (int)g->player_y,
-               4 + (flicker & 1), rgb(s, 255, 215, 75));
+        blend_circle(s, (int)g->player_x - 28, (int)g->player_y + 2,
+                     12 + flicker, 237, 89, 24, 220);
+        blend_circle(s, (int)g->player_x - 26, (int)g->player_y,
+                     6 + (flicker & 1), 255, 226, 120, 255);
     }
 }
 
