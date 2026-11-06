@@ -8412,11 +8412,13 @@ static pix_t average_pixels(SDL_Surface *s, int x0, int y0, int w, int h)
  * less as the aircraft moves. */
 /* The ground's average colour, for the haze of the far fields in the
  * cockpit view.  Measured once at start-up from the top-down painting. */
-static void measure_ground_tint(Game *g, SDL_Surface *ground)
+static void measure_ground_tint(Game *g)
 {
+    SDL_Surface *ground = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
     if (ground && convert_to_screen(g, &ground) && ground->w >= 64)
         g->ground_haze_tint = average_pixels(ground, 0, 0, ground->w,
                                              ground->h);
+    if (ground) SDL_FreeSurface(ground);
 }
 
 /* The cockpit view's ground: the top-down painting and its mipmaps, so
@@ -11667,11 +11669,7 @@ static int game_init(Game *g)
     }
     /* The haze of the far fields comes from the top-down painting; it is
      * measured now, and the painting loaded again when a scene shows it. */
-    {
-        SDL_Surface *ground = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
-        measure_ground_tint(g, ground);
-        if (ground) SDL_FreeSurface(ground);
-    }
+    measure_ground_tint(g);
     /* An 8-bit coverage map: it is read directly, never converted. */
     g->fonts = SDL_LoadBMP(CANVAS_FONTS_BMP);
     if (g->fonts && g->fonts->format->BytesPerPixel != 1) {
