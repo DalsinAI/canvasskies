@@ -922,6 +922,7 @@ typedef struct {
     int next_bullet_hole;
     /* The legs of the sortie and what is sent against it on the way. */
     int leg;                /* LEG_OUT, LEG_HOME, LEG_LANDING */
+    int task_total;         /* the observers' tasks on this sortie */
     float leg_time;         /* seconds into the leg */
     float sortie_clock;     /* seconds since take-off */
     float front_at;         /* side, top-down: where their ground begins */
@@ -3142,6 +3143,7 @@ static void side_layout(Game *g)
 {
     const Chapter *chapter = &chapters[g->chapter];
     int goal = current_mission_goal(g), n, k, first;
+    g->task_total = 0;
     if (g->chapter == 0) {
         static const int tasks[3] = {TASK_MARK, TASK_DROP, TASK_PHOTO};
         for (k = 0; k < 3; ++k) {
@@ -3151,12 +3153,15 @@ static void side_layout(Game *g)
             t->world_x = SIDE_APPROACH + (float)k * 4600.0f;
         }
         g->task_end = g->targets[2].world_x + 300.0f;
+        g->task_total = 3;
         return;
     }
+    /* The first group falls one short of the order, so the second must
+     * be reached; the second has at least three. */
+    first = goal > 1 ? goal - 1 : 1;
     n = chapter->target_count;
-    if (n < goal + 2) n = goal + 2;
+    if (n < first + 3) n = first + 3;
     if (n > 14) n = 14;
-    first = (n + 1) / 2;
     for (k = 0; k < n; ++k) {
         Target *t = &g->targets[k];
         t->active = 1;
@@ -4458,6 +4463,7 @@ static void td_build_mission(Game *g)
     g->td_strip_count = 0;
     g->td_goal = 0;
     g->bags = 0;
+    g->task_total = 0;
     g->td_mix = topdown_mix_for(g->chapter, g->mission);
     if (g->td_mix == MIX_NONE) return;
     mix = &topdown_mixes[g->td_mix];
@@ -4473,6 +4479,7 @@ static void td_build_mission(Game *g)
     }
     for (k = 0; k < g->td_count; ++k)
         if (td_kinds[g->td[k].kind].task == TASK_DROP) g->bags = 3;
+    g->task_total = tasks;
     if (tasks > 0) {
         g->td_goal = tasks > 1 ? tasks - 1 : 1;
     } else {
@@ -5891,7 +5898,11 @@ static int update_legs_2d(Game *g, float dt)
     g->sortie_clock += dt;
     if (g->tree_struck < 10.0f) g->tree_struck += dt;
     if (g->leg == LEG_OUT) {
-        if ((goal > 0 && g->objectives >= goal) || here > g->task_end)
+        /* The observers do all their work if they can; the order is met
+         * with one task to spare. */
+        int done = g->task_total > 0 ? g->objectives >= g->task_total :
+                   goal > 0 && g->objectives >= goal;
+        if (done || here > g->task_end)
             start_run_home(g);
     } else if (g->leg == LEG_HOME) {
         if (g->field_at - (side ? g->scroll + SCREEN_W : g->scroll + SCREEN_H) < 0.0f) {
@@ -7505,7 +7516,7 @@ static void draw_combat_effects(Game *g, int smoke_pass)
  * goes. */
 
 #define DF_HOME_METRES 1700.0f
-#define DF_SHADOW_SECONDS 35.0f
+#define DF_SHADOW_SECONDS 70.0f
 
 static int live_enemies(const Game *g)
 {
@@ -7692,14 +7703,15 @@ static int update_df_legs(Game *g, float dt)
     g->leg_time += dt;
     g->wave_clock += dt;
     alive = live_enemies(g);
-    /* Archie, except in the last quiet hour of the war. */
+    /* Archie, except in the last quiet hour of the war; sooner when the
+     * sky has gone quiet. */
     g->archie_clock -= dt;
+    if (g->qa_idle_run > 6.0f && g->archie_clock > 0.5f) g->archie_clock = 0.5f;
     if (g->archie_clock <= 0.0f) {
-        if (!(armistice_quiet(g) && g->mission >= 9) &&
-            !(g->leg == LEG_HOME && g->home_progress > DF_HOME_METRES * 0.7f))
+        if (!(armistice_quiet(g) && g->mission >= 9))
             archie_fire_3d(g);
         g->archie_clock = (5.0f + random_unit(g) * 4.0f) * pace *
-                          (g->chapter == 0 ? 1.6f : 1.0f) * (alive ? 1.6f : 1.0f);
+                          (alive ? 1.6f : 1.0f);
     }
     g->hazard_clock -= dt;
     if (g->hazard_clock <= 0.0f) {
@@ -7709,7 +7721,8 @@ static int update_df_legs(Game *g, float dt)
     update_squall_3d(g, dt);
     if (g->leg == LEG_OUT) {
         if (g->wave == 0) {
-            if (g->leg_time > 20.0f) df_spawn_wave(g, df_wave_size(g, 0), 0);
+            if (g->leg_time > (hostile ? 20.0f : 14.0f))
+                df_spawn_wave(g, df_wave_size(g, 0), 0);
         } else if (hostile) {
             if (alive == 0 && !enemies_falling(g)) {
                 if (g->wave >= g->waves) {
@@ -7722,10 +7735,13 @@ static int update_df_legs(Game *g, float dt)
                         df_spawn_wave(g, df_wave_size(g, g->wave), 0);
                     }
                 }
-            } else if (g->wave_clock > 95.0f) {
+            } else if (g->wave_clock > 70.0f) {
                 if (g->wave < g->waves) df_spawn_wave(g, df_wave_size(g, g->wave), 0);
                 else df_turn_for_home(g);
             }
+            /* However the fight goes, the patrol's time over the lines
+             * is limited by its fuel and its orders. */
+            if (g->sortie_clock > 220.0f) df_turn_for_home(g);
         } else {
             Enemy *e = &g->enemies[0];
             int k;
@@ -7757,7 +7773,7 @@ static int update_df_legs(Game *g, float dt)
             show_notice(g, "OVER OUR LINES");
             return 1;
         }
-        if (g->leg_time > 80.0f) return 1;
+        if (g->leg_time > 60.0f) return 1;
     }
     return 0;
 }
@@ -7815,7 +7831,7 @@ static int update_gunner_legs(Game *g, float dt)
     if (g->sortie_clock == 0.0f) {
         int i;
         for (i = 0; i < MAX_ENEMIES; ++i) g->enemies[i].active = 0;
-        g->waves = 3;
+        g->waves = mission_armed(g) ? 4 + g->chapter / 3 : 5;
         g->archie_clock = 3.0f;
     }
     g->sortie_clock += dt;
@@ -7823,6 +7839,7 @@ static int update_gunner_legs(Game *g, float dt)
     g->wave_clock += dt;
     alive = live_enemies(g);
     g->archie_clock -= dt;
+    if (g->qa_idle_run > 6.0f && g->archie_clock > 0.5f) g->archie_clock = 0.5f;
     if (g->archie_clock <= 0.0f) {
         if (!(armistice_quiet(g) && g->mission >= 9)) archie_fire_2d(g);
         g->archie_clock = (5.5f + random_unit(g) * 4.0f) * pace *
@@ -7832,14 +7849,14 @@ static int update_gunner_legs(Game *g, float dt)
         if (g->wave == 0) {
             if (g->leg_time > 9.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
         } else if ((alive == 0 && !enemies_falling(g) && g->wave_clock > 4.0f) ||
-                   g->wave_clock > 70.0f) {
-            if (alive == 0 && g->wave >= g->waves) {
+                   g->wave_clock > 45.0f || g->sortie_clock > 170.0f) {
+            if ((alive == 0 && g->wave >= g->waves) || g->sortie_clock > 170.0f) {
                 g->leg = LEG_HOME;
                 g->leg_time = 0.0f;
                 show_notice(g, "TOM TURNS FOR HOME");
-            } else if (g->wave < g->waves && (alive == 0 || g->wave_clock > 70.0f)) {
+            } else if (g->wave < g->waves && (alive == 0 || g->wave_clock > 45.0f)) {
                 if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
-                if (alive || SDL_GetTicks() - g->mission_clear_at > 5000u) {
+                if (alive || SDL_GetTicks() - g->mission_clear_at > 7000u) {
                     g->mission_clear_at = 0;
                     gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
                 }
@@ -7851,8 +7868,8 @@ static int update_gunner_legs(Game *g, float dt)
             ++g->waves;
             gunner_spawn_wave(g, 1, 1);
         }
-        if ((g->leg_time > 22.0f && alive == 0 && !enemies_falling(g)) ||
-            g->leg_time > 42.0f)
+        if ((g->leg_time > 28.0f && alive == 0 && !enemies_falling(g)) ||
+            g->leg_time > 45.0f)
             return 1;
     }
     return 0;
@@ -8107,7 +8124,7 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
     }
     if (!qa_still) g->scroll += g->airspeed * dt;
     /* A tank for the patrol out, its fights and the way home. */
-    g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f) / 3.0f;
+    g->fuel -= dt * (0.36f + g->flight_throttle * 1.05f) / 3.6f;
     if (g->fuel < 0.0f) g->fuel = 0.0f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = g->flight_throttle * 0.55f +
