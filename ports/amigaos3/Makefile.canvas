@@ -50,6 +50,7 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_SIDE_CIVILIANS_BMP=\"PROGDIR:assets/canvas-skies/side-civilians.bmp\" \
 	-DCANVAS_NEWSPAPER_TABLE_BMP=\"PROGDIR:assets/canvas-skies/newspaper-table.bmp\" \
 	-DCANVAS_CINEMA_HUT_BMP=\"PROGDIR:assets/canvas-skies/cinema-hut.bmp\" \
+	-DCANVAS_COCKPIT_CELLULE_BMP=\"PROGDIR:assets/canvas-skies/cockpit-cellule.bmp\" \
 	-DCANVAS_NEWSREELS_BIN=\"PROGDIR:assets/canvas-skies/newsreels.bin\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \

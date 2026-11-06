@@ -137,6 +137,9 @@
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
 #endif
+#ifndef CANVAS_COCKPIT_CELLULE_BMP
+#define CANVAS_COCKPIT_CELLULE_BMP "assets/canvas-skies/cockpit-cellule.bmp"
+#endif
 #ifndef CANVAS_CINEMA_HUT_BMP
 #define CANVAS_CINEMA_HUT_BMP "assets/canvas-skies/cinema-hut.bmp"
 #endif
@@ -9854,7 +9857,19 @@ static SDL_Surface *cockpit_composite_from(SDL_Surface *painting)
                                        CANVAS_SCREEN_FORMAT);
     if (!c) return NULL;
     SDL_FillRect(c, NULL, key);
-    draw_cockpit_cellule(c);
+    /* The painted cellule (make_cockpit_cellule.py), or the drawn one. */
+    {
+        SDL_Surface *cell = SDL_LoadBMP(CANVAS_COCKPIT_CELLULE_BMP);
+        SDL_Surface *conv = cell ? SDL_ConvertSurface(cell, c->format, 0) : NULL;
+        if (cell) SDL_FreeSurface(cell);
+        if (conv) {
+            SDL_SetColorKey(conv, SDL_TRUE, SDL_MapRGB(conv->format, 255, 0, 255));
+            SDL_BlitSurface(conv, NULL, c, NULL);
+            SDL_FreeSurface(conv);
+        } else {
+            draw_cockpit_cellule(c);
+        }
+    }
     SDL_BlitSurface(painting, NULL, c, NULL);
     for (i = 0; i < 4; ++i) erase_painted_needle(c, &cockpit_dials[i]);
     SDL_SetColorKey(c, SDL_TRUE, key);
