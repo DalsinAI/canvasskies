@@ -3077,14 +3077,15 @@ static int current_mission_goal(const Game *g)
         int goal = 1 + g->chapter / 2 + g->mission / 6;
         if (goal > chapters[g->chapter].enemy_count)
             goal = chapters[g->chapter].enemy_count;
-        if (mode == MISSION_GUNNER_3D && goal > 2) goal = 2;
+        /* The rear seat meets a stream of attackers for three minutes. */
+        if (mode == MISSION_GUNNER_3D) goal = goal + 2 > 5 ? 5 : goal + 2;
         if (mode == MISSION_DOGFIGHT_3D && goal > 4) goal = 4;
         return goal;
     }
     if (mode == MISSION_SIDE) {
         /* Two groups of targets: the order is never met by the first
-         * alone.  1914's sorties carry three tasks, two of them to do. */
-        if (g->chapter == 0) return 2;
+         * alone.  1914's sorties carry four tasks, three of them to do. */
+        if (g->chapter == 0) return 3;
         return chapters[g->chapter].goal +
                (g->chapter == CHAPTER_COUNT - 1 ? 1 : 2);
     }
@@ -3183,7 +3184,7 @@ static int side_village_today(const Game *g)
  * stretch of their country, and a second group beyond it; in 1914 the
  * observers' three tasks instead, spread along the same road. */
 #define SIDE_APPROACH 5600.0f
-#define SIDE_BETWEEN 6000.0f
+#define SIDE_BETWEEN 7000.0f
 #define SIDE_SPACING 560.0f
 static void side_layout(Game *g)
 {
@@ -3191,15 +3192,16 @@ static void side_layout(Game *g)
     int goal = current_mission_goal(g), n, k, first;
     g->task_total = 0;
     if (g->chapter == 0) {
+        /* Four pieces of work, a column always among them. */
         static const int tasks[3] = {TASK_MARK, TASK_DROP, TASK_PHOTO};
-        for (k = 0; k < 3; ++k) {
+        for (k = 0; k < 4; ++k) {
             Target *t = &g->targets[k];
             t->active = 1;
-            t->task = tasks[(k + g->mission) % 3];
-            t->world_x = SIDE_APPROACH + (float)k * 4600.0f;
+            t->task = k == 3 ? TASK_MARK : tasks[(k + g->mission) % 3];
+            t->world_x = SIDE_APPROACH + (float)k * 5000.0f;
         }
-        g->task_end = g->targets[2].world_x + 300.0f;
-        g->task_total = 3;
+        g->task_end = g->targets[3].world_x + 300.0f;
+        g->task_total = 4;
         return;
     }
     /* The first group falls one short of the order, so the second must
@@ -4310,27 +4312,27 @@ static const TopdownMix topdown_mixes[MIX_COUNT] = {
      {"STRAFE THE COLUMNS ON THE ROAD WEST.",
       "AMBULANCES ON THE ROAD: HOLD FIRE.",
       "REFUGEES AND FARMS BEYOND: TAKE CARE."}},
-    {{SEG_HQ, SEG_COLUMN, SEG_NONE},
+    {{SEG_HQ, SEG_COLUMN, SEG_BATTERY},
      {"CARRY THE GENERAL'S NOTE TO CORPS HEADQUARTERS.",
       "B DROPS THE MESSAGE BAG ON THE TENTS.",
       "MARK ANY COLUMN ON THE ROAD BEYOND: FLY OVER IT."}},
-    {{SEG_COLUMN, SEG_COLUMN, SEG_NONE},
+    {{SEG_COLUMN, SEG_BATTERY, SEG_COLUMN},
      {"GREY COLUMNS ARE ON THE ROADS.",
-      "MARK EACH ONE: FLY STRAIGHT OVER IT.",
-      "RIFLES WILL BE RAISED AT YOU. KEEP MOVING."}},
-    {{SEG_COLUMN, SEG_BATTERY, SEG_NONE},
+      "MARK EACH ONE: FLY STRAIGHT OVER IT, AND",
+      "PHOTOGRAPH THE BATTERY: HOLD LEVEL OVER IT."}},
+    {{SEG_COLUMN, SEG_BATTERY, SEG_HQ},
      {"FIND THE GAP ON THEIR FLANK.",
       "MARK THE COLUMN, THEN PHOTOGRAPH THE BATTERY:",
       "HOLD THE MACHINE LEVEL OVER THE GUNS."}},
-    {{SEG_BATTERY, SEG_HQ, SEG_NONE},
+    {{SEG_BATTERY, SEG_HQ, SEG_COLUMN},
      {"PHOTOGRAPH THE BATTERY ON THE ROAD NORTH:",
       "HOLD THE MACHINE LEVEL OVER THE GUNS.",
       "THEN DROP THE REPORT AT HEADQUARTERS WITH B."}},
-    {{SEG_HQ, SEG_BATTERY, SEG_NONE},
+    {{SEG_HQ, SEG_BATTERY, SEG_COLUMN},
      {"THE ORDER SAYS THE FIRING ENDS AT ELEVEN.",
       "DROP IT ON THEIR HEADQUARTERS WITH B,",
       "THEN PHOTOGRAPH THE BATTERY STILL IN ACTION."}},
-    {{SEG_COLUMN, SEG_HQ, SEG_NONE},
+    {{SEG_COLUMN, SEG_HQ, SEG_BATTERY},
      {"THE NEGOTIATORS' TRAIN IS IN THE FOREST.",
       "MARK THE COLUMNS FALLING BACK BESIDE IT,",
       "THEN DROP OUR MESSAGE ON HEADQUARTERS WITH B."}}
@@ -4491,7 +4493,7 @@ static void td_build_segment(Game *g, int seg, float from, float to)
  * over the lines, each group of targets, and the stretch between them. */
 #define TD_APPROACH 3800.0f
 #define TD_SEGMENT 2900.0f
-#define TD_BETWEEN 3600.0f
+#define TD_BETWEEN 4000.0f
 
 /* Lays out the sortie's segments and sets the objective: three in five of
  * its military targets, so it can be won without destroying everything,
@@ -4788,30 +4790,6 @@ static int near_the_lines(const Game *g, float world)
         return world > g->task_end - 6000.0f;
     if (g->leg != LEG_OUT && fabsf(world - g->home_line_at) < 1400.0f) return 1;
     return 0;
-}
-
-/* A few pixels of quarter, half or three-quarter screen in one colour:
- * the cheap way to draw rain cloud and to blind a pilot inside it, at a
- * fraction of the cost of blending every pixel. */
-static void dither_rect(SDL_Surface *s, int x, int y, int w, int h,
-                        pix_t colour, int level)
-{
-    int px, py, x0 = x < 0 ? 0 : x, x1 = x + w > s->w ? s->w : x + w;
-    int y1 = y + h > s->h ? s->h : y + h;
-    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
-    for (py = y < 0 ? 0 : y; py < y1; ++py) {
-        pix_t *row = PIX_ROW(s, py);
-        if (level <= 1) {
-            if (py & 1) continue;
-            for (px = x0 + (x0 & 1); px < x1; px += 2) row[px] = colour;
-        } else if (level == 2) {
-            for (px = x0 + ((x0 ^ py) & 1); px < x1; px += 2) row[px] = colour;
-        } else {
-            for (px = x0; px < x1; ++px)
-                if (!((px & py) & 1)) row[px] = colour;
-        }
-    }
-    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
 }
 
 /* Holes in our own fabric, side-on and from above: a few dark specks that
@@ -5373,65 +5351,203 @@ static void update_squall_2d(Game *g, float dt)
     }
 }
 
+/* ---- Rain cloud, drawn cheaply -------------------------------------------
+ *
+ * A squall is drawn as a few overlapping soft blobs of cloud.  Each is laid
+ * down in blocks of four by four pixels: the density of the block is the
+ * fall-off towards the blob's edge times a small tiling noise, and an
+ * ordered dither turns that density into a pattern of pixels.  The screen
+ * is never read, so the cost is a table look-up and a few stores a block,
+ * yet the cloud is ragged, uneven and lets the ground show through. */
+
+static uint8_t cloud_noise[32][32];
+
+static void make_cloud_noise(void)
+{
+    static int ready;
+    uint8_t coarse[8][8];
+    int x, y;
+    if (ready) return;
+    ready = 1;
+    for (y = 0; y < 8; ++y)
+        for (x = 0; x < 8; ++x)
+            coarse[y][x] = (uint8_t)(scene_hash((uint32_t)(y * 8 + x) *
+                                                2654435761u + 0x434c44u) & 255u);
+    for (y = 0; y < 32; ++y)
+        for (x = 0; x < 32; ++x) {
+            /* Two octaves of smooth value noise, wrapping at the edges. */
+            int cx = x >> 2, cy = y >> 2, fx = x & 3, fy = y & 3;
+            int a = coarse[cy][cx], b = coarse[cy][(cx + 1) & 7];
+            int c = coarse[(cy + 1) & 7][cx], d = coarse[(cy + 1) & 7][(cx + 1) & 7];
+            int top = a * (4 - fx) + b * fx, bottom = c * (4 - fx) + d * fx;
+            int smooth = (top * (4 - fy) + bottom * fy) / 16;
+            int fine = (int)(scene_hash((uint32_t)(y * 32 + x) * 977u) & 63u);
+            cloud_noise[y][x] = (uint8_t)(smooth * 3 / 4 + fine);
+        }
+}
+
+/* The sixteen levels of a 4x4 ordered dither, one 4-bit mask a row. */
+static const uint8_t dither_rows[17][4] = {
+    {0x0, 0x0, 0x0, 0x0}, {0x1, 0x0, 0x0, 0x0}, {0x1, 0x0, 0x4, 0x0},
+    {0x5, 0x0, 0x4, 0x0}, {0x5, 0x0, 0x5, 0x0}, {0x5, 0x2, 0x5, 0x0},
+    {0x5, 0x2, 0x5, 0x8}, {0x5, 0xa, 0x5, 0x8}, {0x5, 0xa, 0x5, 0xa},
+    {0x7, 0xa, 0x5, 0xa}, {0x7, 0xa, 0xd, 0xa}, {0xf, 0xa, 0xd, 0xa},
+    {0xf, 0xa, 0xf, 0xa}, {0xf, 0xe, 0xf, 0xa}, {0xf, 0xe, 0xf, 0xb},
+    {0xf, 0xf, 0xf, 0xb}, {0xf, 0xf, 0xf, 0xf}
+};
+
+static void dither_block(SDL_Surface *s, int x, int y, int level, pix_t c)
+{
+    int r, k;
+    if (level <= 0) return;
+    if (level > 16) level = 16;
+    if (x < 0 || x + 4 > s->w) return;
+    for (r = 0; r < 4; ++r) {
+        uint8_t m = dither_rows[level][(y + r) & 3];
+        pix_t *row;
+        if (!m || y + r < 0 || y + r >= s->h) continue;
+        row = PIX_ROW(s, y + r) + x;
+        for (k = 0; k < 4; ++k) if (m & (1u << k)) row[k] = c;
+    }
+}
+
+/* One soft blob of cloud centred on (cx, cy).  (ox, oy) moves the noise
+ * with the world so the cloud keeps its shape as it scrolls; strength is
+ * the densest level, 0 to 16.  The upper part is lit, the lower dark. */
+static void draw_cloud_blob(SDL_Surface *s, int cx, int cy, int rx, int ry,
+                            int ox, int oy, int strength, pix_t light,
+                            pix_t dark)
+{
+    int bx, by, x0, x1, y0, y1;
+    if (rx < 4 || ry < 4 || strength <= 0) return;
+    make_cloud_noise();
+    x0 = (cx - rx) & ~3; x1 = cx + rx;
+    y0 = (cy - ry) & ~3; y1 = cy + ry;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > s->w - 4) x1 = s->w - 4;
+    if (y1 > s->h - 4) y1 = s->h - 4;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (by = y0; by <= y1; by += 4) {
+        int dy = (by + 2 - cy) * 256 / ry;
+        int dy2 = dy * dy;
+        if (dy2 >= 65536) continue;
+        for (bx = x0; bx <= x1; bx += 4) {
+            int dx = (bx + 2 - cx) * 256 / rx;
+            int e = 65536 - dx * dx - dy2;     /* 0 at the edge */
+            int n, level;
+            if (e <= 0) continue;
+            n = cloud_noise[((by + oy) >> 2) & 31][((bx + ox) >> 2) & 31];
+            /* Fall-off shaped so the middle is thick and the edge frays
+             * into the noise. */
+            level = (e >> 8) * (n + 40) / 300;          /* 0 to about 256 */
+            level = level * strength * 3 / 512 - 1;
+            if (level > strength) level = strength;
+            if (level <= 0) continue;
+            /* Lit above, shadowed below, the line between them broken by
+             * the noise so it never runs straight. */
+            dither_block(s, bx, by, level,
+                         dy + (n - 128) / 2 < -50 ? light : dark);
+        }
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
+/* Rain under the cloud: faint slanting streaks, every other pixel. */
+static void draw_rain(SDL_Surface *s, int x0, int x1, int top, int bottom,
+                      int slant, uint32_t seed, pix_t c)
+{
+    int k, n = (x1 - x0) / 7;
+    uint32_t now = SDL_GetTicks();
+    if (x1 <= x0 || bottom <= top) return;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (k = 0; k < n; ++k) {
+        uint32_t h = scene_hash(seed + (uint32_t)k * 2654435761u);
+        int x = x0 + (int)(h % (uint32_t)(x1 - x0 + 1));
+        int len = 10 + (int)((h >> 8) & 15u);
+        int y = top + (int)(((h >> 12) + now / 9u) % (uint32_t)(bottom - top + 1));
+        int j;
+        for (j = 0; j < len; j += 2) {
+            int px = x - (j * slant) / 8, py = y + j;
+            if (px < 0 || px >= s->w || py < 0 || py >= s->h || py > bottom) continue;
+            PIX_ROW(s, py)[px] = c;
+        }
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
+/* Inside the cloud: grey everywhere, thickening and thinning. */
+static void draw_blinding_cloud(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    int k;
+    draw_cloud_blob(s, 320, 200, 520, 420, (int)g->scroll, 0, 11,
+                    PIX_PACK(150, 154, 160), PIX_PACK(104, 108, 116));
+    draw_rain(s, 0, SCREEN_W - 1, 0, SCREEN_H - 1, 3,
+              SDL_GetTicks() / 160u, PIX_PACK(176, 184, 194));
+    for (k = 0; k < 2; ++k) {
+        uint32_t h = scene_hash(SDL_GetTicks() / 300u + (uint32_t)k);
+        draw_cloud_blob(s, (int)(h % SCREEN_W), (int)((h >> 10) % SCREEN_H),
+                        140, 90, k * 37, 0, 14, PIX_PACK(160, 164, 170),
+                        PIX_PACK(120, 124, 132));
+    }
+}
+
 static void draw_squall_2d(Game *g)
 {
     SDL_Surface *s = g->screen;
     const Squall *q = &g->squall;
-    int k;
+    uint32_t seed = scene_hash((uint32_t)q->a);
+    int k, blobs;
     if (!q->active) return;
     if (sortie_mode(g) == MISSION_SIDE) {
         int x0 = (int)(q->a - g->scroll), x1 = (int)(q->b - g->scroll);
-        int lo = (int)q->lo, hi = (int)q->hi;
-        if (x1 < -40 || x0 > SCREEN_W + 40) return;
-        /* Rain falling from its foot to the ground. */
-        for (k = x0 + 6; k < x1 - 6; k += 9)
-            if (k > -10 && k < SCREEN_W + 10)
-                line(s, k, hi, k - 14, 360, PIX_PACK(120, 128, 138));
-        /* Billows of cloud, each its own height, ragged at both ends,
-         * dark underneath and lit along the top. */
-        for (k = x0 + 12; k <= x1 - 12; k += 24) {
-            uint32_t h = scene_hash((uint32_t)(k + (int)g->scroll) / 24u *
-                                    2654435761u ^ (uint32_t)q->a);
-            int end = k - x0 < 60 || x1 - k < 60;
-            int top = lo + (int)(h % 22u) + (end ? 24 : 0);
-            int bottom = hi - (int)((h >> 8) % 22u) - (end ? 20 : 0);
-            int mid = (top + bottom) / 2, half = (bottom - top) / 2;
-            if (half < 8) continue;
-            ellipse(s, k, mid, 24, half, PIX_PACK(70, 74, 82));
-            ellipse(s, k + 4, bottom - half / 3, 20, half / 3, PIX_PACK(54, 58, 66));
-            ellipse(s, k - 4, top + half / 3, 18, half / 3, PIX_PACK(112, 116, 124));
-            ellipse(s, k - 6, top + half / 5, 10, half / 6 + 1, PIX_PACK(150, 152, 158));
+        int lo = (int)q->lo, hi = (int)q->hi, w = x1 - x0, h = hi - lo;
+        int ox = (int)q->a;
+        if (x1 < -160 || x0 > SCREEN_W + 160) return;
+        /* Rain falling from its foot to the ground, a curtain of it. */
+        draw_rain(s, x0 + w / 8, x1 - w / 8, hi - 10, 360, 4, seed,
+                  PIX_PACK(128, 136, 148));
+        draw_rain(s, x0 + w / 5, x1 - w / 5, hi - 10, 360, 4, seed ^ 0x55u,
+                  PIX_PACK(150, 158, 170));
+        /* The body: big billows and smaller ones, each its own size. */
+        blobs = 4 + w / 160;
+        for (k = 0; k < blobs; ++k) {
+            uint32_t r = scene_hash(seed + (uint32_t)k * 7919u);
+            int bx = x0 + (int)(r % (uint32_t)(w + 1));
+            int by = lo + h / 3 + (int)((r >> 8) % (uint32_t)(h / 3 + 1));
+            int rx = 60 + (int)((r >> 4) % 90u);
+            int ry = h / 3 + (int)((r >> 12) % (uint32_t)(h / 4 + 1));
+            draw_cloud_blob(s, bx, by, rx, ry, ox - x0, 0,
+                            11 + (int)((r >> 20) % 3u),
+                            PIX_PACK(156, 158, 166), PIX_PACK(74, 78, 88));
         }
+        /* Heavy, dark under-belly where the rain comes out. */
+        draw_cloud_blob(s, (x0 + x1) / 2, hi - h / 5, w / 2 + 30, h / 4,
+                        ox, 17, 12, PIX_PACK(96, 100, 110), PIX_PACK(50, 54, 62));
     } else {
         int y1 = SCREEN_H - (int)(q->a - g->scroll);
         int y0 = SCREEN_H - (int)(q->b - g->scroll);
-        int lo = (int)q->lo, hi = (int)q->hi;
-        if (y1 < -40 || y0 > SCREEN_H + 40) return;
-        /* Seen from above: a heap of billows, its shadow beside it. */
-        int cx, cy;
-        for (cy = y0 + 14; cy <= y1 - 14; cy += 26)
-            for (cx = lo + 14; cx <= hi - 14; cx += 30) {
-                uint32_t h = scene_hash((uint32_t)(cy + (int)g->scroll) / 26u *
-                                        2246822519u ^ (uint32_t)cx * 7919u);
-                int edge = cx - lo < 40 || hi - cx < 40 || cy - y0 < 34 ||
-                           y1 - cy < 34;
-                int r = 20 + (int)(h % 10u) - (edge ? 6 : 0);
-                if (edge && (h & 3u) == 0u) continue;
-                ellipse(s, cx, cy, r, r * 4 / 5, PIX_PACK(76, 80, 88));
-                ellipse(s, cx - r / 4, cy - r / 4, r * 3 / 5, r / 2,
-                        PIX_PACK(118, 122, 130));
-                ellipse(s, cx - r / 3, cy - r / 3, r / 4 + 1, r / 5 + 1,
-                        PIX_PACK(156, 158, 164));
-            }
-    }
-    if (in_squall_2d(g)) {
-        dither_rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(84, 88, 96), 2);
-        for (k = 0; k < 40; ++k) {
-            uint32_t h = scene_hash(SDL_GetTicks() / 40u + (uint32_t)k * 977u);
-            int x = (int)(h % SCREEN_W), y = (int)((h >> 10) % SCREEN_H);
-            line(s, x, y, x - 4, y + 12, PIX_PACK(170, 178, 188));
+        int lo = (int)q->lo, hi = (int)q->hi, w = hi - lo, h = y1 - y0;
+        int oy = -(int)g->scroll;
+        if (y1 < -160 || y0 > SCREEN_H + 160) return;
+        /* Its shadow on the ground, offset down-sun, then the cloud. */
+        draw_cloud_blob(s, (lo + hi) / 2 + 26, (y0 + y1) / 2 + 30, w / 2,
+                        h / 2, 0, oy, 7, PIX_PACK(30, 32, 28), PIX_PACK(30, 32, 28));
+        blobs = 5 + (w * h) / 26000;
+        for (k = 0; k < blobs; ++k) {
+            uint32_t r = scene_hash(seed + (uint32_t)k * 7919u);
+            int bx = lo + w / 6 + (int)(r % (uint32_t)(w * 2 / 3 + 1));
+            int by = y0 + h / 6 + (int)((r >> 8) % (uint32_t)(h * 2 / 3 + 1));
+            int rad = 50 + (int)((r >> 4) % 70u);
+            draw_cloud_blob(s, bx, by, rad, rad * 4 / 5 + (int)((r >> 14) % 20u),
+                            0, oy, 10 + (int)((r >> 20) % 5u),
+                            PIX_PACK(176, 178, 182), PIX_PACK(98, 102, 112));
         }
+        draw_rain(s, lo + 10, hi - 10, y0 > 0 ? y0 : 0, y1 < SCREEN_H ? y1 : SCREEN_H - 1,
+                  3, seed, PIX_PACK(190, 196, 206));
     }
+    if (in_squall_2d(g)) draw_blinding_cloud(g);
 }
 
 /* A kite balloon on its cable.  Side-on the cable runs from the winch to
@@ -5892,8 +6008,8 @@ static void start_run_home(Game *g)
     if (g->leg != LEG_OUT) return;
     g->leg = LEG_HOME;
     g->leg_time = 0.0f;
-    g->home_line_at = view_end + 1800.0f;
-    g->field_at = view_end + 3300.0f;
+    g->home_line_at = view_end + 2400.0f;
+    g->field_at = view_end + 4300.0f;
     show_notice(g, g->objectives >= current_mission_goal(g) ?
                 "TASK DONE: HOME" : "TURN FOR HOME");
     /* What lay further on is left to another day. */
@@ -6402,7 +6518,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                         flight_clamp(dt * 4.0f, 0.0f, 1.0f);
     if (!qa_still) g->scroll += g->airspeed * dt;
     /* A tank for a raid with two halves and a run home. */
-    g->fuel -= dt * 0.36f;
+    g->fuel -= dt * 0.30f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
     if (mission_armed(g) && g->ammunition > 0 &&
@@ -7669,32 +7785,23 @@ static void draw_squall_3d(Game *g)
         Projected3D p = project_world_point(g, at);
         int r;
         if (!p.visible || p.depth < 30.0f) continue;
-        r = (int)(170.0f * WORLD_FOCAL / p.depth);
-        if (r < 3) r = 3;
-        if (r > 150) r = 150;
+        r = (int)((150.0f + (float)((h >> 14) % 80u)) * WORLD_FOCAL / p.depth);
+        if (r < 4) r = 4;
+        if (r > 220) r = 220;
         if (p.x < -r || p.x > SCREEN_W + r || p.y < -r || p.y > SCREEN_H + r)
             continue;
         if (k < 3) {
             /* Rain hanging under the cloud base. */
             Projected3D foot = project_world_point(g, (Vec3){at.x, 0.0f, at.z});
-            if (foot.visible && abs(foot.x - p.x) < 400) {
-                int j;
-                for (j = -2; j <= 2; ++j)
-                    line(s, p.x + j * r / 3, p.y, foot.x + j * r / 3 - 6, foot.y,
-                         PIX_PACK(110, 116, 126));
-            }
+            if (foot.visible && foot.y > p.y && abs(foot.x - p.x) < 400)
+                draw_rain(s, p.x - r / 2, p.x + r / 2, p.y, foot.y < SCREEN_H ?
+                          foot.y : SCREEN_H - 1, 2, h, PIX_PACK(126, 134, 146));
         }
-        ellipse(s, p.x, p.y, r, r * 2 / 3, PIX_PACK(74, 78, 88));
-        ellipse(s, p.x - r / 6, p.y - r / 4, r * 2 / 3, r / 3, PIX_PACK(108, 112, 120));
+        draw_cloud_blob(s, p.x, p.y, r, r * 2 / 3, (int)h & 127, k * 23,
+                        12 + (int)((h >> 20) % 4u),
+                        PIX_PACK(140, 144, 152), PIX_PACK(70, 74, 84));
     }
-    if (in_squall_3d(g)) {
-        dither_rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(86, 90, 98), 2);
-        for (k = 0; k < 36; ++k) {
-            uint32_t h = scene_hash(SDL_GetTicks() / 40u + (uint32_t)k * 977u);
-            int x = (int)(h % SCREEN_W), y = (int)((h >> 10) % SCREEN_H);
-            line(s, x, y, x - 3, y + 14, PIX_PACK(170, 178, 188));
-        }
-    }
+    if (in_squall_3d(g)) draw_blinding_cloud(g);
 }
 
 static void df_turn_for_home(Game *g)
@@ -7831,7 +7938,7 @@ static void gunner_spawn_wave(Game *g, int count, int behind)
     int i, k = 0;
     for (i = 0; i < MAX_ENEMIES && k < count; ++i) {
         if (g->enemies[i].active) continue;
-        gunner_place_enemy(g, i, 1900.0f + (float)k * 520.0f);
+        gunner_place_enemy(g, i, 2300.0f + (float)k * 480.0f);
         ++k;
     }
     g->wave_clock = 0.0f;
@@ -7845,9 +7952,9 @@ static void gunner_spawn_wave(Game *g, int count, int behind)
 static int gunner_wave_size(const Game *g, int wave)
 {
     if (!mission_armed(g)) return 1;
-    if (wave == 0) return perspective_spawn_count(g);
-    if (wave == 1) return 2;
-    return 1 + g->chapter / 3;
+    if (wave == 0) return perspective_spawn_count(g) > 2 ? 2 :
+                          perspective_spawn_count(g);
+    return 1;
 }
 
 /* Returns 1 when the sortie is over. */
@@ -7858,7 +7965,6 @@ static int update_gunner_legs(Game *g, float dt)
     if (g->sortie_clock == 0.0f) {
         int i;
         for (i = 0; i < MAX_ENEMIES; ++i) g->enemies[i].active = 0;
-        g->waves = mission_armed(g) ? 4 + g->chapter / 3 : 5;
         g->archie_clock = 3.0f;
     }
     g->sortie_clock += dt;
@@ -7870,31 +7976,36 @@ static int update_gunner_legs(Game *g, float dt)
     if (g->archie_clock <= 0.0f) {
         if (!(armistice_quiet(g) && g->mission >= 9)) archie_fire_2d(g);
         g->archie_clock = (5.5f + random_unit(g) * 4.0f) * pace *
-                          (alive ? 1.8f : 1.0f) * (g->chapter == 0 ? 1.5f : 1.0f);
+                          (alive ? 1.8f : 0.7f) * (g->chapter == 0 ? 1.3f : 1.0f);
     }
     if (g->leg == LEG_OUT) {
+        /* A steady stream of attackers rather than set waves with lulls
+         * between: the next comes in as soon as the sky astern is clear,
+         * and one more joins if the last is taking his time. */
         if (g->wave == 0) {
-            if (g->leg_time > 9.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
-        } else if ((alive == 0 && !enemies_falling(g) && g->wave_clock > 4.0f) ||
-                   g->wave_clock > 45.0f || g->sortie_clock > 170.0f) {
-            if ((alive == 0 && g->wave >= g->waves) || g->sortie_clock > 170.0f) {
+            if (g->leg_time > 6.0f) gunner_spawn_wave(g, gunner_wave_size(g, 0), 0);
+        } else if (g->sortie_clock > 175.0f ||
+                   g->wave >= (mission_armed(g) ? 12 : 8)) {
+            if (alive == 0 || g->wave_clock > 30.0f) {
                 g->leg = LEG_HOME;
                 g->leg_time = 0.0f;
                 show_notice(g, "TOM TURNS FOR HOME");
-            } else if (g->wave < g->waves && (alive == 0 || g->wave_clock > 45.0f)) {
-                if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
-                if (alive || SDL_GetTicks() - g->mission_clear_at > 7000u) {
-                    g->mission_clear_at = 0;
-                    gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
-                }
             }
+        } else if (alive == 0 && !enemies_falling(g)) {
+            if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
+            if (SDL_GetTicks() - g->mission_clear_at > 2500u &&
+                g->wave_clock > 7.0f) {
+                g->mission_clear_at = 0;
+                gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
+            }
+        } else if (alive < 2 && g->wave_clock > 14.0f) {
+            g->mission_clear_at = 0;
+            gunner_spawn_wave(g, 1, 0);
         }
     } else {
-        if (mission_armed(g) && g->chapter >= 1 && g->wave <= g->waves &&
-            g->leg_time > 4.0f && g->leg_time - dt <= 4.0f) {
-            ++g->waves;
+        if (mission_armed(g) && g->chapter >= 1 &&
+            g->leg_time > 4.0f && g->leg_time - dt <= 4.0f)
             gunner_spawn_wave(g, 1, 1);
-        }
         if ((g->leg_time > 28.0f && alive == 0 && !enemies_falling(g)) ||
             g->leg_time > 45.0f)
             return 1;
@@ -8048,12 +8159,20 @@ static const uint8_t *qa_gunner_keys(Game *g, const uint8_t *keys)
         d = abs(sx - (int)g->player_x) + abs(sy - (int)g->player_y);
         if (d < best) { best = d; tx = sx; ty = sy; }
     }
-    if (tx < (int)g->player_x - 6) fake[SDL_SCANCODE_LEFT] = 1;
-    if (tx > (int)g->player_x + 6) fake[SDL_SCANCODE_RIGHT] = 1;
-    if (ty < (int)g->player_y - 6) fake[SDL_SCANCODE_UP] = 1;
-    if (ty > (int)g->player_y + 6) fake[SDL_SCANCODE_DOWN] = 1;
-    if (best < 24 && !gunner_tail_blocks_shot(g, (int)g->player_x, (int)g->player_y))
-        fake[SDL_SCANCODE_SPACE] = 1;
+    /* A man, not a machine: he follows the target a little behind it and
+     * fires once he has held it in the sight for half a second. */
+    {
+        static uint32_t held_since;
+        uint32_t now = SDL_GetTicks();
+        if (tx < (int)g->player_x - 14) fake[SDL_SCANCODE_LEFT] = 1;
+        if (tx > (int)g->player_x + 14) fake[SDL_SCANCODE_RIGHT] = 1;
+        if (ty < (int)g->player_y - 14) fake[SDL_SCANCODE_UP] = 1;
+        if (ty > (int)g->player_y + 14) fake[SDL_SCANCODE_DOWN] = 1;
+        if (best >= 30) held_since = now;
+        if (best < 30 && now - held_since > 500u &&
+            !gunner_tail_blocks_shot(g, (int)g->player_x, (int)g->player_y))
+            fake[SDL_SCANCODE_SPACE] = 1;
+    }
     return fake;
 }
 
@@ -8453,7 +8572,7 @@ static void update_side_sortie(Game *g, float dt, const uint8_t *keys)
     }
     if (!qa_still) g->scroll += g->airspeed * dt;
     /* A tank for the way out, both groups of targets and the way home. */
-    g->fuel -= dt * 0.35f;
+    g->fuel -= dt * 0.30f;
     g->audio.engine_speed = g->airspeed;
     g->audio.engine_load = fabsf(g->player_vy) / 120.0f;
     g->audio.other_engine = 0.0f;
