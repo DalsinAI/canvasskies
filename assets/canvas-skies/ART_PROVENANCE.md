@@ -73,10 +73,13 @@ seat) is painted by `ports/amigaos3/make_cockpit_cellule.py`.
 The squadron mess is rendered by `ports/amigaos3/make_mess.py` on the
 same renderer as the picture house, in three evenings: `mess.bmp` (an
 ordinary good evening), `mess-rowdy.bmp` (the night of a victory) and
-`mess-wake.bmp` (the night of a loss).  The officers, the dog, the flying
-helmet, the map and everything else in the room are built from the
-renderer's own lit solids and surfaces (figures from `figures3d.py`); no
-outside textures, photographs or figures are used.
+`mess-wake.bmp` (the night of a loss).  The officers are made with our own
+rigged figure kit, `ports/amigaos3/figurekit.py`: men built from shaped
+solids on a small skeleton, posed by joint angles, with no outside models,
+textures or reference pictures.  The dog, the flying helmet, the map and
+everything else in the room are built from the renderer's own lit solids
+and surfaces (`figures3d.py`); no outside textures, photographs or figures
+are used.
 
 `explosion-atlas.bmp` and `topdown-explosion-atlas.bmp` are re-cut from
 their painted `-source.png` files by `ports/amigaos3/make_explosion_atlases.py`.
