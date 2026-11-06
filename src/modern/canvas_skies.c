@@ -156,6 +156,12 @@
 #ifndef CANVAS_MESS_BMP
 #define CANVAS_MESS_BMP "assets/canvas-skies/mess.bmp"
 #endif
+#ifndef CANVAS_MESS_ROWDY_BMP
+#define CANVAS_MESS_ROWDY_BMP "assets/canvas-skies/mess-rowdy.bmp"
+#endif
+#ifndef CANVAS_MESS_WAKE_BMP
+#define CANVAS_MESS_WAKE_BMP "assets/canvas-skies/mess-wake.bmp"
+#endif
 #ifndef CANVAS_COCKPIT_CELLULE_BMP
 #define CANVAS_COCKPIT_CELLULE_BMP "assets/canvas-skies/cockpit-cellule.bmp"
 #endif
@@ -692,6 +698,8 @@ typedef struct {
     SDL_Surface *cinema_hut;        /* the picture house, its screen dark */
     SDL_Surface *medals;            /* the decorations and the office crest */
     SDL_Surface *mess;              /* the squadron mess by lamplight */
+    SDL_Surface *mess_rowdy;        /* the same, the night of a victory */
+    SDL_Surface *mess_wake;         /* the same, the night of a loss */
     SDL_Surface *machine_cards;     /* the papers of the new-machines cards */
     SDL_Surface *office_paper;      /* foolscap on the adjutant's desk */
     SDL_Surface *office_stamp;      /* the rubber stamp's frame and its wear */
@@ -6856,12 +6864,37 @@ static void draw_dawn(Game *g)
 
 #define MESS_LINES 4
 
+/* How the evening goes, which picks the painted room (make_mess.py).
+ * A wake when the day cost us someone, or soured us: a wingman sent to
+ * the sick bay, the evening Thyne does not come back, a day we are
+ * ashamed of, or a mess that has turned against us.  A party when we
+ * brought machines down.  Otherwise an ordinary good evening. */
+enum { MESS_QUIET, MESS_ROWDY, MESS_WAKE };
+
+static int mess_mood(const Game *g)
+{
+    if (g->sortie_offences > 0 || wingman_hit(g) >= 0 ||
+        thyne_lost_tonight(g) || g->morale < 30)
+        return MESS_WAKE;
+    return g->kills > 0 ? MESS_ROWDY : MESS_QUIET;
+}
+
+/* The squadron board in the painting: its slate, inside the frame, runs
+ * from (59, 47) to (215, 153).  The chalk goes on in fives, four strokes
+ * and one across, twenty to a row, three rows. */
+#define MESS_SLATE_X 59
+#define MESS_SLATE_Y 47
+
 static void draw_mess(Game *g)
 {
     SDL_Surface *s = g->screen;
     uint32_t elapsed = SDL_GetTicks() - g->reveal_started;
     const CampaignMission *mission = &campaign_missions[g->chapter][g->mission];
     uint32_t pick = scene_hash((uint32_t)(g->chapter * 31 + g->mission) * 2654435761u);
+    int mood = mess_mood(g);
+    SDL_Surface *room = mood == MESS_WAKE && g->mess_wake ? g->mess_wake :
+                        mood == MESS_ROWDY && g->mess_rowdy ? g->mess_rowdy :
+                        g->mess;
     const char *lines[MESS_LINES];
     char first[64], board[32];
     static const char *const toasts[4] = {
@@ -6869,6 +6902,13 @@ static void draw_mess(Game *g)
         "BLUEBOTTLE STANDS ON A CHAIR AND MAKES A SPEECH NOBODY HEARS.",
         "TOM SINGS. NOBODY HAS THE HEART TO STOP HIM.",
         "THE COLONEL LOOKS IN, SAYS WELL DONE, AND LEAVES US TO IT."
+    };
+    /* The same moments on a night with an empty chair in it. */
+    static const char *const quiet_toasts[4] = {
+        "SOMEBODY RAISES A GLASS TO THE MACHINES THAT CAME HOME.",
+        "SOMEONE PUTS ON A RECORD, THEN TAKES IT OFF AGAIN.",
+        "TOM SITS BY THE STOVE. NOBODY ASKS HIM TO SING.",
+        "THE COLONEL LOOKS IN, STANDS A WHILE AT THE BOARD, AND GOES."
     };
     static const char *const close_lines[3] = {
         "THE GRAMOPHONE PLAYS UNTIL THE NEEDLE GIVES OUT.",
@@ -6894,9 +6934,11 @@ static void draw_mess(Game *g)
     lines[0] = "THE MESS, THAT EVENING.";
     lines[1] = first;
     /* Bluebottle's speech waits until he is out of the sick bay. */
-    lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u : (pick & 3u)];
+    lines[2] = mood == MESS_WAKE ? quiet_toasts[pick & 3u] :
+               toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u : (pick & 3u)];
     lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
-                                     close_lines[(pick >> 4) % 3u];
+               mood == MESS_WAKE ? "NOBODY SITS IN HIS CHAIR." :
+                                   close_lines[(pick >> 4) % 3u];
     if (g->sortie_offences > 0) {
         /* Nobody drinks to a day like that. */
         lines[1] = "NOBODY TOASTS ANYTHING. THE GRAMOPHONE STAYS SHUT.";
@@ -6905,16 +6947,18 @@ static void draw_mess(Game *g)
     } else if (g->morale < 30) {
         lines[3] = "THE TALK IS SHORT AND SOUR. THEY HAVE NOT FORGOTTEN.";
     }
-    if (g->mess) {
-        /* The painted room; its board is left clean for the chalk. */
-        SDL_BlitSurface(g->mess, NULL, s, NULL);
+    if (room) {
+        /* The painted room for the evening's mood; its board is left
+         * clean for the chalk, and our own table across the foot of the
+         * picture is kept dark for the lines. */
+        SDL_BlitSurface(room, NULL, s, NULL);
     } else {
         rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
         /* Lamplight and the gramophone horn. */
-        blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
-        circle(s, 520, 118, 4, PIX_PACK(255, 220, 130));
-        fill_triangle(s, 560, 210, 620, 170, 620, 250, PIX_PACK(150, 112, 50));
-        rect(s, 540, 206, 30, 16, PIX_PACK(80, 52, 30));
+        blend_circle(s, 372, 96, 110, 140, 96, 40, 70);
+        circle(s, 372, 94, 4, PIX_PACK(255, 220, 130));
+        fill_triangle(s, 560, 150, 620, 110, 620, 190, PIX_PACK(150, 112, 50));
+        rect(s, 540, 146, 30, 16, PIX_PACK(80, 52, 30));
         /* Bunting strung across the ceiling. */
         for (x = 0; x < SCREEN_W; x += 40) {
             uint32_t c = (x / 40) % 3 == 0 ? PIX_PACK(176, 40, 34) :
@@ -6924,28 +6968,41 @@ static void draw_mess(Game *g)
             fill_triangle(s, x, 14 + sag, x + 30, 14 + sag, x + 15, 38 + sag, c);
         }
         line(s, 0, 14, SCREEN_W, 14, PIX_PACK(120, 100, 70));
-        /* The squadron board: every victory in chalk, today's in yellow. */
-        rect(s, 40, 64, 300, 196, PIX_PACK(96, 62, 34));
-        rect(s, 48, 72, 284, 180, PIX_PACK(26, 38, 30));
+        /* The squadron board, and our own table at the foot. */
+        rect(s, MESS_SLATE_X - 7, MESS_SLATE_Y - 7, 170, 120,
+             PIX_PACK(96, 62, 34));
+        rect(s, MESS_SLATE_X, MESS_SLATE_Y, 156, 106, PIX_PACK(26, 38, 30));
+        rect(s, 0, 300, SCREEN_W, SCREEN_H - 300, PIX_PACK(36, 24, 16));
     }
-    typewriter_text(g, 64, 84, "SQUADRON BOARD", 10, 15, PIX_PACK(232, 228, 214));
+    typewriter_text(g, MESS_SLATE_X + 9, MESS_SLATE_Y + 5, "SQUADRON BOARD",
+                    7, 11, PIX_PACK(232, 228, 214));
     snprintf(board, sizeof(board), "VICTORIES %d", g->victories);
-    typewriter_text(g, 64, 108, board, 7, 11, PIX_PACK(220, 218, 204));
+    typewriter_text(g, MESS_SLATE_X + 9, MESS_SLATE_Y + 21, board, 7, 11,
+                    PIX_PACK(220, 218, 204));
+    /* Every victory in chalk, today's in yellow. */
     for (i = 0; i < g->victories && i < 60; ++i) {
-        int cx = 66 + (i % 15) * 17, cy = 134 + (i / 15) * 26;
+        int cx = MESS_SLATE_X + 12 + ((i % 20) / 5) * 38;
+        int cy = MESS_SLATE_Y + 42 + (i / 20) * 18;
+        int stroke = i % 5;
         int today = i >= g->victories - g->kills;
         uint32_t chalk = today && ((elapsed / 400u) & 1u) ?
                          PIX_PACK(250, 230, 120) :
                          today ? PIX_PACK(240, 214, 96) : PIX_PACK(214, 214, 204);
-        line(s, cx, cy, cx, cy + 16, chalk);
-        line(s, cx + 1, cy, cx + 1, cy + 16, chalk);
+        if (stroke < 4) {
+            line(s, cx + stroke * 7, cy, cx + stroke * 7, cy + 12, chalk);
+            line(s, cx + stroke * 7 + 1, cy, cx + stroke * 7 + 1, cy + 12, chalk);
+        } else {
+            /* The fifth goes across the four. */
+            line(s, cx - 3, cy + 11, cx + 24, cy + 1, chalk);
+            line(s, cx - 2, cy + 11, cx + 25, cy + 1, chalk);
+        }
     }
     for (i = 0; i < MESS_LINES; ++i)
         if (elapsed > 300u + (uint32_t)i * 1100u)
-            typewriter_text(g, 40, 286 + i * 20, lines[i], 7, 11,
+            typewriter_text(g, 40, 304 + i * 19, lines[i], 7, 11,
                             i == 0 ? PIX_PACK(214, 92, 62) : PIX_PACK(226, 210, 172));
     if (elapsed > MESS_LINES * 1100u + 600u)
-        typewriter_text(g, 270, 374, "ENTER", 7, 11, PIX_PACK(200, 180, 140));
+        typewriter_text(g, 300, 381, "ENTER", 7, 11, PIX_PACK(200, 180, 140));
 }
 
 
@@ -11378,6 +11435,8 @@ static int game_init(Game *g)
     g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
     g->medals = SDL_LoadBMP(CANVAS_MEDALS_BMP);
     g->mess = SDL_LoadBMP(CANVAS_MESS_BMP);
+    g->mess_rowdy = SDL_LoadBMP(CANVAS_MESS_ROWDY_BMP);
+    g->mess_wake = SDL_LoadBMP(CANVAS_MESS_WAKE_BMP);
     g->machine_cards = SDL_LoadBMP(CANVAS_MACHINE_CARDS_BMP);
     g->office_paper = SDL_LoadBMP(CANVAS_OFFICE_PAPER_BMP);
     g->office_stamp = SDL_LoadBMP(CANVAS_OFFICE_STAMP_BMP);
@@ -11394,10 +11453,11 @@ static int game_init(Game *g)
             &g->cockpit_revolver, &g->topdown_targets,
             &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
             &g->medals, &g->mess, &g->loss_card, &g->machine_cards,
-            &g->office_paper, &g->office_stamp
+            &g->office_paper, &g->office_stamp,
+            &g->mess_rowdy, &g->mess_wake
         };
         int i;
-        for (i = 0; i < 24; ++i) if (*convert[i]) {
+        for (i = 0; i < 26; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -12293,12 +12353,17 @@ int main(int argc, char **argv)
         set_scene(&g, SCENE_STORY);
         g.story_stage = 1;
     } else if (argc > 1 && strcmp(argv[1], "MESS") == 0) {
-        /* The mess after a good day: seven on the board, two of them new. */
+        /* The mess after a good day: seven on the board, two of them new.
+         * MESS QUIET is an evening with nothing brought down; MESS WAKE
+         * the evening Eccles goes to the sick bay. */
         g.chapter = 2;
         g.mission = 3;
         g.victories = 7;
         g.kills = 2;
         g.success = 1;
+        if (argc > 2 && strcmp(argv[2], "QUIET") == 0) g.kills = 0;
+        if (argc > 2 && strcmp(argv[2], "WAKE") == 0)
+            g.wingman_hit_today[0] = 1;
         set_scene(&g, SCENE_MESS);
     } else if (argc > 2 && strcmp(argv[1], "CINEMA") == 0) {
         /* CINEMA n: chapter n's evening at the picture house. */
@@ -12573,6 +12638,8 @@ int main(int argc, char **argv)
     if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
     if (g.medals) SDL_FreeSurface(g.medals);
     if (g.mess) SDL_FreeSurface(g.mess);
+    if (g.mess_rowdy) SDL_FreeSurface(g.mess_rowdy);
+    if (g.mess_wake) SDL_FreeSurface(g.mess_wake);
     if (g.machine_cards) SDL_FreeSurface(g.machine_cards);
     if (g.office_paper) SDL_FreeSurface(g.office_paper);
     if (g.office_stamp) SDL_FreeSurface(g.office_stamp);
