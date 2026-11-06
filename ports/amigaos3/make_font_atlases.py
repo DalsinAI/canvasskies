@@ -46,6 +46,12 @@ FACES = (
      "Old Standard TT Italic: dates and side items"),
     ("FONT_STENCIL", "stardosstencil/StardosStencil-Bold.ttf", 14,
      "Stardos Stencil Bold: the flying instruments"),
+    ("FONT_MASTHEAD", "unifrakturmaguntia/UnifrakturMaguntia-Book.ttf", 38,
+     "UnifrakturMaguntia: the newspaper's blackletter masthead"),
+    ("FONT_NEWS_DECK", "oldstandardtt/OldStandard-Bold.ttf", 14,
+     "Old Standard TT Bold: headline decks and column heads"),
+    ("FONT_NEWS_SMALL", "oldstandardtt/OldStandard-Regular.ttf", 10,
+     "Old Standard TT: the paper's column text"),
 )
 
 

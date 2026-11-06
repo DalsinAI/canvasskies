@@ -83,8 +83,15 @@ def side_frame(kind, frame):
                gloss=0.25, round_=0.8)             # upper wing, seen edge on
         c.part(R([(30, 28.5), (84, 28.5), (84, 32), (30, 32)]), wing,
                gloss=0.25, round_=0.8)             # lower wing
-        for x in (46, 72):
-            c.line(R([(x, 9)])[0], R([(x - 1, 29)])[0], WOOD, 1.0)
+        # Two bays each side, as on the B.E.2: the near struts stand in two
+        # front-and-rear pairs, the far pair a shade behind them; short
+        # cabane struts carry the centre section over the front cockpit.
+        for x in (40, 50, 66, 76):
+            c.line(R([(x + 1.5, 9.5)])[0], R([(x + 0.5, 28.5)])[0], (60, 44, 30), 1.2)
+        for x in (38, 48, 64, 74):
+            c.line(R([(x, 9.5)])[0], R([(x - 1, 28.5)])[0], WOOD, 1.7)
+        for x in (70, 78):
+            c.line(R([(x, 9.5)])[0], R([(x + 1, 15)])[0], WOOD, 1.4)
         c.part(R([(8, 9), (16, 9), (20, 17), (8, 18)]), wing, round_=0.8)  # fin
         for k, col in enumerate((BLUE, WHITE, RED)):          # rudder stripes
             c.part(R([(2 + k * 2.4, 10), (4.4 + k * 2.4, 10), (4.4 + k * 2.4, 22),
@@ -106,8 +113,13 @@ def side_frame(kind, frame):
                round_=0.8)
         c.part(R([(40, 28.5), (82, 28.5), (82, 32), (40, 32)]), wing,
                gloss=0.25, round_=0.8)
-        for x in (52, 76):
-            c.line(R([(x, 8.5)])[0], R([(x - 2, 29)])[0], WOOD, 1.1)
+        # One bay, a front and rear strut each side, and the cabanes.
+        for x in (54, 76):
+            c.line(R([(x + 1.5, 9)])[0], R([(x - 0.5, 28.5)])[0], (60, 44, 30), 1.2)
+        for x in (52, 74):
+            c.line(R([(x, 9)])[0], R([(x - 2, 28.5)])[0], WOOD, 1.8)
+        for x in (72, 80):
+            c.line(R([(x, 9)])[0], R([(x + 1, 13.5)])[0], WOOD, 1.4)
         c.part(R([(6, 8), (16, 8), (22, 17), (6, 19)]), body, round_=1.0)
         for k, col in enumerate((BLUE, WHITE, RED)):
             c.part(R([(2 + k * 2.4, 9), (4.4 + k * 2.4, 9), (4.4 + k * 2.4, 22),
@@ -125,7 +137,11 @@ def side_frame(kind, frame):
                round_=0.4)
         c.part(R([(50, 14), (80, 14), (80, 16.5), (50, 16.5)]), wing,
                gloss=0.25, round_=0.6)             # the shoulder wing
-        c.line(R([(62, 13)])[0], R([(62, 5)])[0], DARK, 1.0)   # the pylon
+        c.line(R([(62, 13)])[0], R([(62, 4)])[0], DARK, 1.6)   # the pylon
+        c.line(R([(62, 4)])[0], R([(44, 14)])[0], (60, 56, 50), 0.6)
+        c.line(R([(62, 4)])[0], R([(82, 14)])[0], (60, 56, 50), 0.6)
+        c.line(R([(68, 36)])[0], R([(50, 16.5)])[0], (60, 56, 50), 0.6)  # landing
+        c.line(R([(68, 36)])[0], R([(80, 16.5)])[0], (60, 56, 50), 0.6)
         c.line(R([(62, 5)])[0], R([(52, 14)])[0], (60, 56, 50), 0.5)
         c.line(R([(62, 5)])[0], R([(76, 14)])[0], (60, 56, 50), 0.5)
         c.part(R([(6, 10), (14, 9), (20, 18), (6, 20)]), WHITE, round_=1.2)
@@ -144,9 +160,11 @@ def side_frame(kind, frame):
                round_=0.8)                         # thick square upper wing
         c.part(R([(42, 28.5), (78, 28.5), (78, 31.5), (42, 31.5)]),
                LOZENGE[1], gloss=0.2, round_=0.8)
+        for x in (74, 80):                         # cabanes
+            c.line(R([(x, 9)])[0], R([(x + 1, 13.5)])[0], DARK, 1.4)
         for x in (52, 72):                         # N-struts
-            c.line(R([(x, 9)])[0], R([(x - 3, 28.5)])[0], DARK, 1.0)
-        c.line(R([(52, 9)])[0], R([(69, 28.5)])[0], DARK, 0.8)
+            c.line(R([(x, 9)])[0], R([(x - 3, 28.5)])[0], DARK, 1.7)
+        c.line(R([(52, 9)])[0], R([(69, 28.5)])[0], DARK, 1.3)
         c.part(R([(6, 9), (16, 9), (22, 18), (6, 20)]), WHITE, round_=1.2)
         cross(c, *R([(12, 14.5)])[0], 4.2)
         cross(c, *R([(40, 21.5)])[0], 4.6)
@@ -267,7 +285,18 @@ def top_view(kind):
     if kind == "twoseat":
         c.part([(cx - 3, 36), (cx + 3, 36), (cx + 3, 41), (cx - 3, 41)], DARK,
                round_=1.0)
-    for x in (cx - span * 0.72, cx + span * 0.72):
+    # Strut stations: the tops of the front and rear interplane struts (and,
+    # on the two-seater, the outer bay too), with the shadow they cast.
+    stations = (0.38, 0.72) if kind == "twoseat" else (0.6,)
+    for f in stations:
+        for side in (-1, 1):
+            for y in (20 + chord * 0.25, 20 + chord * 0.72):
+                x = cx + side * span * f
+                c.part([(x + 1, y + 1), (x + 3.4, y + 3.4)], (40, 34, 28),
+                       shape="ellipse", gloss=0.0, rim=0.0, round_=0.2)
+                c.part([(x - 1.2, y - 1.2), (x + 1.2, y + 1.2)], (84, 56, 36),
+                       shape="ellipse", gloss=0.4, round_=0.1)
+    for x in (cx - span * 0.82, cx + span * 0.82):
         roundel(c, x, 20 + chord / 2, chord * 0.42)
     c.part([(cx - 16, 1), (cx + 16, 3.5)], (140, 110, 70), shape="ellipse",
            gloss=0.0, rim=0.0, round_=0.2)         # propeller disc

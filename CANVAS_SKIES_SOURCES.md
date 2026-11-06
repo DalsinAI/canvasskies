@@ -253,3 +253,16 @@ The choices follow the period: Fell's engraved roman for formal titles, a
 worn office typewriter for orders, a pencilled hand for the diary, a late
 Victorian Modern serif of the kind newspapers were set in, and the stencil
 lettering painted on crates and petrol tins.
+
+The newspaper's masthead is set in UnifrakturMaguntia (Peter Wiegel and
+j. 'mach' wust, SIL Open Font License 1.1), a blackletter of the kind the
+London dailies used for their titles. Its licence is in
+`assets/fonts/unifrakturmaguntia/`.
+
+The front page follows the layout of British dailies of 1914-1918 such as
+the Daily Mirror, the Daily Express and The Times: a blackletter masthead
+between rules with an ear each side, a dateline with the paper's number, a
+main head over stacked decks, narrow justified columns divided by rules,
+small boxed notices, and (as the Mirror did) a screened photograph. The
+photograph is our own title painting, dithered; the filler items and
+notices are written for the game.

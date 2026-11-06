@@ -137,6 +137,9 @@
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
 #endif
+#ifndef CANVAS_NEWSPAPER_TABLE_BMP
+#define CANVAS_NEWSPAPER_TABLE_BMP "assets/canvas-skies/newspaper-table.bmp"
+#endif
 #ifndef CANVAS_SIDE_CIVILIANS_BMP
 #define CANVAS_SIDE_CIVILIANS_BMP "assets/canvas-skies/side-civilians.bmp"
 #endif
@@ -645,6 +648,7 @@ typedef struct {
     SDL_Surface *topdown_explosion_atlas;
     SDL_Surface *topdown_targets;   /* the painted mission targets */
     SDL_Surface *side_civilians;    /* farms, a church, carts, side-on */
+    SDL_Surface *newspaper_table;   /* the paper on its bundle, untyped */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
     SDL_Surface *player_sprites;
     SDL_Surface *enemy_sprites;
@@ -6350,78 +6354,260 @@ static void draw_loss_card(Game *g)
 }
 
 /* Grey bars standing in for the columns of small print. */
-static void draw_newsprint(SDL_Surface *s, int x, int y, int w, int lines,
-                           uint32_t seed, uint32_t colour)
+/* A front page of the morning paper. */
+/* ---- The morning paper ---------------------------------------------------
+ *
+ * Laid out like the London dailies of 1914-1918: a blackletter masthead
+ * between rules with an ear each side, a dateline with the number, a
+ * main head over stacked decks, then narrow justified columns divided by
+ * hairline rules, a screened photograph and small notices.  The paper,
+ * its bundle and string are painted (make_newspaper_table.py); the type
+ * is set here.  The cable copy is stored in capitals and set in upper and
+ * lower case, with the names that keep their capitals listed below. */
+static const char *const news_proper[] = {
+    "ABOUKIR", "ADMIRALTY", "ADRIATIC", "ALLIES", "ALLIES'", "AMERICA",
+    "AMERICA'S", "AMIENS", "ANZAC", "APRIL", "ARMENIAN", "AUGUST", "AUSTRIA",
+    "BALDWIN", "BALKANS", "BALUCHISTAN", "BARON", "BEATTY'S", "BEAUMONT",
+    "BELGIAN", "BELGIUM", "BERLIN", "BOELCKE", "BOLSHEVIKS", "BRAZIL",
+    "BRITAIN", "BRITISH", "BRUSSELS", "BRYAN'S", "BULGARIAN", "BULLECOURT",
+    "CAMBRAI", "CANADIAN", "CANADIANS", "CAPT", "CAVELL", "CHRISTMAS",
+    "COLOGNE", "COMMONS", "CONGRESS", "COURCELLETTE", "COURTRAI", "CRESSY",
+    "CUBA", "CUNARD", "DECEMBER", "DOUGLAS", "DOWNING", "DUBLIN", "EDITH",
+    "ENGLAND", "ERZBERGER", "ESSEN", "ESSEX", "EXCELLENCY", "FEBRUARY",
+    "FINLAND", "FORMIDABLE", "FRANCE", "FRENCH", "GALLIPOLI", "GAZA",
+    "GEORGE", "GERMAN", "GERMANS", "GERMANY", "GHENT", "GIBRALTAR", "GORIZIA",
+    "HAIG", "HAIG'S", "HAMEL", "HAMPSHIRE", "HARTLEPOOL", "HINDENBURG",
+    "HOGUE", "I", "IRELAND", "JAMES", "JANUARY", "JERUSALEM", "JOHN", "JULY",
+    "JUNE", "KAISER", "KAISER'S", "KIEL", "KING", "KINSALE", "KITCHENER",
+    "KITCHENER'S", "LLOYD", "LONDON", "LOOS", "LORD", "LUSITANIA", "MANNOCK",
+    "MARY'S", "MASSEY'S", "MCCUDDEN", "MESSINES", "MONDAY", "MONS",
+    "MOORHOUSE", "MOSCOW", "MR", "NGAURUHOE", "NORFOLK", "NORWAY", "NOVEMBER",
+    "OCTOBER", "ORKNEY", "PARIS", "PASSCHENDAELE", "PIRONGIA", "QUENTIN",
+    "REUTER", "RICHTHOFEN", "RUSSIA", "SANDRINGHAM", "SCARBOROUGH", "SCARPE",
+    "SEPTEMBER", "SERVIANS", "SIBERIAN", "SIR", "SOMME", "SPAIN", "ST",
+    "STATES", "SUVLA", "TATIANA", "TONGARIRO", "UNITED", "VENICE", "VERDUN",
+    "VIMY", "VON", "WARNEFORD", "WARNEFORD'S", "WESTMINSTER", "WILSON",
+    "WINDSOR", "ZEPPELIN", "ZEPPELINS", "ZEPPS"
+};
+
+/* Capitals to sentence case, keeping names and initials ("A.M.", "R.F.C."). */
+static void news_case(const char *str, char *buf, int size)
 {
-    int i;
-    for (i = 0; i < lines; ++i) {
-        uint32_t h = scene_hash(seed + (uint32_t)i * 2654435761u);
-        int len = i % 7 == 6 ? w / 3 + (int)(h % (uint32_t)(w / 3)) :
-                  w - (int)(h % 14u);
-        rect(s, x, y + i * 6, len, 2, colour);
+    int n = 0, sentence = 1;
+    while (*str && n < size - 1) {
+        const char *end = str;
+        int len, i, keep = 0, k, initials;
+        if (*str == ' ') { buf[n++] = *str++; continue; }
+        while (*end && *end != ' ') ++end;
+        len = (int)(end - str);
+        while (len > 1 && (str[len - 1] == '.' || str[len - 1] == ',' ||
+                           str[len - 1] == ';' || str[len - 1] == ':'))
+            --len;                              /* the word without its stop */
+        initials = 0;
+        for (i = 0; i + 1 < len; ++i)
+            if (str[i] == '.' && str[i + 1] != ' ') keep = initials = 1;
+        for (k = 0; !keep && k < (int)(sizeof(news_proper) /
+                                       sizeof(news_proper[0])); ++k)
+            if ((int)strlen(news_proper[k]) == len &&
+                strncmp(news_proper[k], str, (size_t)len) == 0)
+                keep = 1;
+        for (i = 0; i < (int)(end - str) && n < size - 1; ++i) {
+            char c = str[i];
+            /* Names keep their capital letter; initials keep them all. */
+            int capital = i == 0 && (sentence || keep);
+            int dotted = initials && i + 1 < (int)(end - str) &&
+                         str[i + 1] == '.';
+            if (!capital && !dotted && c >= 'A' && c <= 'Z' &&
+                !(len == 1 && str[0] == 'I'))
+                c = (char)(c - 'A' + 'a');
+            buf[n++] = c;
+        }
+        sentence = end[-1] == '.' || end[-1] == '!' || end[-1] == '?';
+        str = end;
     }
+    buf[n] = '\0';
 }
 
-/* A front page of the morning paper. */
+/* Sets text in a column 'w' wide, justified, from baseline 'y'; returns
+ * the baseline after the last line, or stops at 'bottom'. */
+static int news_column(Game *g, FontId font, int x, int y, int w, int line_h,
+                       int bottom, const char *text, uint32_t ink)
+{
+    const char *p = text;
+    while (*p && y <= bottom) {
+        const char *words[24];
+        int lens[24], count = 0, width = 0, space = font_width(font, " ");
+        int k, gap_total, last;
+        while (*p == ' ') ++p;
+        while (*p && count < 24) {
+            const char *q = p;
+            int wl, ww;
+            while (*q && *q != ' ') ++q;
+            wl = (int)(q - p);
+            ww = font_width_n(font, p, wl);
+            if (count && width + space + ww > w) break;
+            words[count] = p; lens[count] = wl;
+            width += (count ? space : 0) + ww;
+            ++count;
+            p = q;
+            while (*p == ' ') ++p;
+        }
+        if (!count) break;
+        last = !*p;
+        gap_total = w - (width - space * (count - 1));
+        {
+            int cx = x;
+            for (k = 0; k < count; ++k) {
+                char word[48];
+                int wl = lens[k] < 47 ? lens[k] : 47;
+                memcpy(word, words[k], (size_t)wl);
+                word[wl] = '\0';
+                font_text(g, font, cx, y, word, ink);
+                cx += font_width_n(font, words[k], lens[k]);
+                if (k + 1 < count)
+                    cx += last || count == 1 ? space :
+                          gap_total / (count - 1) +
+                          (k < gap_total % (count - 1) ? 1 : 0);
+            }
+        }
+        y += line_h;
+    }
+    return y;
+}
+
+/* Filler for the inside columns: war news of the period kind, written for
+ * the game. */
+static const char *const news_filler[][2] = {
+    {"CASUALTIES", "The War Office issues a further list of officers "
+     "and men killed, wounded and missing. Relatives are asked not to call "
+     "at the Office in person but to await the post."},
+    {"FOOD PRICES", "The price of bread is unchanged this week. Sugar remains "
+     "short in the northern towns, and grocers are asked to ration their "
+     "customers fairly."},
+    {"MUNITIONS", "Another national shell factory opened yesterday. Women "
+     "now make up the greater part of its hands, and the output is said to "
+     "exceed every estimate."},
+    {"THE FRONT", "A correspondent with the army writes of mud to the "
+     "knee and rain that has not stopped for a week. The men are cheerful and "
+     "ask for socks."},
+    {"AIRMEN", "Our airmen continue to be active over the "
+     "enemy's lines. Several of our machines did not return. The enemy lost "
+     "more."},
+    {"LONDON", "The theatres are full of men on leave. A concert for "
+     "wounded soldiers at the Albert Hall raised a handsome sum for the "
+     "hospitals."}
+};
+
+static const char *const news_notices[][3] = {
+    {"WAR SAVINGS", "Certificates 15s. 6d.", "at any Post Office."},
+    {"PARCELS", "Cake, tobacco, socks", "for him: from 2s. 6d."},
+    {"TRENCH COATS", "Proofed, 3 guineas.", "Outfitters, Strand."}
+};
+
 static void draw_newspaper(Game *g, int index, const char *footer)
 {
     SDL_Surface *s = g->screen;
     const NewsItem *n = &news_items[index];
-    uint32_t ink = PIX_PACK(36, 30, 26);
-    uint32_t red = PIX_PACK(128, 36, 28);
-    uint32_t grey = PIX_PACK(150, 140, 120);
-    uint32_t paper = PIX_PACK(222, 210, 178);
-    int w, i;
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(30, 22, 16));
-    rect(s, 36, 20, 580, 372, PIX_PACK(16, 12, 10));
-    rect(s, 30, 14, 580, 372, paper);
-    blend_rect(s, 30, 14, 580, 372, 180, 150, 90, 40);
-    /* Newsprint: an engraved masthead over a Modern serif, as the
-     * papers of the day were set. */
-    w = display_width(NEWS_MASTHEAD, 28);
-    display_text(g, 320 - w / 2, 22, NEWS_MASTHEAD, 22, 28, ink);
-    rect(s, 44, 56, 552, 2, ink);
-    font_text(g, FONT_NEWS_ITALIC, 46, 71, "Price One Penny", ink);
-    font_text(g, FONT_NEWS_BODY, 594 - font_width(FONT_NEWS_BODY, n->date),
-              71, n->date, ink);
-    rect(s, 44, 75, 552, 1, ink);
-    rect(s, 44, 78, 552, 1, ink);
-    w = font_width(FONT_NEWS_HEAD, n->headline);
-    if (w <= 548)
-        font_text(g, FONT_NEWS_HEAD, 320 - w / 2, 106, n->headline, red);
+    pix_t ink = PIX_PACK(30, 28, 26), grey = PIX_PACK(120, 116, 108);
+    char buf[200], lead[400];
+    int i, y, col_w = 96, gap = 9, x0 = 56, colx[5];
+    if (g->newspaper_table) SDL_BlitSurface(g->newspaper_table, NULL, s, NULL);
+    else rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(232, 230, 220));
+    for (i = 0; i < 5; ++i) colx[i] = x0 + i * (col_w + gap);
+    /* Ears and masthead between rules. */
+    rect(s, 56, 16, 74, 34, ink); rect(s, 57, 17, 72, 32, PIX_PACK(232, 230, 220));
+    font_text(g, FONT_NEWS_DECK, 62, 30, "ONE", ink);
+    font_text(g, FONT_NEWS_DECK, 62, 45, "PENNY", ink);
+    rect(s, 510, 16, 74, 34, ink); rect(s, 511, 17, 72, 32, PIX_PACK(232, 230, 220));
+    font_text(g, FONT_NEWS_SMALL, 516, 29, "WAR", ink);
+    font_text(g, FONT_NEWS_SMALL, 516, 43, "EDITION", ink);
+    font_text(g, FONT_MASTHEAD,
+              320 - font_width(FONT_MASTHEAD, "The Western Courier") / 2, 50,
+              "The Western Courier", ink);
+    rect(s, 52, 56, 536, 2, ink);
+    snprintf(buf, sizeof(buf), "No. %d", 3800 + index * 37);
+    font_text(g, FONT_NEWS_SMALL, 56, 67, buf, ink);
+    font_text(g, FONT_NEWS_SMALL, 320 - font_width(FONT_NEWS_SMALL, n->date) / 2,
+              67, n->date, ink);
+    font_text(g, FONT_NEWS_SMALL, 584 - font_width(FONT_NEWS_SMALL,
+              "[REGISTERED AS A NEWSPAPER]"), 67,
+              "[REGISTERED AS A NEWSPAPER]", ink);
+    rect(s, 52, 71, 536, 1, ink);
+    rect(s, 52, 73, 536, 1, ink);
+    /* The main head across the page, decks beneath it. */
+    i = font_width(FONT_NEWS_HEAD, n->headline);
+    if (i <= 530)
+        font_text(g, FONT_NEWS_HEAD, 320 - i / 2, 96, n->headline, ink);
     else
-        display_text(g, 320 - display_width(n->headline, 18) / 2, 90,
-                     n->headline, 12, 18, red);
-    rect(s, 44, 116, 552, 1, ink);
-    for (i = 0; i < 3; ++i)
-        if (n->body[i])
-            font_text(g, FONT_NEWS_BODY, 50, 136 + i * 17, n->body[i], ink);
-    /* Three columns of the rest of the day's news. */
-    for (i = 0; i < 3; ++i) {
-        int cx = 50 + i * 184;
-        draw_newsprint(s, cx, 188, 168, 18, (uint32_t)index * 97u + (uint32_t)i,
-                       grey);
-        if (i < 2) rect(s, cx + 176, 184, 1, 112, grey);
+        font_text(g, FONT_NEWS_DECK, 320 - font_width(FONT_NEWS_DECK,
+                  n->headline) / 2, 94, n->headline, ink);
+    if (n->brief[0])
+        font_text(g, FONT_NEWS_DECK, 320 - font_width(FONT_NEWS_DECK,
+                  n->brief[0]) / 2, 113, n->brief[0], ink);
+    if (n->brief[1]) {
+        news_case(n->brief[1], buf, (int)sizeof(buf));
+        font_text(g, FONT_NEWS_ITALIC, 320 - font_width(FONT_NEWS_ITALIC,
+                  buf) / 2, 127, buf, ink);
     }
-    rect(s, 44, 300, 552, 1, ink);
-    font_text(g, FONT_NEWS_ITALIC, 50, 316, "In Brief", red);
-    if (n->brief[0]) font_text(g, FONT_NEWS_BODY, 50, 334, n->brief[0], ink);
-    if (g->offence_last_sortie && g->scene == SCENE_STORY)
-        font_text(g, FONT_NEWS_BODY, 330, 334, "INQUIRY INTO AN AIRMAN'S CONDUCT.",
-                  ink);
-    else if (n->brief[1])
-        font_text(g, FONT_NEWS_BODY, 330, 334, n->brief[1], ink);
-    rect(s, 320, 304, 1, 36, grey);
-    rect(s, 44, 344, 552, 1, ink);
-    if (footer)
-        typewriter_text(g, 320 - typewriter_width(footer, 11) / 2, 356, footer,
-                        7, 11, red);
+    rect(s, 52, 131, 536, 1, ink);
+    for (i = 1; i < 5; ++i)                             /* column rules */
+        if (i == 3) rect(s, colx[i] - gap / 2 - 1, 268, 1, 96, grey);
+        else rect(s, colx[i] - gap / 2 - 1, 136, 1, 228, grey);
+    /* Columns 1 and 2: the day's story, then a filler item. */
+    lead[0] = '\0';
+    for (i = 0; i < 3 && n->body[i]; ++i) {
+        strncat(lead, n->body[i], sizeof(lead) - strlen(lead) - 2);
+        strncat(lead, " ", sizeof(lead) - strlen(lead) - 1);
+    }
+    news_case(lead, buf, (int)sizeof(buf));
+    y = news_column(g, FONT_NEWS_SMALL, colx[0], 146, col_w, 11, 362, buf, ink);
+    y += 6;
+    font_text(g, FONT_NEWS_DECK, colx[0], y, news_filler[index % 6][0], ink);
+    news_column(g, FONT_NEWS_SMALL, colx[0], y + 13, col_w, 11, 362,
+                news_filler[index % 6][1], ink);
+    y = news_column(g, FONT_NEWS_SMALL, colx[1], 146, col_w, 11, 362,
+                    news_filler[(index + 1) % 6][1], ink);
+    /* Columns 3 and 4: the screened photograph (painted in), its caption,
+     * and more news. */
+    font_text(g, FONT_NEWS_ITALIC, 366 - font_width(FONT_NEWS_ITALIC,
+              "Our airmen: a machine at the hangars.") / 2, 252,
+              "Our airmen: a machine at the hangars.", ink);
+    font_text(g, FONT_NEWS_DECK, colx[2], 280, news_filler[(index + 2) % 6][0], ink);
+    news_column(g, FONT_NEWS_SMALL, colx[2], 293, col_w, 11, 362,
+                news_filler[(index + 2) % 6][1], ink);
+    font_text(g, FONT_NEWS_DECK, colx[3], 280, news_filler[(index + 3) % 6][0], ink);
+    news_column(g, FONT_NEWS_SMALL, colx[3], 293, col_w, 11, 362,
+                news_filler[(index + 3) % 6][1], ink);
+    /* Column 5: the notices, boxed and centred, as the small display
+     * advertisements were set. */
+    y = 140;
+    for (i = 0; i < 3; ++i) {
+        const char *const *ad = news_notices[(index + i) % 3];
+        int cx = colx[4] + col_w / 2, h = 54;
+        rect(s, colx[4] - 2, y, col_w + 4, 1, ink);
+        rect(s, colx[4] - 2, y + h, col_w + 4, 1, ink);
+        rect(s, colx[4] - 2, y, 1, h, ink);
+        rect(s, colx[4] + col_w + 1, y, 1, h, ink);
+        font_text(g, font_width(FONT_NEWS_DECK, ad[0]) < col_w - 4 ?
+                  FONT_NEWS_DECK : FONT_NEWS_SMALL,
+                  cx - font_width(font_width(FONT_NEWS_DECK, ad[0]) < col_w - 4 ?
+                                  FONT_NEWS_DECK : FONT_NEWS_SMALL, ad[0]) / 2,
+                  y + 17, ad[0], ink);
+        font_text(g, FONT_NEWS_SMALL, cx - font_width(FONT_NEWS_SMALL, ad[1]) / 2,
+                  y + 32, ad[1], ink);
+        font_text(g, FONT_NEWS_SMALL, cx - font_width(FONT_NEWS_SMALL, ad[2]) / 2,
+                  y + 45, ad[2], ink);
+        y += h + 10;
+    }
+    if (footer)          /* in the foot margin, clear of the string */
+        typewriter_text(g, 300 - typewriter_width(footer, 11) / 2, 374, footer,
+                        7, 11, PIX_PACK(128, 36, 28));
 }
 
 static void draw_scrapbook(Game *g)
 {
     SDL_Surface *s = g->screen;
-    char buf[48];
+    char buf[80];
     int i, total = 0, place = 0;
     for (i = 0; i < NEWS_COUNT; ++i)
         if (news_unlocked(g, i)) {
@@ -6443,11 +6629,9 @@ static void draw_scrapbook(Game *g)
                         PIX_PACK(36, 30, 26));
         return;
     }
-    draw_newspaper(g, g->scrap_index,
-                   "LEFT / RIGHT  TURN THE PAGE    ENTER  BACK");
-    snprintf(buf, sizeof(buf), "CUTTING %d OF %d", place, total);
-    typewriter_text(g, 320 - typewriter_width(buf, 11) / 2, 372, buf, 7, 11,
-                    PIX_PACK(36, 30, 26));
+    snprintf(buf, sizeof(buf), "CUTTING %d OF %d    LEFT / RIGHT  TURN    ENTER  BACK",
+             place, total);
+    draw_newspaper(g, g->scrap_index, buf);
 }
 
 /* ---- Before and after --------------------------------------------------
@@ -9226,26 +9410,53 @@ static int draw_aircraft_mesh(Game *g, const AircraftPose *pose,
             }
         }
     }
-    /* Struts, wires, undercarriage, pilot and the spinning propeller. */
-    if (centre.depth < 520.0f) {
-        static const float struts[][6] = {
-            {-5.6f, 1.35f, 0.9f, -5.1f, -0.95f, 0.9f},
-            {5.6f, 1.35f, 0.9f, 5.1f, -0.95f, 0.9f},
-            {-5.6f, 1.35f, -0.4f, -5.1f, -0.95f, -0.4f},
-            {5.6f, 1.35f, -0.4f, 5.1f, -0.95f, -0.4f},
-            {-0.7f, 1.35f, 1.2f, -0.6f, 0.7f, 1.6f},
-            {0.7f, 1.35f, 1.2f, 0.6f, 0.7f, 1.6f},
-            {-0.6f, -0.8f, 2.6f, -0.9f, -2.1f, 2.4f},
-            {0.6f, -0.8f, 2.6f, 0.9f, -2.1f, 2.4f}
-        };
+    /* Struts, wires, undercarriage, pilot and the spinning propeller.  The
+     * struts follow the machine's own rigging and are drawn as lines at
+     * every range, so a distant biplane never shows floating wings. */
+    if (centre.depth < 1600.0f) {
+        float struts[10][6];
+        int count = 0;
         pix_t strut = pix_mix(PIX_PACK(42, 34, 28), g->world_haze, haze);
+        {
+            const MachineType *t = kind == 1 ?
+                &our_machines[our_machine_index(mesh_chapter)] :
+                &their_machines[kind == 3 ? 1 : their_machine_index(mesh_chapter)];
+            float scale = kind == 3 ? 1.5f : 1.0f;
+            float chord = t->chord * 2.0f, gap = t->gap * 1.55f;
+            float up_y = t->monoplane ? 0.35f : gap * 0.58f, low_y = -gap * 0.42f;
+            float up_le = 1.8f + t->stagger * 2.0f, sx = t->span * 0.64f;
+            float fs = up_le - chord * 0.3f, rs = up_le - chord * 0.75f;
+            float st = t->stagger * 2.0f;
+            int side;
+#define STRUT(a, b, c2, d, e, f) do { if (count < 10) { \
+    struts[count][0] = (a) * scale; struts[count][1] = (b) * scale; \
+    struts[count][2] = (c2) * scale; struts[count][3] = (d) * scale; \
+    struts[count][4] = (e) * scale; struts[count][5] = (f) * scale; \
+    ++count; } } while (0)
+            for (side = -1; side <= 1; side += 2) {
+                float x = (float)side * sx;
+                if (t->monoplane) {
+                    STRUT(0.0f, 1.9f, 0.6f, x, up_y, 0.6f);
+                    STRUT(0.0f, -1.6f, 0.9f, x, up_y, 0.6f);
+                } else {
+                    STRUT(x, up_y, fs, x * 0.95f, low_y, fs - st);
+                    STRUT(x, up_y, rs, x * 0.95f, low_y, rs - st);
+                    STRUT((float)side * 0.7f, up_y, fs, (float)side * 0.6f,
+                          0.7f, fs + 0.4f);
+                }
+                STRUT((float)side * 0.6f, -0.8f, 2.6f, (float)side * 0.9f,
+                      -2.1f, 2.4f);
+            }
+            if (t->monoplane) STRUT(0.0f, up_y, 0.6f, 0.0f, 1.9f, 0.6f);
+#undef STRUT
+        }
         Projected3D head = project_world_point(g,
             pose_point(pose, 0.0f, 1.0f, -0.4f));
         Projected3D hub = project_world_point(g,
             pose_point(pose, 0.0f, 0.0f, 4.7f));
         Projected3D tip = project_world_point(g,
             pose_point(pose, 0.0f, 1.3f, 4.7f));
-        for (i = 0; i < 8; ++i) {
+        for (i = 0; i < count; ++i) {
             Projected3D a = project_world_point(g, pose_point(pose,
                 struts[i][0], struts[i][1], struts[i][2]));
             Projected3D b = project_world_point(g, pose_point(pose,
@@ -10405,14 +10616,22 @@ static void draw_late_edition(Game *g)
     SDL_Surface *s = g->screen;
     char words[200];
     late_edition_text(g, words, sizeof(words));
-    rect(s, 410, 62, 196, 172, PIX_PACK(30, 22, 16));
-    rect(s, 406, 58, 196, 172, PIX_PACK(222, 210, 178));
-    circle(s, 504, 64, 3, PIX_PACK(150, 40, 30));
-    typewriter_text(g, 416, 72, "LATE EDITION", 7, 11, PIX_PACK(128, 36, 28));
-    typewriter_text(g, 416, 86, NEWS_MASTHEAD, 7, 11, PIX_PACK(36, 30, 26));
-    rect(s, 414, 100, 180, 1, PIX_PACK(36, 30, 26));
-    wrapped_text_limit(g, 416, 106, words, 25, 15, 1000, 1,
-                       PIX_PACK(36, 30, 26));
+    {
+        /* A torn-off column of the late edition pinned to the board:
+         * white newsprint, the masthead in blackletter, set in columns. */
+        pix_t ink = PIX_PACK(30, 28, 26);
+        char cased[200];
+        rect(s, 410, 62, 196, 172, PIX_PACK(30, 22, 16));
+        rect(s, 406, 58, 196, 172, PIX_PACK(232, 230, 220));
+        blend_rect(s, 406, 58, 196, 172, 200, 196, 180, 30);
+        circle(s, 504, 64, 3, PIX_PACK(150, 40, 30));
+        font_text(g, FONT_NEWS_DECK, 416, 80, "LATE EDITION", PIX_PACK(128, 36, 28));
+        font_text(g, FONT_NEWS_ITALIC, 416, 96, "The Western Courier", ink);
+        rect(s, 414, 101, 180, 1, ink);
+        rect(s, 414, 103, 180, 1, ink);
+        news_case(words, cased, (int)sizeof(cased));
+        news_column(g, FONT_NEWS_SMALL, 416, 116, 176, 12, 222, cased, ink);
+    }
 }
 
 static void draw_debrief(Game *g)
@@ -10797,6 +11016,7 @@ static int game_init(Game *g)
     g->topdown_explosion_atlas = SDL_LoadBMP(CANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP);
     g->topdown_targets = SDL_LoadBMP(CANVAS_TOPDOWN_TARGETS_BMP);
     g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
+    g->newspaper_table = SDL_LoadBMP(CANVAS_NEWSPAPER_TABLE_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -10807,10 +11027,10 @@ static int game_init(Game *g)
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
             &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
-            &g->side_civilians
+            &g->side_civilians, &g->newspaper_table
         };
         int i;
-        for (i = 0; i < 17; ++i) if (*convert[i]) {
+        for (i = 0; i < 18; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11671,6 +11891,7 @@ int main(int argc, char **argv)
     if (g.rear_carbine) SDL_FreeSurface(g.rear_carbine);
     if (g.topdown_targets) SDL_FreeSurface(g.topdown_targets);
     if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
+    if (g.newspaper_table) SDL_FreeSurface(g.newspaper_table);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
