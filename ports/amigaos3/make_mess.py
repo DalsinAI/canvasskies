@@ -2,7 +2,7 @@
 """Render the squadron mess at night, in three moods.
 
 Built and lit with the small renderer in scene3d.py, the officers made
-from its solids (figures3d.py).  We sit at the near end of a table whose
+and posed with the rigged figure kit (figurekit.py).  We sit at the near end of a table whose
 edge runs across the foot of the picture, with somebody's flying helmet
 and goggles on a map, his tankard beside them; the evening's lines are
 typed over the dark boards of that table.  Beyond it the long mess table
@@ -33,7 +33,9 @@ Three evenings, one picture each:
                           cap on the seat and his glass full on the
                           table, the CO alone at the board, the piano shut.
 
-Rendered at twice the size, filtered down and dithered to RGB565.
+Rendered at four times the size (so that a face of a dozen pixels still
+has its brow, eyes, nose and mouth in it), filtered down and dithered to
+RGB565.  Each evening takes about a minute and some 650 MB.
 Writes assets/canvas-skies/mess.bmp, mess-rowdy.bmp and mess-wake.bmp.
 
   make_mess.py [quiet|rowdy|wake ...] [--preview DIR]
@@ -53,14 +55,16 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from figures3d import Body, bentwood, dog, officer  # noqa: E402
-from scene3d import SS, Scene, fbm, normalize, planks, rot_z  # noqa: E402
+from figurekit import Figure  # noqa: E402
+from figures3d import Body, bentwood, dog  # noqa: E402
+from scene3d import Scene, fbm, normalize, planks, rot_z  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets" / "canvas-skies"
 OUT = {"quiet": "mess.bmp", "rowdy": "mess-rowdy.bmp",
        "wake": "mess-wake.bmp"}
 W, H = 640, 400
+SS = 4                              # samples a side: the men need them
 BOARD = (52, 40, 222, 160)          # the frame; the slate is 7 inside it
 LAMP = (372, 92)
 TABLE = (286, 518)                  # the long table's ends
@@ -96,6 +100,11 @@ def rect(x0, y0, x1, y1):
     return mask([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
 
 
+def boards(seed, **kw):
+    """Planks the size of the picture (scene3d.planks)."""
+    return planks(H * SS, W * SS, seed, ss=SS, **kw)
+
+
 def yramp(y0, y1, z0, z1):
     """A depth that runs from z0 at screen row y0 to z1 at row y1."""
     yy = np.arange(H * SS, dtype=np.float32)[:, None] / SS
@@ -105,10 +114,10 @@ def yramp(y0, y1, z0, z1):
 
 # ---- the room ----------------------------------------------------------------
 def room(sc):
-    a, n, _ = planks(H * SS, W * SS, 71, base=(116, 84, 56), widths=(18, 32),
+    a, n, _ = boards(71, base=(116, 84, 56), widths=(18, 32),
                      soot_top=0.55)
     sc.surface(np.ones((H * SS, W * SS), bool), 520, a, normals=n)
-    floor, _, _ = planks(H * SS, W * SS, 72, base=(80, 58, 38), widths=(5, 8),
+    floor, _, _ = boards(72, base=(80, 58, 38), widths=(5, 8),
                          vertical=False, nails=False)
     yy = np.arange(H * SS, dtype=np.float32)[:, None] / SS
     fz = np.broadcast_to(np.maximum(520 - (yy - 252) * 4, 300),
@@ -117,7 +126,7 @@ def room(sc):
     # The skirting where the wall meets the boards.
     sc.surface(rect(0, 247, W, 253), 516, (64, 46, 30), normal=(0, -0.3, -1))
     # The eaves beam and the bunting strung beneath it.
-    beam, _, _ = planks(H * SS, W * SS, 73, base=(100, 70, 44),
+    beam, _, _ = boards(73, base=(100, 70, 44),
                         widths=(400, 401), vertical=False)
     sc.surface(rect(0, 0, W, 9), 500, beam, normal=(0, 0.5, -1))
     cols = [(176, 40, 34), (226, 220, 204), (40, 60, 128)]
@@ -135,7 +144,7 @@ def room(sc):
 
 def board(sc):
     x0, y0, x1, y1 = BOARD
-    wood, _, _ = planks(H * SS, W * SS, 75, base=(120, 80, 46),
+    wood, _, _ = boards(75, base=(120, 80, 46),
                         widths=(400, 401), vertical=False)
     yy, xx = np.mgrid[0:H * SS, 0:W * SS].astype(np.float32) / SS
     n = np.zeros((H * SS, W * SS, 3), np.float32)
@@ -217,7 +226,7 @@ def stove(sc, mood):
 
 
 def piano(sc, mood):
-    case, _, _ = planks(H * SS, W * SS, 87, base=(66, 36, 22),
+    case, _, _ = boards(87, base=(66, 36, 22),
                         widths=(400, 401), vertical=False)
     x0, x1 = 518, 610
     sc.surface(rect(x0, 158, x1, 238), 492, case, spec=0.55, shine=26)
@@ -244,7 +253,7 @@ def piano(sc, mood):
     for lx in (x0 + 4, x1 - 4):
         sc.cylinder(lx, 232, 260, 2.5, 470, (54, 30, 18), spec=0.5)
     # The gramophone on top, its brass horn.
-    gcase, _, _ = planks(H * SS, W * SS, 80, base=(86, 52, 30),
+    gcase, _, _ = boards(80, base=(86, 52, 30),
                          widths=(400, 401), vertical=False)
     sc.surface(rect(530, 138, 566, 154), 488, gcase, spec=0.45, shine=24)
     sc.surface(rect(528, 135, 568, 138), 487, gcase, normal=(0, -0.9, -0.4),
@@ -285,7 +294,7 @@ def top_z(y):
 def table(sc, mood):
     x0, x1 = TABLE
     y0, y1 = TOP
-    wood, _, _ = planks(H * SS, W * SS, 78, base=(122, 82, 46), widths=(6, 8),
+    wood, _, _ = boards(78, base=(122, 82, 46), widths=(6, 8),
                         vertical=False)
     for lx in (x0 + 10, x1 - 10):
         sc.cylinder(lx, y1, floor_y(400), 3.5, 400, (70, 46, 28), spec=0.2)
@@ -376,76 +385,68 @@ def on_table(sc, mood):
 
 # ---- the officers ------------------------------------------------------------
 def officers(sc, mood):
-    rng = np.random.default_rng({"quiet": 11, "rowdy": 12, "wake": 13}[mood])
+    """The squadron, each man made and posed with the figure kit
+    (figurekit.py): his own build, face and kit from his seed."""
     far, near = 446, 372
     fy, ny = floor_y(far), 294            # the near side sit a little lower
-    S, SN = 1.25, 1.4
-    co = dict(grey=True, moustache=True, tunic=(80, 78, 54),
-              skin=(196, 146, 116), hair=(70, 58, 44))
-    stove_man = (92, floor_y(448), 448, S)
+    S, SN = 1.25 * 13, 1.4 * 13           # pixels to a head-height
+    co = dict(grey=True, moustache="walrus", style="sd", hair=(70, 58, 44),
+              skin=(196, 146, 116), build=1.08)
+
+    def man(seed, pose, x, floor, z, px, yaw, make=None, **over):
+        f = Figure(seed=seed, **(make or {}))
+        f.pose(pose, **over)
+        f.draw(sc, x, floor, z, px, yaw)
+        return f
+    stove = (92, floor_y(448), 448, S)
     if mood == "quiet":
-        # Round the far side, face-on: one drinks, one talks, one listens.
-        officer(sc, 322, fy, far, S, 0.15, "glass", rng, turn=0.35)
-        officer(sc, 374, fy, far, S, -0.1, "talk", rng, turn=-0.25)
-        officer(sc, 426, fy, far, S, 0.0, "drink", rng, lift=0.2)
-        officer(sc, 478, fy, far, S, -0.3, "pipe", rng, turn=-0.4,
-                bow=0.1, moustache="full")
+        # Round the far side, face-on: one with his glass, one talking,
+        # one drinking, one with his pipe.
+        man(21, "glass", 322, fy, far, S, 0.15, turn=18)
+        man(22, "talk", 374, fy, far, S, -0.1)
+        man(23, "drink", 426, fy, far, S, 0.0)
+        man(24, "pipe", 478, fy, far, S, -0.3, dict(moustache="full"),
+            turn=-14)
         # The CO with a glass at the head of the table.
-        officer(sc, 256, floor_y(430), 430, S, -0.5, "sglass", rng,
-                seated=False, turn=-0.2, **co)
+        man(20, "sglass", 256, floor_y(430), 430, S, -0.5, co, turn=-10)
         # Back-on at the near side, turned to his neighbour.
-        officer(sc, 300, ny, near, SN, math.pi + 0.35, "rest", rng,
-                turn=0.5)
+        man(25, "table", 300, ny, near, SN, math.pi + 0.35, turn=25)
         # At the piano, playing softly.
-        officer(sc, 572, floor_y(452), 452, S, math.pi, "piano", rng,
-                bow=0.15)
+        man(26, "piano", 572, floor_y(452), 452, S, math.pi)
         # By the stove, his hands to it.
-        officer(sc, *stove_man[:3], S, math.pi / 2 - 0.25, "warm", rng)
+        man(27, "warm", *stove[:3], S, math.pi / 2 - 0.25)
     elif mood == "rowdy":
-        officer(sc, 322, fy, far, S, 0.2, "raise", rng, lift=0.2)
-        officer(sc, 374, fy, far, S, 0.0, "cheer", rng, lift=0.3,
-                style="shirt", sing=True)
-        officer(sc, 426, fy, far, S, -0.1, "drink", rng, lift=0.2)
-        officer(sc, 478, fy, far, S, -0.2, "raise", rng, lift=0.15,
-                turn=-0.3)
+        man(31, "toast", 322, fy, far, S, 0.2)
+        man(32, "cheer", 374, fy, far, S, 0.0, dict(style="shirt"))
+        man(33, "drink", 426, fy, far, S, -0.1)
+        man(34, "toast", 478, fy, far, S, -0.2, turn=-12)
         # On the table, making his speech to the lamp.
-        officer(sc, 452, TOP[0] + 5, top_z(TOP[0] + 5), S, -0.25, "sraise",
-                rng, seated=False, lift=0.3, chair=False)
-        officer(sc, 256, floor_y(430), 430, S, -0.4, "sraise", rng,
-                seated=False, lift=0.2, **co)
-        officer(sc, 300, ny, near, SN, math.pi + 0.3, "raise", rng,
-                lift=0.3)
-        officer(sc, 502, ny, near, SN, math.pi - 0.3, "raise", rng,
-                lift=0.25, turn=-0.4)
+        man(35, "sraise", 452, TOP[0] + 5, top_z(TOP[0] + 5), S, -0.25)
+        man(20, "sraise", 256, floor_y(430), 430, S, -0.4, co)
+        man(36, "toast", 300, ny, near, SN, math.pi + 0.3)
+        man(37, "toast", 502, ny, near, SN, math.pi - 0.3, turn=-20)
         # The piano going, and a man leaning on it to sing.
-        officer(sc, 566, floor_y(452), 452, S, math.pi - 0.2, "piano", rng,
-                lift=0.2)
-        officer(sc, 620, floor_y(458), 458, S, -0.6, "lean", rng,
-                seated=False, lift=0.45, sing=True)
-        officer(sc, *stove_man[:3], S, -0.9, "raise", rng, lift=0.25)
+        man(38, "piano", 566, floor_y(452), 452, S, math.pi - 0.2, lift=8)
+        man(39, "lean", 620, floor_y(458), 458, S, -0.6)
+        man(40, "toast", *stove[:3], S, -0.9)
     else:
         # Fewer of us.  Heads down; nobody at the piano.
-        officer(sc, 340, fy, far, S, 0.1, "clasp", rng, bow=0.6,
-                hair=(36, 28, 22))
-        officer(sc, 466, fy, far, S, -0.15, "head", rng, bow=0.5,
-                turn=0.2)
-        officer(sc, 502, ny, near, SN, math.pi - 0.2, "clasp", rng,
-                bow=0.55)
+        man(41, "clasp", 340, fy, far, S, 0.1, dict(hair=(36, 28, 22)))
+        man(42, "head", 466, fy, far, S, -0.15)
+        man(43, "clasp", 502, ny, near, SN, math.pi - 0.2)
         # His chair, pushed back from the table, his cap on its back.
-        b = Body(sc, (390, ny - 1.9 * 13 * SN, near - 4), SN,
+        b = Body(sc, (390, ny - 1.9 * 13 * 1.4, near - 4), 1.4,
                  math.pi + 0.3)
         bentwood(b, cap=True)
-        # The CO alone at the board, his back to us, hands behind him.
-        officer(sc, 240, floor_y(436), 436, S, math.pi / 2 + 0.3, "behind",
-                rng, seated=False, bow=0.45, **co)
-        officer(sc, *stove_man[:3], S, math.pi / 2 - 0.1, "warm", rng,
-                bow=0.45)
+        # The CO alone at the board, his back half to us, hands behind.
+        man(20, "behind", 240, floor_y(436), 436, S, math.pi / 2 + 0.3, co)
+        man(44, "warm", *stove[:3], S, math.pi / 2 - 0.1, bow=22)
     dog(sc, 74, floor_y(404) - 7, 404, 1.2)
 
 
 # ---- our own table, nearest -------------------------------------------------
 def near_table(sc, mood):
-    top, _, _ = planks(H * SS, W * SS, 90, base=(104, 70, 42), widths=(16, 26),
+    top, _, _ = boards(90, base=(104, 70, 42), widths=(16, 26),
                        vertical=False)
     sc.surface(rect(0, NEAR + 3, W, H), yramp(NEAR, H, 260, 140), top * 0.85,
                normal=(0, -0.92, -0.4), spec=0.3, shine=18)
@@ -556,7 +557,7 @@ def haze(sc, mood, colour):
 
 def render(mood):
     k = MOODS[mood]
-    sc = Scene(W, H, ambient={"quiet": (0.03, 0.026, 0.022),
+    sc = Scene(W, H, ss=SS, ambient={"quiet": (0.03, 0.026, 0.022),
                               "rowdy": (0.035, 0.03, 0.025),
                               "wake": (0.024, 0.022, 0.024)}[mood])
     sc.point_rim = 0.45
