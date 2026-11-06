@@ -9,22 +9,37 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.2.0 RC2**, a release candidate. Download it from
-[the v0.2.0-rc2 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc2).
-New since the alpha: a cinematic cockpit view, open-sky dogfights, a pilot's
-career with medals, the story as a war diary, the morning paper and Book of
-Press Cuttings, the Christmas truce, the airship and Gotha raids, and period
-gramophone records. The earlier alpha is described in
+Current release: **0.2.0 RC3**, a release candidate. Download it from
+[the v0.2.0-rc3 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc3).
+New in RC3: the cockpit seen from the pilot's seat, machines that change with
+the war, top-down raids on convoys, railways, aerodromes and trench lines,
+civilians and ambulances to spare on pain of court martial, the morning paper
+set like a real one, and a picture house showing real film of the war. The
+earlier alpha is described in
 [docs/ALPHA_RELEASE_NOTES.md](docs/ALPHA_RELEASE_NOTES.md).
 
 ## Features
 
-- Side-on, top-down, first-person dogfight and rear-gunner mission modes
-- Pilot's journal and General Headquarters briefing before every sortie
-- Six-axis dogfight flight model with stalls, damage and crashes
+- Side-on, top-down, cockpit dogfight and rear-gunner sorties
+- The cockpit from the pilot's seat: the top wing overhead, the struts beside
+  the gun, the world banking around the machine
+- Machines that change with the war, ours and theirs: a 1914 two-seater
+  armed with a rifle and revolver, a single-Vickers scout, a twin-gun scout
+  and a late-war scout, against the Fokker monoplane, the Albatros and the
+  late Fokker
+- Top-down raids built from the war's targets: lorry convoys, trains and
+  stations, aerodromes, depots and trench runs, mixed to suit each year
+- Ambulances, villages and our own line to spare: a reprimand, a lost rank,
+  then a court martial that ends the career
+- Bombs that burst too close hurt your own machine
+- Pilot's diary and General Headquarters orders before every sortie, and a
+  career of victories, promotion and medals
+- The morning paper on its tied bundle, quoting real cable news of
+  1914-1918, and the Book of Press Cuttings
+- The picture house behind the lines, showing real film of each year
 - Three-life campaign with field hospital recovery and a graveside memorial
 - Resumable campaign saves
-- Period fonts, painted art and gramophone-style music
+- Period typefaces, painted art and period gramophone records
 - F9 toggles aspect-correct fullscreen
 
 ## Screenshots
@@ -39,7 +54,7 @@ game's own 640x400.
 | ![The morning paper](docs/screenshots/newspaper.png) | ![The picture house](docs/screenshots/picture-house.png) |
 | The morning paper on its bundle | The picture house behind the lines, showing real film of 1916 |
 | ![Cockpit dogfight](docs/screenshots/cockpit-dogfight.png) | ![New machines](docs/screenshots/new-machines.png) |
-| A 1918 patrol from the cockpit | New machines from the aircraft park |
+| A 1916 patrol from the pilot's seat, one Vickers under the sight | New machines from the aircraft park |
 | ![Top-down sortie](docs/screenshots/top-down-sortie.png) | ![Side-on sortie](docs/screenshots/side-on-sortie.png) |
 | A top-down raid on a convoy and its depot | A side-on sortie at dusk |
 | ![Court martial](docs/screenshots/court-martial.png) | |
@@ -75,8 +90,8 @@ the assets the game loads, without the source PNGs.
 | Context | Controls |
 |---|---|
 | Menus | Up/Down select, Enter accepts, Escape returns |
-| Side/top-down | Arrow keys move, X/Z adjust speed, Space fires, B bombs |
-| Pilot dogfight | Left/Right bank, Down pulls up, Up pushes down, X/Z throttle, Space fires |
+| Side/top-down | Arrow keys move, X/Z adjust speed, Space fires (a rifle in 1914), B bombs |
+| Pilot dogfight | Left/Right bank, Down pulls up, Up pushes down, X/Z throttle, Space fires (a revolver in 1914), R clears a jam, H turns for home |
 | Rear gunner | Arrow keys traverse/elevate, Space fires |
 | Display | F9 toggles fullscreen |
 
@@ -91,17 +106,18 @@ the assets the game loads, without the source PNGs.
 ## Licence
 
 Canvas Skies is free software under the
-[GNU General Public License, version 3](LICENSE). Music, font and art
+[GNU General Public License, version 3](LICENSE). Music, font, film and art
 licences are listed below.
 
 ## Credits
 
 Designed, tested and delivered by The AmiCradle Team.
 
-Music, font and art credits are in
+Music, font, film and art credits are in
 [assets/canvas-skies/MUSIC_LICENSE.md](assets/canvas-skies/MUSIC_LICENSE.md),
-[assets/canvas-skies/ART_PROVENANCE.md](assets/canvas-skies/ART_PROVENANCE.md)
-and the font copyright files in `assets/canvas-skies/`.
+[assets/canvas-skies/ART_PROVENANCE.md](assets/canvas-skies/ART_PROVENANCE.md),
+[CANVAS_SKIES_SOURCES.md](CANVAS_SKIES_SOURCES.md) (the newsreels and
+typefaces) and the font licences in `assets/fonts/`.
 
 Neddy Seagoon, Eccles, Bluebottle and Gridpipe Thyne are an affectionate nod
 to *The Goon Show*.
