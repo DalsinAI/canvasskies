@@ -137,6 +137,12 @@
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
 #endif
+#ifndef CANVAS_MEDALS_BMP
+#define CANVAS_MEDALS_BMP "assets/canvas-skies/medals.bmp"
+#endif
+#ifndef CANVAS_MESS_BMP
+#define CANVAS_MESS_BMP "assets/canvas-skies/mess.bmp"
+#endif
 #ifndef CANVAS_COCKPIT_CELLULE_BMP
 #define CANVAS_COCKPIT_CELLULE_BMP "assets/canvas-skies/cockpit-cellule.bmp"
 #endif
@@ -671,6 +677,8 @@ typedef struct {
     SDL_Surface *side_civilians;    /* farms, a church, carts, side-on */
     SDL_Surface *newspaper_table;   /* the paper on its bundle, untyped */
     SDL_Surface *cinema_hut;        /* the picture house, its screen dark */
+    SDL_Surface *medals;            /* the decorations and the office crest */
+    SDL_Surface *mess;              /* the squadron mess by lamplight */
     Newsreel newsreel;
     int cinema_reel_slot;
     int cinema_seen;                /* chapter + 1 whose reels were shown */
@@ -6801,24 +6809,29 @@ static void draw_mess(Game *g)
     } else if (g->morale < 30) {
         lines[3] = "THE TALK IS SHORT AND SOUR. THEY HAVE NOT FORGOTTEN.";
     }
-    rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
-    /* Lamplight and the gramophone horn. */
-    blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
-    circle(s, 520, 118, 4, PIX_PACK(255, 220, 130));
-    fill_triangle(s, 560, 210, 620, 170, 620, 250, PIX_PACK(150, 112, 50));
-    rect(s, 540, 206, 30, 16, PIX_PACK(80, 52, 30));
-    /* Bunting strung across the ceiling. */
-    for (x = 0; x < SCREEN_W; x += 40) {
-        uint32_t c = (x / 40) % 3 == 0 ? PIX_PACK(176, 40, 34) :
-                     (x / 40) % 3 == 1 ? PIX_PACK(230, 224, 210) :
-                                         PIX_PACK(40, 60, 128);
-        int sag = 8 - abs((x % 160) - 80) / 10;
-        fill_triangle(s, x, 14 + sag, x + 30, 14 + sag, x + 15, 38 + sag, c);
+    if (g->mess) {
+        /* The painted room; its board is left clean for the chalk. */
+        SDL_BlitSurface(g->mess, NULL, s, NULL);
+    } else {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, rgb(s, 30, 20, 14));
+        /* Lamplight and the gramophone horn. */
+        blend_circle(s, 520, 120, 110, 140, 96, 40, 70);
+        circle(s, 520, 118, 4, PIX_PACK(255, 220, 130));
+        fill_triangle(s, 560, 210, 620, 170, 620, 250, PIX_PACK(150, 112, 50));
+        rect(s, 540, 206, 30, 16, PIX_PACK(80, 52, 30));
+        /* Bunting strung across the ceiling. */
+        for (x = 0; x < SCREEN_W; x += 40) {
+            uint32_t c = (x / 40) % 3 == 0 ? PIX_PACK(176, 40, 34) :
+                         (x / 40) % 3 == 1 ? PIX_PACK(230, 224, 210) :
+                                             PIX_PACK(40, 60, 128);
+            int sag = 8 - abs((x % 160) - 80) / 10;
+            fill_triangle(s, x, 14 + sag, x + 30, 14 + sag, x + 15, 38 + sag, c);
+        }
+        line(s, 0, 14, SCREEN_W, 14, PIX_PACK(120, 100, 70));
+        /* The squadron board: every victory in chalk, today's in yellow. */
+        rect(s, 40, 64, 300, 196, PIX_PACK(96, 62, 34));
+        rect(s, 48, 72, 284, 180, PIX_PACK(26, 38, 30));
     }
-    line(s, 0, 14, SCREEN_W, 14, PIX_PACK(120, 100, 70));
-    /* The squadron board: every victory in chalk, today's in yellow. */
-    rect(s, 40, 64, 300, 196, PIX_PACK(96, 62, 34));
-    rect(s, 48, 72, 284, 180, PIX_PACK(26, 38, 30));
     typewriter_text(g, 64, 84, "SQUADRON BOARD", 10, 15, PIX_PACK(232, 228, 214));
     snprintf(board, sizeof(board), "VICTORIES %d", g->victories);
     typewriter_text(g, 64, 108, board, 7, 11, PIX_PACK(220, 218, 204));
@@ -7047,7 +7060,15 @@ static void draw_award(Game *g)
     w = display_width(title, 18);
     if (w > 420) w = 420;
     display_text(g, 318 - w / 2, 116, title, 12, 18, red);
-    if (index >= 0) draw_medal(s, 140, 150, &decorations[index]);
+    if (index >= 0) {
+        /* The painted decoration on its ribbon (make_medals.py). */
+        if (g->medals) {
+            SDL_Rect src = {index * 72, 0, 72, 112}, dst = {104, 146, 72, 112};
+            SDL_BlitSurface(g->medals, &src, s, &dst);
+        } else {
+            draw_medal(s, 140, 150, &decorations[index]);
+        }
+    }
     {
         char who[48];
         snprintf(who, sizeof(who), "%s N. SEAGOON, %s",
@@ -10957,6 +10978,7 @@ static int game_init(Game *g)
     memset(g, 0, sizeof(*g));
     g->running = 1;
     g->lives = 3;
+    g->morale = 70;     /* a cheerful mess until something sours it */
     g->has_save = load_campaign_save(g);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) != 0) {
         fprintf(stderr, "SDL init failed: %s\n", SDL_GetError());
@@ -11105,6 +11127,8 @@ static int game_init(Game *g)
     g->side_civilians = SDL_LoadBMP(CANVAS_SIDE_CIVILIANS_BMP);
     g->newspaper_table = SDL_LoadBMP(CANVAS_NEWSPAPER_TABLE_BMP);
     g->cinema_hut = SDL_LoadBMP(CANVAS_CINEMA_HUT_BMP);
+    g->medals = SDL_LoadBMP(CANVAS_MEDALS_BMP);
+    g->mess = SDL_LoadBMP(CANVAS_MESS_BMP);
     {
         SDL_Surface **convert[] = {
             &g->topdown_battlefield, &g->topdown_player,
@@ -11115,10 +11139,11 @@ static int game_init(Game *g)
             &g->gunner_moving_guns,
             &g->explosion_atlas, &g->topdown_explosion_atlas,
             &g->cockpit_revolver, &g->rear_carbine, &g->topdown_targets,
-            &g->side_civilians, &g->newspaper_table, &g->cinema_hut
+            &g->side_civilians, &g->newspaper_table, &g->cinema_hut,
+            &g->medals, &g->mess
         };
         int i;
-        for (i = 0; i < 19; ++i) if (*convert[i]) {
+        for (i = 0; i < 21; ++i) if (*convert[i]) {
             SDL_Surface *converted = SDL_ConvertSurface(*convert[i],
                                                         g->screen->format, 0);
             if (converted) {
@@ -11141,6 +11166,11 @@ static int game_init(Game *g)
         int i;
         for (i = 0; i < 15; ++i) if (keyed[i])
             prepare_magenta_key(keyed[i]);
+        /* The ribbons are purple silk, which the loose key would eat; the
+         * painter leaves hard edges, so the exact colour is enough. */
+        if (g->medals)
+            SDL_SetColorKey(g->medals, SDL_TRUE,
+                            SDL_MapRGB(g->medals->format, 255, 0, 255));
     }
     if (!g->topdown_battlefield || !g->topdown_player ||
         !g->dogfight_background || !g->dogfight_enemy ||
@@ -11236,18 +11266,11 @@ static void draw_office_paper(Game *g, const char *heading, const char *sub,
                      6 + k % 5, 150, 112, 60, 40);
     rect(s, 104, 38, 432, 1, PIX_PACK(150, 120, 80));
     rect(s, 104, 353, 432, 1, PIX_PACK(150, 120, 80));
-    /* The crest: a crown over a laurel wreath. */
-    for (k = 0; k < 10; ++k) {
-        float a = (float)M_PI * (0.6f + 0.08f * (float)k);
-        ellipse(s, 320 + (int)(cosf(a) * 16.0f), 60 + (int)(sinf(a) * 14.0f),
-                3, 2, ink);
-        ellipse(s, 320 - (int)(cosf(a) * 16.0f), 60 + (int)(sinf(a) * 14.0f),
-                3, 2, ink);
+    /* The crest, printed in black. */
+    if (g->medals) {
+        SDL_Rect src = {5 * 72, 8, 72, 64}, dst = {284, 28, 72, 64};
+        SDL_BlitSurface(g->medals, &src, s, &dst);
     }
-    rect(s, 312, 48, 17, 5, ink);
-    fill_triangle(s, 312, 48, 315, 41, 318, 48, ink);
-    fill_triangle(s, 317, 48, 320, 39, 323, 48, ink);
-    fill_triangle(s, 322, 48, 325, 41, 328, 48, ink);
     w = display_width(heading, 23);
     display_text(g, 320 - w / 2, 80, heading, 16, 23, ink);
     w = typewriter_width(sub, 11);
@@ -11868,10 +11891,10 @@ int main(int argc, char **argv)
      * starts the game normally on the player's campaign. */
     if (argc > 1) {
         static const char *const qa_modes[] = {
-            "AIRSHIP", "CHAPTER_SUCCESS", "CINEMA", "COURTMARTIAL", "DEATH",
+            "AIRSHIP", "AWARD", "CHAPTER_SUCCESS", "CINEMA", "COURTMARTIAL", "DEATH",
             "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
-            "GUNNER", "HOSPITAL", "MACHINES", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN",
+            "GUNNER", "HOSPITAL", "MACHINES", "MESS", "NEWS", "REPRIMAND", "SIDE", "TOPDOWN",
             "TOPMIX",
             "TRACERS",
             "TRUCE",
@@ -11942,6 +11965,21 @@ int main(int argc, char **argv)
         g.career_counted = 1;
         g.conduct_pending = 0;
         set_scene(&g, g.offences >= 3 ? SCENE_COURT_MARTIAL : SCENE_CONDUCT);
+    } else if (argc > 2 && strcmp(argv[1], "AWARD") == 0) {
+        /* AWARD n: decoration n pinned on in the colonel's office. */
+        g.chapter = 3;
+        g.mission = 0;
+        g.victories = 9;
+        g.pending_award = 1 << (atoi(argv[2]) % 5);
+        set_scene(&g, SCENE_AWARD);
+    } else if (argc > 1 && strcmp(argv[1], "MESS") == 0) {
+        /* The mess after a good day: seven on the board, two of them new. */
+        g.chapter = 2;
+        g.mission = 3;
+        g.victories = 7;
+        g.kills = 2;
+        g.success = 1;
+        set_scene(&g, SCENE_MESS);
     } else if (argc > 2 && strcmp(argv[1], "CINEMA") == 0) {
         /* CINEMA n: chapter n's evening at the picture house. */
         g.chapter = atoi(argv[2]) % CHAPTER_COUNT;
@@ -12192,6 +12230,8 @@ int main(int argc, char **argv)
     if (g.side_civilians) SDL_FreeSurface(g.side_civilians);
     if (g.newspaper_table) SDL_FreeSurface(g.newspaper_table);
     if (g.cinema_hut) SDL_FreeSurface(g.cinema_hut);
+    if (g.medals) SDL_FreeSurface(g.medals);
+    if (g.mess) SDL_FreeSurface(g.mess);
     newsreel_free(&g.newsreel);
     free_world_textures(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
