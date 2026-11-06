@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render Neddy's carbine in the rear seat, aimed anywhere in the aft arc.
 
-The rifle, the gloved hands and the khaki sleeves are solids in the
-observer's own view: the eye at the origin looking aft over the tail, x to
+The rifle alone, held in the air where he would hold it, with no arms or
+hands: it is a solid in the observer's own view: the eye at the origin looking aft over the tail, x to
 the right, y up, z away.  Every pixel is ray-cast through a pinhole for its
 true depth and surface normal, then lit by the low sun beyond the tail, a
 fill from the sky behind the observer and a rim of sunlight round the edges.
@@ -11,8 +11,8 @@ on the screen visibly runs towards it: back into the picture when aimed
 astern, across it when swung onto a flank, up it when raised.
 
 One frame is rendered for each aim point of a grid over the crosshair's
-range.  The observer's shoulders turn and lift partly with the aim, so the
-butt moves in the shoulder and the hands and forearms follow the rifle.
+range.  The butt sits where his shoulder would be, turning and lifting
+partly with the aim.
 
   assets/canvas-skies/rear-carbine.bmp   the frames, cropped and packed,
                                          256 colours with magenta as key,
@@ -47,9 +47,6 @@ WOOD_LIGHT = np.array([0.50, 0.32, 0.18])
 WOOD_DARK = np.array([0.28, 0.16, 0.09])
 STEEL = np.array([0.17, 0.18, 0.20])
 STEEL_DARK = np.array([0.10, 0.10, 0.12])
-GLOVE = np.array([0.52, 0.42, 0.29])
-SLEEVE = np.array([0.40, 0.37, 0.24])
-CUFF = np.array([0.40, 0.30, 0.19])
 
 SUN = np.array([0.10, 0.32, 1.0]); SUN /= np.linalg.norm(SUN)
 SUN_COL = np.array([1.35, 1.00, 0.66])
@@ -256,14 +253,6 @@ def grain(scale, amount):
     return tex
 
 
-def folds(local):
-    """Creases round a sleeve, loosest at the elbow."""
-    s, n = local
-    round_ = np.arctan2(n[..., 1], n[..., 0])
-    return (1 + 0.10 * np.sin(s * 23.0 + np.sin(round_ * 2.0) * 1.6) *
-            (0.5 + 0.5 * np.sin(round_ * 3.0 + s * 5.0)))
-
-
 def rot_y(a):
     c, s = math.cos(a), math.sin(a)
     return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
@@ -291,9 +280,6 @@ def render(ax, ay):
     # so the rifle stays in sight above the signs.
     lean = np.array([0.11, 0.085, 0.0]) * min(1.0, max(0.0, -pitch - 0.02) / 0.28)
     butt = body @ np.array([0.075, -0.215, 0.44]) + lean
-    l_shoulder = body @ np.array([-0.24, -0.36, 0.34]) + lean
-    r_elbow_at = body @ np.array([0.27, -0.40, 0.50]) + lean
-    l_elbow_at = body @ np.array([-0.15, -0.46, 0.70]) + lean
     a = d
     up = np.array([0.0, 1.0, 0.0])
     u = unit(up - (up @ a) * a)
@@ -310,21 +296,6 @@ def render(ax, ay):
     def piece(s0, s1, w, h, du, albedo, **kw):
         v.box(at((s0 + s1) / 2, du), axes, (w / 2, h / 2, (s1 - s0) / 2),
               albedo, **kw)
-
-    # Sleeves and forearms first in order; depth sorts them out.
-    r_hand = at(0.30, -0.035, 0.012)
-    l_hand = at(0.60, -0.040, -0.004)
-    v.capsule(r_elbow_at, r_hand - a * 0.05 - u * 0.01, 0.050, SLEEVE,
-              texture=folds)
-    v.capsule(r_elbow_at + (r_elbow_at - r_hand) * 0.35, r_elbow_at, 0.056,
-              SLEEVE, texture=folds)
-    v.capsule(l_elbow_at, l_hand - a * 0.07 - u * 0.03, 0.046, SLEEVE,
-              texture=folds)
-    v.capsule(l_shoulder, l_elbow_at, 0.056, SLEEVE, texture=folds)
-    v.capsule(r_hand - a * 0.07 - u * 0.012, r_hand - a * 0.035, 0.040, CUFF,
-              spec=0.05)
-    v.capsule(l_hand - a * 0.09 - u * 0.03, l_hand - a * 0.05 - u * 0.02,
-              0.037, CUFF, spec=0.05)
 
     # The rifle, butt plate at s = 0, muzzle at s = 1.0.
     wood = grain(260.0, 0.10)
@@ -355,22 +326,6 @@ def render(ax, ay):
               STEEL, spec=0.4)
     piece(0.910, 0.925, 0.003, 0.016, 0.022, STEEL)             # blade
 
-    # The hands: the right round the wrist with the thumb over it, the left
-    # under the fore-end with its fingers up the far side.
-    v.ellipsoid(r_hand, axes, (0.046, 0.054, 0.064), GLOVE, spec=0.10)
-    v.capsule(at(0.29, 0.008, -0.014), at(0.345, 0.016, -0.022), 0.0145,
-              GLOVE, spec=0.10)                                 # thumb
-    for k in range(3):
-        s = 0.300 + k * 0.026
-        v.capsule(at(s, -0.046, 0.034), at(s, -0.002, -0.028), 0.0140,
-                  GLOVE, spec=0.10)
-    v.ellipsoid(l_hand, axes, (0.050, 0.040, 0.070), GLOVE, spec=0.10)
-    for k in range(4):
-        s = 0.565 + k * 0.022
-        v.capsule(at(s, -0.046, -0.034), at(s, 0.006, -0.030), 0.0125,
-                  GLOVE, spec=0.10)
-    v.capsule(at(0.580, -0.034, 0.030), at(0.645, -0.002, 0.028), 0.0130,
-              GLOVE, spec=0.10)                                 # thumb
     muzzle = at(1.0, 0.004)
     mx = CX + FOCAL * muzzle[0] / muzzle[2]
     my = CY - FOCAL * muzzle[1] / muzzle[2]

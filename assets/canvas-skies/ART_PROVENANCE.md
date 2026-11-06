@@ -32,8 +32,8 @@ AMBULANCE; the protected red cross emblem is deliberately not drawn.
 
 The observer's carbine in hand (`rear-carbine.bmp`) is original art for
 this game, rendered on the host by `ports/amigaos3/make_rear_carbine.py`:
-the rifle, gloves and sleeves are simple solids ray-cast in perspective from
-the observer's eye and lit by the low sun, the sky and a rim of sunlight, one
+the rifle alone is built of simple solids ray-cast in perspective from the
+observer's eye and lit by the low sun, the sky and a rim of sunlight, one
 frame for each aim of a grid over the rear arc. It is stored as a 256-colour
 run-length encoded BMP.
 
