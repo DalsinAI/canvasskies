@@ -1,0 +1,190 @@
+{
+ "sources": [
+  {
+   "n": 1,
+   "title": "German War Film, 1914-1918",
+   "licence": "Public domain (US government compilation)",
+   "holder": "US National Archives",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/b/bf/German_War_Film%2C_1914-1918.webm",
+   "sha256": "7c193c4aaa0540952bbb71d13444025088ef1c0b5a3c011ce1088616b28a470b"
+  },
+  {
+   "n": 2,
+   "title": "The Battle of the Somme (1916)",
+   "licence": "Public domain (expired UK Crown copyright)",
+   "holder": "Wikimedia Commons",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/3/31/The_Battle_of_the_Somme_%281916%29.webm",
+   "sha256": "e28b144f7641a353ca375c20e25f94e25db12583252c42b0d5d956a879781cea"
+  },
+  {
+   "n": 3,
+   "title": "Kitchener's Great Army in the Battle of the Somme (1916)",
+   "licence": "Public domain",
+   "holder": "Wikimedia Commons / Internet Archive",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/6/6e/Kitchener%27s_Great_Army_in_the_Battle_of_the_Somme_%281916%29.webm",
+   "sha256": "1b0b616335697c1ec4f05423a8d098bda47ab2e8118fa29b5df796cd4ee915ac"
+  },
+  {
+   "n": 4,
+   "title": "Australia Prepared (1916)",
+   "licence": "Public domain",
+   "holder": "Wikimedia Commons",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/1/19/Australia_Prepared_%281916%29.webm",
+   "sha256": "e35d6cd1fc2b633cf453ba6d284aaef7dc2d3d59d4f5086ac639239fab17f597"
+  },
+  {
+   "n": 5,
+   "title": "BL 9.2 inch howitzer firing (from America Goes Over, 1918)",
+   "licence": "Public domain (US Army Signal Corps)",
+   "holder": "Wikimedia Commons / Internet Archive",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/4/4a/9.2inchhowitzerfiringWWI.ogv",
+   "sha256": "17080567f1c4983e3cfdc93e539c0043fe873b65e589ae15b8116466ac6723b0"
+  },
+  {
+   "n": 6,
+   "title": "Draft and Mobilization Activities 1917-1918",
+   "licence": "Public domain (US government)",
+   "holder": "US National Archives",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/1/13/Draft_and_Mobilization_Activities_1917-1918.webm",
+   "sha256": "cb26932c0fd73c27c0d126e267c9e65149af93f77db3c0accc5d6c58b9dbe3eb"
+  },
+  {
+   "n": 7,
+   "title": "Third Aviation Instruction Center (France, 1917-1918)",
+   "licence": "Public domain (US Army Signal Corps), NAID 24982",
+   "holder": "US National Archives",
+   "url": "https://catalog.archives.gov/medialz/mopix/111/h/111-h-1481-r1.mp4",
+   "sha256": "4ffa6e0d51b776b43eb78c6556203bb5945d850fea20251c5ea7aa350047e606"
+  },
+  {
+   "n": 8,
+   "title": "Flashes of Action: Actualities of the World War (1919)",
+   "licence": "Public domain (US Army Signal Corps)",
+   "holder": "US National Archives",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/3/39/Flashes_of_Action-_Actualities_of_the_World_War.webm",
+   "sha256": "bfcdb4014324dcb8beb3be74662f17bf3cc420e9b39db55d2a038352f5ff585c"
+  },
+  {
+   "n": 9,
+   "title": "La journ\u00e9e de l'Armistice (11 November 1918)",
+   "licence": "CC0 (Mus\u00e9e Albert-Kahn)",
+   "holder": "Mus\u00e9e d\u00e9partemental Albert-Kahn",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/0/06/La_journ%C3%A9e_de_l%27Armistice_-_AI90872.webm",
+   "sha256": "4fa344c30403eb2be7f5afaf62bee18dca87868de88b7f7d6e50b16e6ed095bc"
+  },
+  {
+   "n": 10,
+   "title": "Paris manifeste sa joie le jour de l'Armistice (11 November 1918)",
+   "licence": "CC0 (Mus\u00e9e Albert-Kahn)",
+   "holder": "Mus\u00e9e d\u00e9partemental Albert-Kahn",
+   "url": "https://upload.wikimedia.org/wikipedia/commons/4/4b/Paris_manifeste_sa_joie_le_jour_de_l%27Armistice_-_AI90875.webm",
+   "sha256": "824bf1ee5414f69599dc705d3281fd151f17324d13cfe574ca13f04c2e1ed595"
+  },
+  {
+   "n": 11,
+   "title": "The First Air Depot (France, 1918)",
+   "licence": "Public domain (US Army Signal Corps), NAID 24981",
+   "holder": "US National Archives",
+   "url": "https://catalog.archives.gov/medialz/mopix/111/h/111-h-1480-r1.mp4",
+   "sha256": "8b2fbbd35e5f002cbde135099a5ef6a24389466d7875e4dbdb56e9dba1530155"
+  }
+ ],
+ "cuts": [
+  {
+   "source": "1",
+   "start": 397,
+   "seconds": 5,
+   "title": "THE ENEMY MARCHES WEST - 1914"
+  },
+  {
+   "source": "1",
+   "start": 623,
+   "seconds": 5,
+   "title": "TROOPS IN THE ORCHARDS"
+  },
+  {
+   "source": "7",
+   "start": 234,
+   "seconds": 5,
+   "title": "MACHINES ON THE AERODROME"
+  },
+  {
+   "source": "11",
+   "start": 97,
+   "seconds": 5,
+   "title": "A MACHINE IN ITS CANVAS HANGAR"
+  },
+  {
+   "source": "2",
+   "start": 821,
+   "seconds": 5,
+   "title": "THE BATTALION WAITS - SOMME, 1916"
+  },
+  {
+   "source": "3",
+   "start": 1352,
+   "seconds": 5,
+   "title": "THE GUNS BEFORE THE ATTACK"
+  },
+  {
+   "source": "7",
+   "start": 401,
+   "seconds": 5,
+   "title": "A SCOUT OVER THE FIELD - 1917"
+  },
+  {
+   "source": "3",
+   "start": 1722,
+   "seconds": 5,
+   "title": "MEN IN THE LINE"
+  },
+  {
+   "source": "5",
+   "start": 3,
+   "seconds": 5,
+   "title": "A HEAVY HOWITZER FIRES"
+  },
+  {
+   "source": "8",
+   "start": 2159,
+   "seconds": 5,
+   "title": "UNDER THE BARRAGE"
+  },
+  {
+   "source": "8",
+   "start": 388,
+   "seconds": 5,
+   "title": "THE RUINS OF THE LINE - 1918"
+  },
+  {
+   "source": "3",
+   "start": 4259,
+   "seconds": 5,
+   "title": "MEN GOING UP"
+  },
+  {
+   "source": "8",
+   "start": 499,
+   "seconds": 5,
+   "title": "THE ADVANCE"
+  },
+  {
+   "source": "11",
+   "start": 347,
+   "seconds": 5,
+   "title": "AT THE AIR DEPOT"
+  },
+  {
+   "source": "10",
+   "start": 229,
+   "seconds": 5,
+   "title": "PARIS, 11 NOVEMBER 1918"
+  },
+  {
+   "source": "8",
+   "start": 2601,
+   "seconds": 5,
+   "title": "THE NEWS REACHES THE FRONT"
+  }
+ ]
+}

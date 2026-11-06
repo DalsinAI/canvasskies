@@ -34,14 +34,16 @@ game's own 640x400.
 
 | | |
 |---|---|
-| ![Title screen](docs/screenshots/title.png) | ![Officers' menu](docs/screenshots/menu.png) |
-| The title screen | The officers' menu: begin the war or join it in any year |
-| ![Chapter card](docs/screenshots/chapter-card.png) | ![Pilot's diary](docs/screenshots/diary.png) |
-| Each chapter opens with its date and title | Neddy Seagoon's flight log, written as you watch |
-| ![Briefing](docs/screenshots/briefing.png) | ![Cockpit dogfight](docs/screenshots/cockpit-dogfight.png) |
-| General Headquarters' orders and the squadron roster | A dogfight from the cockpit, an enemy scout crossing ahead |
-| ![Top-down sortie](docs/screenshots/top-down-sortie.png) | ![Medal award](docs/screenshots/medal-award.png) |
-| A top-down bombing sortie over the trenches | Mentioned in Despatches, by command of the King |
+| ![Title screen](docs/screenshots/title.png) | ![Pilot's diary](docs/screenshots/diary.png) |
+| The title screen | Neddy Seagoon's flight log, ruled and written in his hand |
+| ![The morning paper](docs/screenshots/newspaper.png) | ![The picture house](docs/screenshots/picture-house.png) |
+| The morning paper on its bundle | The picture house behind the lines, showing real film of 1916 |
+| ![Cockpit dogfight](docs/screenshots/cockpit-dogfight.png) | ![New machines](docs/screenshots/new-machines.png) |
+| A 1918 patrol from the cockpit | New machines from the aircraft park |
+| ![Top-down sortie](docs/screenshots/top-down-sortie.png) | ![Side-on sortie](docs/screenshots/side-on-sortie.png) |
+| A top-down raid on a convoy and its depot | A side-on sortie at dusk |
+| ![Court martial](docs/screenshots/court-martial.png) | |
+| Fire on civilians three times and it ends here | |
 
 ## Requirements
 
