@@ -318,16 +318,21 @@ def corrugated(h, w, seed, base=(96, 92, 86), pitch=7.0):
 
 
 # ---- ground seen from above --------------------------------------------------
-def seg_distance(px, py, segs):
+def seg_distance(px, py, segs, square=0.0):
     """Distance from each point to the nearest of the segments
-    ((x0, y0), (x1, y1)), and the index of that segment."""
+    ((x0, y0), (x1, y1)), and the index of that segment.  'square' (0..1)
+    blends toward the box distance, so bands round axis-aligned segments
+    keep crisp right-angled corners."""
     best = np.full(px.shape, np.inf, np.float32)
     which = np.zeros(px.shape, np.int32)
     for i, ((x0, y0), (x1, y1)) in enumerate(segs):
         dx, dy = x1 - x0, y1 - y0
         L = dx * dx + dy * dy
         t = np.clip(((px - x0) * dx + (py - y0) * dy) / max(L, 1e-9), 0, 1)
-        d = np.hypot(px - (x0 + t * dx), py - (y0 + t * dy))
+        ex, ey = np.abs(px - (x0 + t * dx)), np.abs(py - (y0 + t * dy))
+        d = np.hypot(ex, ey)
+        if square:
+            d = d * (1 - square) + np.maximum(ex, ey) * square
         closer = d < best
         best = np.where(closer, d, best)
         which = np.where(closer, i, which)

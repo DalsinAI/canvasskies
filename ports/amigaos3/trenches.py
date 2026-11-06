@@ -44,7 +44,7 @@ def tile(ours, variant, seed):
     cx = TW / 2 - front * 14            # leave room for the wire in front
     # The crenellated centreline: bays alternately forward and back,
     # joined by short jogs round the traverses; two bays a tile.
-    off = 8.0
+    off = 6.5
     segs = []
     for k in range(4):
         y0, y1 = k * 24, (k + 1) * 24
@@ -58,24 +58,34 @@ def tile(ours, variant, seed):
         pts = [(bx, 60), (bx - front * 12, 54), (bx - front * 20, 64),
                (bx - front * 30, 58), (bx - front * 34, 62)]
         segs += list(zip(pts[:-1], pts[1:]))
-    d, which = seg_distance(xx, yy, segs)
+    d, which = seg_distance(xx, yy, segs[:9], square=0.85)
+    if variant:
+        dc, wc = seg_distance(xx, yy, segs[9:])
+        closer = dc < d
+        d = np.where(closer, dc, d)
+        which = np.where(closer, 9 + wc, which)
     centre_x = np.where(((yy // 24) % 2) == 0, cx + off, cx - off)
     side = np.sign(xx - centre_x) * front          # +1 toward the enemy
     comm = which >= 9
     noise = periodic_noise(H, W, nseed, 5, 6)
     fine = periodic_noise(H, W, nseed + 1, 3, 30)
 
-    half = 4.6
-    # Nothing on the ground is ruled: wobble every band's edge.
+    half = 2.3
+    # Nothing on the ground is ruled, but the cut itself is: only the
+    # banks and spoil wander.
     rough = (periodic_noise(H, W, nseed + 9, 4, 10) - 0.5)
-    d_floor = d + rough * 1.2
-    d = d + rough * 4.0
+    d_floor = d + rough * 0.4
+    d = d + rough * 1.6
     floor = d_floor < half
-    wall = (d >= half) & (d < half + 1.2)
-    para = (d >= half + 1.2) & (d < half + 8.0) & ((side > 0) & ~comm)
-    parados = (d >= half + 1.2) & (d < half + 6.0) & ~para
-    spoil_w = 14 + 7 * (noise - 0.5)
-    spoil = (d >= half + 6.0) & (d < half + spoil_w) & ~para
+    wall = (d >= half) & (d < half + 0.9)
+    para = (d >= half + 0.9) & (d < half + 5.0) & ((side > 0) & ~comm)
+    parados = (d >= half + 0.9) & (d < half + 3.6) & ~para
+    # Spoil in broken heaps, thrown thickest on the parapet side.
+    heaps = periodic_noise(H, W, nseed + 11, 5, 12)
+    reach = np.where(side > 0, 13.0, 7.0) + 6 * (noise - 0.5)
+    spoil = (d >= half + 3.0) & (d < half + reach) & \
+        (heaps > 0.33 + 0.28 * (d - half) / reach) & ~para
+    spoil_w = reach
     # Height: the floor cut down, the bags raised in courses, the spoil
     # heaped unevenly along the lip.
     h = np.zeros((H, W), np.float32)
@@ -89,16 +99,16 @@ def tile(ours, variant, seed):
     top = 2.6 - 0.25 * course
     h[para] = top[para] * 0.75 + 0.6 * bump[para]
     h[parados] = 1.6 * 0.75 + 0.5 * bump[parados]
-    lip = np.clip(1 - (d - half - 6.0) / spoil_w, 0, 1)
+    lip = np.clip(1 - (d - half - 3.0) / spoil_w, 0, 1)
     h[spoil] = (0.4 + 1.2 * lip[spoil]) * (0.7 + 0.6 * noise[spoil])
     # Albedo for each part.
     clay = np.array([0.50, 0.40, 0.28])
-    chalk = np.array([0.74, 0.72, 0.66])
+    chalk = np.array([0.80, 0.78, 0.72])
     spoil_col = clay if ours else chalk
     bag = np.array([0.66, 0.58, 0.40]) if ours else np.array([0.46, 0.46, 0.40])
     alb = np.zeros((H, W, 3), np.float32)
     alb[:] = np.array([0.36, 0.30, 0.22])
-    alb[spoil] = (spoil_col * (0.75 + 0.35 * fine[..., None]))[spoil]
+    alb[spoil] = (spoil_col * (0.6 + 0.6 * heaps[..., None]))[spoil]
     bagtone = (0.82 + 0.25 * fine + 0.12 * np.sin(along * 7.0 + course * 2))
     alb[para | parados] = (bag[None, :] * bagtone[..., None])[para | parados]
     seams = (bag_u < 0.08) | (bag_v < 0.1)
@@ -127,8 +137,9 @@ def tile(ours, variant, seed):
         rr = np.hypot(xx - ccx, yy - ccy) / r
         bowl = rr < 1.0
         rim = (rr >= 1.0) & (rr < 1.45)
-        h[bowl] = np.minimum(h[bowl], -3.5 * (1 - rr[bowl] ** 2))
-        h[rim] = np.maximum(h[rim], 1.4 * (1 - (rr[rim] - 1) / 0.45))
+        depth = min(1.0, r / 8.0)
+        h[bowl] = np.minimum(h[bowl], -3.5 * depth * (1 - rr[bowl] ** 2))
+        h[rim] = np.maximum(h[rim], 1.2 * depth * (1 - (rr[rim] - 1) / 0.45))
         alb[bowl | rim] = (clay * 0.8 * (0.8 + 0.4 * fine[..., None]))[bowl | rim]
         if rng.random() < 0.6:
             pool = rr < 0.45
@@ -137,8 +148,8 @@ def tile(ours, variant, seed):
         crater_any |= bowl | rim
     # The wire belt in front: rows of screw pickets, the wire tangled
     # between them.
-    wire_x0 = cx + front * (half + 13)
-    wire_x1 = cx + front * (half + 34)
+    wire_x0 = cx + front * (half + 16)
+    wire_x1 = cx + front * (half + 30)
     lo, hi = min(wire_x0, wire_x1), max(wire_x0, wire_x1)
     wire = np.zeros((H, W), bool)
     stakes = []
@@ -159,14 +170,14 @@ def tile(ours, variant, seed):
         py = a[1] + (b[1] - a[1]) * t + np.sin(t * 9 + sag) * 0.6
         for x, y in zip(px, py):
             ix, iy = int(x * K), int(y * K) % H
-            wire[iy:iy + 3, max(0, ix):ix + 3] = True
+            wire[iy:iy + 4, max(0, ix):ix + 4] = True
     # Light it; the wire and stakes go on top, dark with their shadows.
     out = shade_height(h, alb, float(K), wet=wet, shadow_len=60)
     shadow = np.roll(np.roll(stake | wire, 3, 0), 3, 1) & ~(stake | wire)
     out[shadow] *= 0.6
-    out[wire] = np.array([0.20, 0.19, 0.18])
+    out[wire] = np.array([0.50, 0.50, 0.48])          # rusted wire, grey
     out[stake] = np.array([0.16, 0.13, 0.10])
-    footprint = (d < half + spoil_w) | crater_any | wire | stake | \
+    footprint = floor | wall | para | parados | spoil | crater_any | wire | stake | \
         (shadow & (np.abs(xx - (lo + hi) / 2) < (hi - lo) / 2 + 3))
     # Filter down; anything mostly outside the works becomes clear.
     rgb = Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8))
