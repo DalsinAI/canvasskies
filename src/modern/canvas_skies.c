@@ -15386,12 +15386,13 @@ typedef struct {
     uint32_t period_ms, frame_ms;
 } RememberLife;
 static const RememberLife remember_life[] = {
-    {0, 286, 9, 5, 26, 38000u, 90u},          /* a butterfly over the poppies */
-    {REMEMBER_LIFE_SPRITES > 1 ? 1 : 0, 304, 7, 7, 30, 47000u, 80u},
-    {REMEMBER_LIFE_SPRITES > 2 ? 2 : 0, 40, 4, 3, 2, 120000u, 220u},  /* the lark */
-    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 220, 18, 2, 16, 26000u, 400u}, /* seeds */
-    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 180, 22, 2, 14, 31000u, 400u},
-    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 250, 14, 3, 18, 22000u, 400u}
+    {0, 288, 9, 5, 26, 38000u, 90u},           /* a tortoiseshell */
+    {1, 306, 7, 7, 30, 47000u, 80u},           /* a cabbage white */
+    {2, 274, 6, 6, 28, 33000u, 70u},           /* a common blue */
+    {3, 138, 4, 3, 2, 120000u, 220u},          /* the lark, high up */
+    {4, 230, 18, 2, 16, 26000u, 400u},         /* thistledown */
+    {4, 190, 22, 2, 14, 31000u, 400u},
+    {4, 255, 14, 3, 18, 22000u, 400u}
 };
 #define REMEMBER_LIFE_COUNT ((int)(sizeof(remember_life) / sizeof(remember_life[0])))
 #endif
@@ -15512,9 +15513,16 @@ static void remember_line(Game *g, FontId face, int y, const char *text,
             for (k = 0; k < (fade >= 24 ? 8 : 4); ++k)
                 font_text(g, face, x + edge[k][0], y + edge[k][1], text,
                           PIX_PACK(14, 16, 12));
-    } else if (fade >= 16) {
-        /* The names: a gentle shadow only, below and to the right. */
-        font_text(g, face, x + 1, y + 1, text, PIX_PACK(20, 20, 16));
+    } else {
+        /* The names: a soft dark strip behind each, feathered at its ends
+         * so it reads as shade rather than a box, and a gentle shadow. */
+        int a = 70 * fade / 32, half = w / 2 + 18, top = y - 14;
+        for (k = 0; k < 4; ++k)
+            blend_rect(g->screen, 320 - half + k * 5, top + (k > 1),
+                       2 * (half - k * 5), 19 - 2 * (k > 1), 10, 10, 8,
+                       (uint8_t)(a / 4));
+        if (fade >= 16)
+            font_text(g, face, x + 1, y + 1, text, PIX_PACK(20, 20, 16));
     }
     font_text(g, face, x, y, text,
               PIX_PACK(60 + 168 * fade / 32, 58 + 160 * fade / 32,
@@ -15627,8 +15635,8 @@ static void draw_remember(Game *g)
         blend_rect(s, 0, REMEMBER_BAND_TOP - 24 + i * 3, SCREEN_W, 3,
                    8, 9, 8, (uint8_t)(6 + i * 7));
     blend_rect(s, 0, REMEMBER_BAND_TOP, SCREEN_W,
-               SCREEN_H - REMEMBER_BAND_TOP, 8, 9, 8, 62);
-    last = (g->remember_count ? g->remember_count * REMEMBER_LINE + 40 : 0) +
+               SCREEN_H - REMEMBER_BAND_TOP, 8, 9, 8, 48);
+    last = (g->remember_count ? g->remember_count * REMEMBER_LINE + 90 : 0) +
            REMEMBER_LINE;
     y = SCREEN_H + 6 -
         (int)((t - REMEMBER_SCROLL_AT) * (uint32_t)REMEMBER_RISE / 1000u);
