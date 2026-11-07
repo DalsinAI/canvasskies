@@ -276,6 +276,10 @@ The reels shown in the picture house (`newsreels.bin`, made by
 logo and timecode. The pianist's score (`cinema-piano.wav`) is composed
 for the game by `ports/amigaos3/make_cinema_piano.py`.
 
+The aerodrome films (`airfield-films.bin`) are not footage: they are
+rendered and their sound synthesised by our own scripts (see
+`assets/canvas-skies/ART_PROVENANCE.md`).
+
 | Film | Licence | Held by | Source |
 |---|---|---|---|
 | German War Film, 1914-1918 | Public domain (US government compilation) | US National Archives | <https://upload.wikimedia.org/wikipedia/commons/b/bf/German_War_Film%2C_1914-1918.webm> |
