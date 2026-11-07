@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "canvas_campaign.h"
+#include "canvas_career.h"
 #include "canvas_news.h"
 #include "canvas_fonts.h"
 #include "canvas_topdown_sprites.h"
@@ -24,6 +25,7 @@
 #include "canvas_side_civilians.h"
 #include "canvas_rear_carbine.h"
 #include "canvas_ticks.h"
+#include "canvas_remember.h"
 #include "canvas_riflemen.h"
 
 #ifndef M_PI
@@ -260,6 +262,33 @@
 #ifndef CANVAS_AIRFIELD_FILMS_BIN
 #define CANVAS_AIRFIELD_FILMS_BIN "assets/canvas-skies/airfield-films.bin"
 #endif
+#ifndef CANVAS_REMEMBER_FIELD_BMP
+#define CANVAS_REMEMBER_FIELD_BMP "assets/canvas-skies/remember-field.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_POPPIES_BMP
+#define CANVAS_REMEMBER_POPPIES_BMP "assets/canvas-skies/remember-poppies.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_SKY_BMP
+#define CANVAS_REMEMBER_SKY_BMP "assets/canvas-skies/remember-sky.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_FAR_BMP
+#define CANVAS_REMEMBER_FAR_BMP "assets/canvas-skies/remember-far.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_MID_BMP
+#define CANVAS_REMEMBER_MID_BMP "assets/canvas-skies/remember-mid.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_NEAR_BMP
+#define CANVAS_REMEMBER_NEAR_BMP "assets/canvas-skies/remember-near.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_LIFE_BMP
+#define CANVAS_REMEMBER_LIFE_BMP "assets/canvas-skies/remember-life.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_WIND_WAV
+#define CANVAS_REMEMBER_WIND_WAV "assets/canvas-skies/remember-wind.wav"
+#endif
+#ifndef CANVAS_WE_REMEMBER_TXT
+#define CANVAS_WE_REMEMBER_TXT "PROGDIR:WeRemember.txt"
+#endif
 #ifndef CANVAS_PREFS_PATH
 #define CANVAS_PREFS_PATH "PROGDIR:CanvasSkies.prefs"
 #endif
@@ -361,7 +390,8 @@ typedef enum {
     SCENE_COURT_MARTIAL, /* the end of a career in disgrace */
     SCENE_CINEMA,   /* the picture house, a chapter's first morning */
     SCENE_SETTINGS, /* the officer's preferences */
-    SCENE_FILM      /* a take-off or a landing, on old film */
+    SCENE_FILM,     /* a take-off or a landing, on old film */
+    SCENE_REMEMBER  /* the old front in 1919, and the roll */
 } Scene;
 
 typedef enum {
@@ -751,6 +781,8 @@ typedef struct {
     float gramophone_lp;
     float gramophone_hp;
     float gramophone_previous;
+    const int16_t *wind;        /* the wind over the old front, looped */
+    uint32_t wind_len, wind_pos;
     const int16_t *film_sound;  /* the aerodrome film's soundtrack */
     uint32_t film_len, film_pos;
     float music_gain;     /* the settings' two sliders, 0..1 */
@@ -804,6 +836,12 @@ typedef struct {
     SDL_Surface *loss_card;         /* the empty chair, by candlelight */
     Newsreel newsreel;
     AirfieldFilm film;
+    SDL_Surface *remember_field;    /* the old front in summer 1919 */
+    SDL_Surface *remember_layer[4]; /* or the same as sky, far, mid, near */
+    SDL_Surface *remember_life;     /* butterflies, a lark, thistledown */
+    SDL_Surface *remember_poppies;  /* poppies and grass in the wind */
+    char **remember_names;          /* the roll, from WeRemember.txt */
+    int remember_count;
     Scene film_next;        /* where the film leads when it ends */
     int cinema_reel_slot;
     int cinema_seen;                /* chapter + 1 whose reels were shown */
@@ -872,6 +910,7 @@ typedef struct {
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
+    int saved_grounded;
     /* Pilot's record: victories, decorations, rank and growing skills. */
     int victories, sorties, rank;
     /* Conduct, kept with the career: the squadron's morale, offences
@@ -1025,6 +1064,8 @@ static int personal_shot(Game *g, int revolver);
 static void ensure_scene_assets(Game *g, Scene scene);
 static void ensure_music(Game *g, int mood);
 static int film_start_for(Game *g, Scene from, Scene to);
+static void remember_start(Game *g);
+static void remember_free(Game *g);
 static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void qa_log_sortie(Game *g);
@@ -1105,29 +1146,31 @@ static int enemies_hostile(const Game *g)
     return mission_armed(g) && !armistice_quiet(g);
 }
 
-/* Wingmen follow the written story rather than a damage simulation.
- * Gridpipe Thyne turns east and is lost in "Thyne's Last Turn" (Chapter 5,
- * Mission 9); from the next sortie onward his place stays empty. */
 /* QA entry points (DOGFIGHT, DEATH, CHAPTER_SUCCESS...) write their own
  * save file so testing on a player's install never replaces the campaign. */
 static const char *save_path = CANVAS_SAVE_PATH;
 static const char *save_new_path = CANVAS_SAVE_NEW_PATH;
 static const char *save_backup_path = CANVAS_SAVE_BACKUP_PATH;
 
+static int qa_save_in_use;
+
 static void use_qa_save_paths(void)
 {
+    qa_save_in_use = 1;
     save_path = "PROGDIR:CanvasSkies-QA.save";
     save_new_path = "PROGDIR:CanvasSkies-QA.save.new";
     save_backup_path = "PROGDIR:CanvasSkies-QA.save.bak";
 }
 
+/* The wingmen carry their wounds from one sortie to the next
+ * (canvas_career.h has the arithmetic); the story only adds what it has
+ * written.  Gridpipe Thyne turns east and is lost in "Thyne's Last Turn"
+ * (Chapter 5, Mission 9); from the next sortie onward his place stays
+ * empty.  Whatever else the war has done to the flight is left alone. */
 static void apply_story_wingmen(Game *g)
 {
-    int pilot;
-    for (pilot = 0; pilot < 3; ++pilot)
-        g->wingman_health[pilot] = 100;
-    if (g->chapter > 4 || (g->chapter == 4 && g->mission > 8))
-        g->wingman_health[1] = 0;
+    career_story_wingmen(g->wingman_health,
+                         g->chapter > 4 || (g->chapter == 4 && g->mission > 8));
 }
 
 /* The Royal Air Force was formed on 1 April 1918; before that the pilot
@@ -1151,6 +1194,32 @@ static const char *corps_short(const Game *g)
 static int wingman_sick(const Game *g, int pilot)
 {
     return pilot == 2 && g->chapter == 5 && g->mission >= 8;
+}
+
+/* Whether he is in the flight this morning: not lost, not down with the
+ * influenza, and not still mending from an earlier sortie. */
+static int wingman_fit(const Game *g, int pilot)
+{
+    return career_wingman_fit(g->wingman_health[pilot]) &&
+           !wingman_sick(g, pilot);
+}
+
+/* QA: the flight and the continuation point as the save now has them,
+ * printed to the shell for the lab's notes.  Only the test entries,
+ * which keep their own save, say anything. */
+static void qa_report_flight(const Game *g, const char *when)
+{
+    int i;
+    if (!qa_save_in_use) return;
+    printf("QA %s: CHAPTER %d MISSION %d GROUNDED %d", when,
+           g->chapter + 1, g->mission + 1, g->grounded_next);
+    for (i = 0; i < 3; ++i)
+        printf("  %s %d %s", allied_pilot_names[i], g->wingman_health[i],
+               g->wingman_health[i] <= 0 ? "LOST" :
+               wingman_sick(g, i) ? "SICK" :
+               career_wingman_fit(g->wingman_health[i]) ? "FIT" : "SICK BAY");
+    printf("\n");
+    fflush(stdout);
 }
 
 /* The day of this sortie: the diary date carried by the latest newspaper
@@ -1183,78 +1252,26 @@ static int news_unlocked(const Game *g, int index)
 static int load_campaign_save_path(Game *g, const char *path)
 {
     FILE *file = fopen(path, "r");
-    char magic[24];
-    int version;
-    int chapter, mission;
-    int wingman0, wingman1, wingman2;
-    int complete = 0;
-    int lives = 3;
-    int victories = 0, sorties = 0, rank = 0;
-    unsigned awards = 0;
-    int skill[3] = {0, 0, 0};
+    CareerRecord r;
+    int ok;
     if (!file) return 0;
-    if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
-               &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
-        strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
-        (version < 1 || version > 5) ||
-        chapter < 0 || chapter >= CHAPTER_COUNT ||
-        mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
-        wingman0 < 0 || wingman0 > 100 ||
-        wingman1 < 0 || wingman1 > 100 ||
-        wingman2 < 0 || wingman2 > 100) {
-        fclose(file);
-        return 0;
-    }
-    if (version >= 2 &&
-        (fscanf(file, "%d", &complete) != 1 ||
-         (complete != 0 && complete != 1))) {
-        fclose(file);
-        return 0;
-    }
-    if (version >= 3 &&
-        (fscanf(file, "%d", &lives) != 1 || lives < 0 || lives > 3)) {
-        fclose(file);
-        return 0;
-    }
-    /* Version 4 adds the pilot's record.  Older saves start it at zero. */
-    if (version >= 4 &&
-        (fscanf(file, "%d %d %u %d %d %d %d", &victories, &sorties, &awards,
-                &rank, &skill[0], &skill[1], &skill[2]) != 7 ||
-         victories < 0 || sorties < 0 || rank < 0 || rank > 3 ||
-         skill[0] < 0 || skill[0] > 100 || skill[1] < 0 || skill[1] > 100 ||
-         skill[2] < 0 || skill[2] > 100)) {
-        fclose(file);
-        return 0;
-    }
-    /* Version 5 adds conduct.  Older saves start with a cheerful mess. */
-    {
-        int conduct[5] = {70, 0, 0, 0, 0};
-        if (version >= 5 &&
-            (fscanf(file, "%d %d %d %d %d", &conduct[0], &conduct[1],
-                    &conduct[2], &conduct[3], &conduct[4]) != 5 ||
-             conduct[0] < 0 || conduct[0] > 100 || conduct[1] < 0 ||
-             conduct[1] > 3 || conduct[2] < 0 || conduct[3] < 0 ||
-             conduct[3] > 3 || conduct[4] < 0 || conduct[4] > 1)) {
-            fclose(file);
-            return 0;
-        }
-        memcpy(g->saved_conduct, conduct, sizeof(conduct));
-    }
+    ok = career_record_read(file, &r, CHAPTER_COUNT, MISSIONS_PER_CHAPTER);
     fclose(file);
-    g->saved_victories = victories;
-    g->saved_sorties = sorties;
-    g->saved_awards = awards;
-    g->saved_rank = rank;
-    g->saved_skill[0] = (float)skill[0] / 100.0f;
-    g->saved_skill[1] = (float)skill[1] / 100.0f;
-    g->saved_skill[2] = (float)skill[2] / 100.0f;
-    g->saved_chapter = chapter;
-    g->saved_mission = mission;
-    g->saved_wingman_health[0] = wingman0;
-    g->saved_wingman_health[1] = wingman1;
-    g->saved_wingman_health[2] = wingman2;
-    g->saved_campaign_complete = complete;
-    g->saved_lives = lives;
+    if (!ok) return 0;
+    g->saved_victories = r.victories;
+    g->saved_sorties = r.sorties;
+    g->saved_awards = r.awards;
+    g->saved_rank = r.rank;
+    g->saved_skill[0] = (float)r.skill[0] / 100.0f;
+    g->saved_skill[1] = (float)r.skill[1] / 100.0f;
+    g->saved_skill[2] = (float)r.skill[2] / 100.0f;
+    memcpy(g->saved_conduct, r.conduct, sizeof(r.conduct));
+    g->saved_chapter = r.chapter;
+    g->saved_mission = r.mission;
+    memcpy(g->saved_wingman_health, r.wingman, sizeof(r.wingman));
+    g->saved_campaign_complete = r.complete;
+    g->saved_lives = r.lives;
+    g->saved_grounded = r.grounded;
     return 1;
 }
 
@@ -1279,18 +1296,28 @@ static int save_campaign(Game *g)
     FILE *file = fopen(save_new_path, "w");
     int ok;
     int backed_up;
+    CareerRecord r;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 5\n%d %d\n%d %d %d\n%d\n%d\n"
-                 "%d %d %u %d %d %d %d\n%d %d %d %d %d\n",
-                 g->chapter, g->mission,
-                 g->wingman_health[0], g->wingman_health[1],
-                 g->wingman_health[2], g->campaign_complete, g->lives,
-                 g->victories, g->sorties, g->awards, g->rank,
-                 (int)(g->skill_flying * 100.0f + 0.5f),
-                 (int)(g->skill_gunnery * 100.0f + 0.5f),
-                 (int)(g->skill_engine * 100.0f + 0.5f),
-                 g->morale, g->offences, g->award_hold, g->rank_penalty,
-                 g->disgraced) > 0;
+    career_record_defaults(&r);
+    r.chapter = g->chapter;
+    r.mission = g->mission;
+    memcpy(r.wingman, g->wingman_health, sizeof(r.wingman));
+    r.complete = g->campaign_complete;
+    r.lives = g->lives;
+    r.victories = g->victories;
+    r.sorties = g->sorties;
+    r.awards = g->awards;
+    r.rank = g->rank;
+    r.skill[0] = (int)(g->skill_flying * 100.0f + 0.5f);
+    r.skill[1] = (int)(g->skill_gunnery * 100.0f + 0.5f);
+    r.skill[2] = (int)(g->skill_engine * 100.0f + 0.5f);
+    r.conduct[0] = g->morale;
+    r.conduct[1] = g->offences;
+    r.conduct[2] = g->award_hold;
+    r.conduct[3] = g->rank_penalty;
+    r.conduct[4] = g->disgraced;
+    r.grounded = g->grounded_next;
+    ok = career_record_write(file, &r);
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(save_new_path);
@@ -1318,6 +1345,7 @@ static int save_campaign(Game *g)
     g->saved_lives = g->lives;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
+    g->saved_grounded = g->grounded_next;
     g->saved_victories = g->victories;
     g->saved_sorties = g->sorties;
     g->saved_awards = g->awards;
@@ -1419,7 +1447,9 @@ static void restore_saved_career(Game *g)
     g->award_hold = g->saved_conduct[2];
     g->rank_penalty = g->saved_conduct[3];
     g->disgraced = g->saved_conduct[4];
-    g->grounded_next = g->conduct_pending = 0;
+    /* A grounding owed when he last left the mess is still owed. */
+    g->grounded_next = g->saved_grounded;
+    g->conduct_pending = 0;
 }
 
 static float grow_skill(float skill, float amount)
@@ -1439,6 +1469,19 @@ static void count_sortie_in_record(Game *g)
     g->skill_flying = grow_skill(g->skill_flying, g->success ? 0.03f : 0.012f);
     g->skill_gunnery = grow_skill(g->skill_gunnery, 0.006f + 0.018f * g->kills);
     g->skill_engine = grow_skill(g->skill_engine, 0.015f);
+    /* The flight's wounds go into the books with the rest of the day.
+     * Only the cockpit patrols put the wingmen in the air; on any other
+     * sortie their machines stay on the field and the men simply rest.
+     * A round that strikes a wingman takes one of his three lives of
+     * fabric and wire (wingmen[].hp), and the third sends him home. */
+    for (i = 0; i < 3; ++i) {
+        const Enemy *w = &g->wingmen[i];
+        int hits = w->max_hp - (w->hp < 0 ? 0 : w->hp);
+        g->wingman_health[i] =
+            career_wingman_after_sortie(g->wingman_health[i],
+                                        w->max_hp > 0 ? hits : 0,
+                                        g->wingman_hit_today[i]);
+    }
     g->pending_award = 0;
     /* A pilot who goes down shows no decoration card that evening, so the
      * decoration waits for the next sortie he comes home from. */
@@ -1494,6 +1537,7 @@ static int save_mission_result(Game *g)
     int active_chapter = g->chapter;
     int active_mission = g->mission;
     int active_complete = g->campaign_complete;
+    int active_grounded = g->grounded_next;
     int ok, game_over;
     if (g->fatal_sortie && !g->life_lost_this_sortie) {
         if (g->lives > 0) --g->lives;
@@ -1502,19 +1546,17 @@ static int save_mission_result(Game *g)
     count_sortie_in_record(g);
     /* The debrief still describes the sortie just flown, but the durable
      * continuation point must already describe what comes next.  A failed
-     * sortie deliberately saves the same mission so Retry remains honest. */
-    if (g->success) {
-        if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
-            ++g->mission;
-        } else if (g->chapter + 1 < CHAPTER_COUNT) {
-            ++g->chapter;
-            g->mission = 0;
-            /* A fresh chapter brings a fresh start: three lives again, so
-             * one bad spell costs a chapter rather than the whole war. */
-            g->lives = 3;
-        } else {
-            g->campaign_complete = 1;
-        }
+     * sortie deliberately saves the same mission so Retry remains honest.
+     * A grounded pilot's next sortie is struck off here too, by the same
+     * rule the evening uses, so quitting after the debrief and continuing
+     * cannot fly the sortie the squadron flew without him. */
+    if (g->success &&
+        career_advance(&g->chapter, &g->mission, &g->campaign_complete,
+                       &g->grounded_next, CHAPTER_COUNT,
+                       MISSIONS_PER_CHAPTER) == CAREER_NEXT_CHAPTER) {
+        /* A fresh chapter brings a fresh start: three lives again, so
+         * one bad spell costs a chapter rather than the whole war. */
+        g->lives = 3;
     }
     game_over = !g->success && g->fatal_sortie && g->lives <= 0;
     if (game_over) {
@@ -1526,10 +1568,15 @@ static int save_mission_result(Game *g)
     }
     apply_story_wingmen(g);
     ok = save_campaign(g);
+    if (ok) qa_report_flight(g, "SAVED");
     if (game_over) g->lives = 0;   /* tonight still ends at the memorial */
+    /* The evening's cards still belong to the sortie just flown: the
+     * memorandum must still know he is grounded, and advance_after_debrief
+     * moves on from here by the same rule as above. */
     g->chapter = active_chapter;
     g->mission = active_mission;
     g->campaign_complete = active_complete;
+    g->grounded_next = active_grounded;
     apply_story_wingmen(g);
     g->mission_save_state = ok ? 1 : -1;
     return ok;
@@ -2729,10 +2776,15 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         }
         /* Music on one slider; in a sortie the engines' drone goes with
          * the guns and bangs on the other. */
-        float bed = a->scene == SCENE_FILM ? 0.0f :
+        float bed = a->scene == SCENE_FILM || a->scene == SCENE_REMEMBER ?
+                    0.0f :
                     sample * (a->scene == SCENE_SORTIE ? a->effects_gain :
                                                         a->music_gain);
         sample = 0.0f;
+        if (a->scene == SCENE_REMEMBER && a->wind && a->wind_len) {
+            sample += (float)a->wind[a->wind_pos] / 32768.0f;
+            if (++a->wind_pos >= a->wind_len) a->wind_pos = 0;
+        }
         if (a->film_sound && a->film_pos < a->film_len)
             sample += (float)(int16_t)SDL_SwapBE16(
                           (uint16_t)a->film_sound[a->film_pos++]) / 32768.0f;
@@ -2949,6 +3001,9 @@ static void set_scene(Game *g, Scene scene)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
     if (scene == SCENE_CINEMA) cinema_start(g);
+    if (g->scene == SCENE_REMEMBER && scene != SCENE_REMEMBER)
+        remember_free(g);
+    if (scene == SCENE_REMEMBER) remember_start(g);
     if (scene == SCENE_COURT_MARTIAL) {
         /* Cashiered: the career ends here and the save says so. */
         g->court_martial_stage = 0;
@@ -7500,7 +7555,7 @@ static void reset_wingmen(Game *g)
     for (i = 0; i < 3; ++i) {
         Enemy *w = &g->wingmen[i];
         Vec3 at;
-        if (g->wingman_health[i] <= 0 || wingman_sick(g, i)) continue;
+        if (!wingman_fit(g, i)) continue;   /* lost, ill or mending */
         at = pose_point(&pose, offset[i][0], offset[i][1], offset[i][2]);
         w->world_x = at.x; w->world_y = at.y; w->world_z = at.z;
         w->heading = g->flight_heading;
@@ -9816,7 +9871,7 @@ static void draw_mess(Game *g)
                  "A MACHINE DOWN WITH A CARBINE. NOBODY BELIEVES IT.");
     else if (g->kills > 0)
         snprintf(first, sizeof(first), "%s CHALKS %d MORE ON THE BOARD.",
-                 wingman_sick(g, 2) ? "ECCLES" : "BLUEBOTTLE", g->kills);
+                 wingman_fit(g, 2) ? "BLUEBOTTLE" : "ECCLES", g->kills);
     else if (mission->special == SPECIAL_TRUCE)
         snprintf(first, sizeof(first), "A CHRISTMAS TOAST TO THE MEN ACROSS THE WIRE.");
     else if (!mission_armed(g))
@@ -9830,7 +9885,7 @@ static void draw_mess(Game *g)
         /* Whoever is still at the table gives it, never the man missing. */
         int k;
         for (k = 0; k < 3; ++k)
-            if (k != wingman_hit(g) && !wingman_sick(g, k)) {
+            if (k != wingman_hit(g) && wingman_fit(g, k)) {
                 toaster = allied_pilot_names[k];
                 break;
             }
@@ -9838,10 +9893,11 @@ static void draw_mess(Game *g)
         snprintf(toast, sizeof(toast), wake_toasts[pick & 3u], toaster);
         lines[2] = toast;
     } else {
-        lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u :
+        lines[2] = toasts[(pick & 3u) == 1u && !wingman_fit(g, 2) ? 0u :
                           (pick & 3u)];
     }
-    lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
+    /* A man sent home wounded today is kept out of tomorrow's show. */
+    lines[3] = wingman_hit(g) >= 0 ? "THE DOCTOR KEEPS HIM OUT OF THE NEXT SHOW." :
                mood == MESS_WAKE ? "NOBODY SITS IN HIS CHAIR." :
                                    close_lines[(pick >> 4) % 3u];
     if (g->sortie_offences > 0) {
@@ -10061,16 +10117,39 @@ static void draw_story(Game *g)
                               0, ink);
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
+        /* The whole flight fills the page as it always did.  Short of a
+         * man, the page has room for who is flying on one line and who
+         * is in the sick bay on the next. */
+        static const char *const surname[3] = {"ECCLES", "THYNE", "BLUEBOTTLE"};
+        int k, fit = 0, abed = -1, abed_count = 0;
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "FLYING WITH:", red);
-        if (wingman_sick(g, 2))
-            snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
-        else
+        buf[0] = '\0';
+        for (k = 0; k < 3; ++k) {
+            if (wingman_fit(g, k)) {
+                if (fit++) strcat(buf, " / ");
+                strcat(buf, surname[k]);
+            } else if (g->wingman_health[k] > 0) {
+                if (abed < 0) abed = k;
+                ++abed_count;
+            }
+        }
+        if (fit == 3) {
             snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                      allied_pilot_names[2]);
-        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
-        if (g->wingman_health[1] > 0)
+            journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
             journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
                          allied_pilot_names[1], ink);
+        } else {
+            journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16),
+                         fit ? buf : "NOBODY. I GO ALONE.", ink);
+            if (abed_count > 1)
+                journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
+                             "THE REST IN THE SICK BAY", red);
+            else if (abed >= 0) {
+                snprintf(buf, sizeof(buf), "%s IN THE SICK BAY", surname[abed]);
+                journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18), buf, red);
+            }
+        }
     } else if (mission->mode == MISSION_GUNNER_3D) {
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16),
@@ -10171,13 +10250,16 @@ static void draw_squadron_roster(Game *g)
     typewriter_text(g, 410, y, buf, 7, 11, ink);
     snprintf(buf, sizeof(buf), "VICT. %d", g->victories);
     typewriter_text(g, 530, y, buf, 7, 11, ink);
+    /* A man still mending from the last show is WOUNDED and stays on the
+     * ground; one back in the flight but not yet himself is BRUISED. */
     for (i = 0; i < 3; ++i) {
-        uint32_t c = g->wingman_health[i] > 0 && !wingman_sick(g, i) ?
-                     ink : red;
+        uint32_t c = wingman_fit(g, i) ? ink : red;
         y += 15;
         typewriter_text(g, 410, y, allied_pilot_names[i], 7, 11, c);
         typewriter_text(g, 530, y, g->wingman_health[i] <= 0 ? "LOST" :
-                        wingman_sick(g, i) ? "SICK" : "FIT", 7, 11, c);
+                        wingman_sick(g, i) ? "SICK" :
+                        !wingman_fit(g, i) ? "WOUNDED" :
+                        g->wingman_health[i] < 75 ? "BRUISED" : "FIT", 7, 11, c);
     }
     y += 15;
     typewriter_text(g, 410, y, "TOM", 7, 11, ink);
@@ -14344,7 +14426,7 @@ typedef enum {
     AG_SIDE = 1u << 12, AG_SKY = 1u << 13, AG_TOPDOWN = 1u << 14,
     AG_TARGETS = 1u << 15, AG_EXPLODE = 1u << 16, AG_COCKPIT = 1u << 17,
     AG_GROUND = 1u << 18, AG_GUNNER = 1u << 19, AG_LEWIS = 1u << 20,
-    AG_CARBINE = 1u << 21, AG_RIFLEMEN = 1u << 22
+    AG_CARBINE = 1u << 21, AG_RIFLEMEN = 1u << 22, AG_REMEMBER = 1u << 23
 } AssetGroup;
 
 enum { ASSET_PLAIN, ASSET_LOOSE_KEY, ASSET_EXACT_KEY, ASSET_INDEX_KEY };
@@ -14415,7 +14497,20 @@ static const AssetSpec asset_specs[] = {
     ASSET(machine_cards, CANVAS_MACHINE_CARDS_BMP, AG_CARDS, 1, ASSET_EXACT_KEY),
     ASSET(office_paper, CANVAS_OFFICE_PAPER_BMP, AG_OFFICE, 1, ASSET_PLAIN),
     ASSET(office_stamp, CANVAS_OFFICE_STAMP_BMP, AG_OFFICE, 1, ASSET_EXACT_KEY),
-    ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN)
+    ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN),
+#ifdef REMEMBER_LAYERS
+    ASSET(remember_layer[0], CANVAS_REMEMBER_SKY_BMP, AG_REMEMBER, 1, ASSET_PLAIN),
+    ASSET(remember_layer[1], CANVAS_REMEMBER_FAR_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+    ASSET(remember_layer[2], CANVAS_REMEMBER_MID_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+    ASSET(remember_layer[3], CANVAS_REMEMBER_NEAR_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+#else
+    ASSET(remember_field, CANVAS_REMEMBER_FIELD_BMP, AG_REMEMBER, 1, ASSET_PLAIN),
+#endif
+#ifdef REMEMBER_LIFE_SPRITES
+    ASSET(remember_life, CANVAS_REMEMBER_LIFE_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+#endif
+    ASSET(remember_poppies, CANVAS_REMEMBER_POPPIES_BMP, AG_REMEMBER, 1,
+          ASSET_LOOSE_KEY)
 };
 #define ASSET_COUNT ((int)(sizeof(asset_specs) / sizeof(asset_specs[0])))
 
@@ -14515,6 +14610,7 @@ static unsigned asset_groups_for_scene(const Game *g, Scene scene)
     case SCENE_COURT_MARTIAL: return AG_JOURNAL;
     case SCENE_CINEMA: return AG_CINEMA;
     case SCENE_FILM: return 0;
+    case SCENE_REMEMBER: return AG_REMEMBER;
     case SCENE_SORTIE:
         if (mode == MISSION_SIDE)
             return AG_SIDE | AG_SKY | AG_EXPLODE | AG_RIFLEMEN;
@@ -14750,6 +14846,8 @@ static int game_init(Game *g)
     g->running = 1;
     g->lives = 3;
     g->morale = 70;     /* a cheerful mess until something sours it */
+    /* A fit flight for the test entries; a campaign sets its own. */
+    g->wingman_health[0] = g->wingman_health[1] = g->wingman_health[2] = 100;
     /* With room to spare the art stays once loaded; otherwise each scene
      * holds only its own.  The officer's preferences may say otherwise. */
     g->fast_at_start = exec_avail_mem(MEMF_FAST_BITS);
@@ -15412,6 +15510,301 @@ static void draw_film(Game *g)
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
 }
 
+/* ---- We remember ----------------------------------------------------------
+ *
+ * The very end: the old front in the summer of 1919, the trenches grassed
+ * over and the poppies grown up through the wire, the camera drifting
+ * slowly across it with nothing but the wind.  Over it, WE REMEMBER and
+ * the roll: names given by people who have given to the Royal British
+ * Legion, of someone of theirs who served, read from WeRemember.txt
+ * beside the program so that the roll can grow without a new program.
+ * One line a name; blank lines and lines starting with # are passed over;
+ * UTF-8 or Latin-1, with accents folded to the plain letters the period
+ * faces carry. */
+#define REMEMBER_MAX_NAMES 4000
+#define REMEMBER_NAME_LEN 72
+#define REMEMBER_HEADING_MS 2500u      /* the heading fades in over this */
+#define REMEMBER_SCROLL_AT 7000u       /* and the roll begins to rise */
+#define REMEMBER_LINE 21               /* pixels from one name to the next */
+#define REMEMBER_RISE 13               /* pixels a second */
+#define REMEMBER_BAND_TOP 262          /* the shaded band for the roll */
+#define REMEMBER_REST_Y 352            /* where the closing line rests */
+#define REMEMBER_PAN_MS 150000u        /* to drift from one end to the other */
+#define REMEMBER_POPPY_COUNT 34
+
+#ifdef REMEMBER_LIFE_SPRITES
+/* What moves over the field: each crosses the screen in period_ms, at
+ * depth/32 of the near layer's pace, bobbing 'bobs' times a crossing. */
+typedef struct {
+    int sprite, y, bob, bobs, depth;
+    uint32_t period_ms, frame_ms;
+} RememberLife;
+static const RememberLife remember_life[] = {
+    {0, 288, 9, 5, 26, 38000u, 90u},           /* a tortoiseshell */
+    {1, 306, 7, 7, 30, 47000u, 80u},           /* a cabbage white */
+    {2, 274, 6, 6, 28, 33000u, 70u},           /* a common blue */
+    {3, 138, 4, 3, 2, 120000u, 220u},          /* the lark, high up */
+    {4, 230, 18, 2, 16, 26000u, 400u},         /* thistledown */
+    {4, 190, 22, 2, 14, 31000u, 400u},
+    {4, 255, 14, 3, 18, 22000u, 400u}
+};
+#define REMEMBER_LIFE_COUNT ((int)(sizeof(remember_life) / sizeof(remember_life[0])))
+#endif
+
+static const char *const remember_closing[2] = {
+    "PLEASE CONSIDER A GIFT TO THE ROYAL BRITISH LEGION.",
+    "BRITISHLEGION.ORG.UK/GET-INVOLVED/DONATE"
+};
+
+/* A Latin-1 letter to the plain one the faces have. */
+static char fold_latin1(unsigned c)
+{
+    static const char *const from =
+        "\xc0\xc1\xc2\xc3\xc4\xc5\xc7\xc8\xc9\xca\xcb\xcc\xcd\xce\xcf\xd1"
+        "\xd2\xd3\xd4\xd5\xd6\xd8\xd9\xda\xdb\xdc\xdd"
+        "\xe0\xe1\xe2\xe3\xe4\xe5\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf1"
+        "\xf2\xf3\xf4\xf5\xf6\xf8\xf9\xfa\xfb\xfc\xfd\xff";
+    static const char *const to =
+        "AAAAAACEEEEIIIIN" "OOOOOOUUUUY"
+        "aaaaaaceeeeiiiin" "oooooouuuuyy";
+    const char *at;
+    if (c < 0x80) return (char)c;
+    at = c ? strchr(from, (int)c) : NULL;
+    return at ? to[at - from] : '\0';
+}
+
+static void remember_load_names(Game *g)
+{
+    FILE *f = fopen(CANVAS_WE_REMEMBER_TXT, "rb");
+    char line[256];
+    if (!f) return;
+    g->remember_names = (char **)calloc(REMEMBER_MAX_NAMES, sizeof(char *));
+    if (!g->remember_names) {
+        fclose(f);
+        return;
+    }
+    while (g->remember_count < REMEMBER_MAX_NAMES &&
+           fgets(line, sizeof(line), f)) {
+        char name[REMEMBER_NAME_LEN + 1];
+        const unsigned char *p = (const unsigned char *)line;
+        int n = 0;
+        if (p[0] == 0xef && p[1] == 0xbb && p[2] == 0xbf) p += 3;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (*p == '#' || *p == '\r' || *p == '\n' || !*p) continue;
+        while (*p && *p != '\r' && *p != '\n' && n < REMEMBER_NAME_LEN) {
+            unsigned c = *p++;
+            char out;
+            /* Two-byte UTF-8 for the Latin-1 range; anything wider is
+             * dropped, as the faces could not show it. */
+            if (c >= 0xc0 && c < 0xe0 && (*p & 0xc0) == 0x80) {
+                c = ((c & 0x1f) << 6) | (*p++ & 0x3f);
+            } else if (c >= 0xe0) {
+                while ((*p & 0xc0) == 0x80) ++p;
+                continue;
+            }
+            out = fold_latin1(c);
+            if (out >= 'a' && out <= 'z') out = (char)(out - 'a' + 'A');
+            if (out >= 32 && out <= 126) name[n++] = out;
+        }
+        while (n > 0 && name[n - 1] == ' ') --n;
+        if (!n) continue;
+        name[n] = '\0';
+        g->remember_names[g->remember_count] = (char *)malloc((size_t)n + 1);
+        if (!g->remember_names[g->remember_count]) break;
+        memcpy(g->remember_names[g->remember_count], name, (size_t)n + 1);
+        ++g->remember_count;
+    }
+    fclose(f);
+}
+
+static void remember_start(Game *g)
+{
+    uint32_t len = 0;
+    uint8_t *wind;
+    g->scene_started = SDL_GetTicks();
+    if (!g->remember_names) remember_load_names(g);
+    if (!g->audio.device || g->audio.wind) return;
+    wind = load_mono_wav(CANVAS_REMEMBER_WIND_WAV, &len);
+    if (!wind) return;
+    SDL_LockAudioDevice(g->audio.device);
+    g->audio.wind = (const int16_t *)(void *)wind;
+    g->audio.wind_len = len / 2;
+    g->audio.wind_pos = 0;
+    SDL_UnlockAudioDevice(g->audio.device);
+}
+
+static void remember_free(Game *g)
+{
+    int i;
+    if (g->audio.device && g->audio.wind) {
+        const int16_t *wind;
+        SDL_LockAudioDevice(g->audio.device);
+        wind = g->audio.wind;
+        g->audio.wind = NULL;
+        g->audio.wind_len = g->audio.wind_pos = 0;
+        SDL_UnlockAudioDevice(g->audio.device);
+        SDL_free((void *)wind);
+    }
+    for (i = 0; i < g->remember_count; ++i) free(g->remember_names[i]);
+    free(g->remember_names);
+    g->remember_names = NULL;
+    g->remember_count = 0;
+}
+
+/* Lettering centred over the field, cream with a soft dark edge all
+ * round so it reads over sky and poppies alike.  Fading, it thins into
+ * the field rather than darkening. */
+static void remember_line(Game *g, FontId face, int y, const char *text,
+                          int fade)
+{
+    static const signed char edge[8][2] = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, 1}, {-1, 1}, {1, -1}, {2, 2}
+    };
+    int w = font_width(face, text), x = 320 - w / 2, k;
+    if (y < -40 || y > SCREEN_H + 40 || fade <= 0) return;
+    if (face == FONT_TITLE) {
+        if (fade >= 12)
+            for (k = 0; k < (fade >= 24 ? 8 : 4); ++k)
+                font_text(g, face, x + edge[k][0], y + edge[k][1], text,
+                          PIX_PACK(14, 16, 12));
+    } else {
+        /* The names: a soft dark strip behind each, feathered at its ends
+         * so it reads as shade rather than a box, and a gentle shadow. */
+        int a = 70 * fade / 32, half = w / 2 + 18, top = y - 14;
+        for (k = 0; k < 4; ++k)
+            blend_rect(g->screen, 320 - half + k * 5, top + (k > 1),
+                       2 * (half - k * 5), 19 - 2 * (k > 1), 10, 10, 8,
+                       (uint8_t)(a / 4));
+        if (fade >= 16)
+            font_text(g, face, x + 1, y + 1, text, PIX_PACK(20, 20, 16));
+    }
+    font_text(g, face, x, y, text,
+              PIX_PACK(60 + 168 * fade / 32, 58 + 160 * fade / 32,
+                       50 + 140 * fade / 32));
+}
+
+/* Names come up through the foot of the band and go out at its head. */
+static int remember_band_fade(int y)
+{
+    if (y > SCREEN_H - 4 || y < REMEMBER_BAND_TOP - 4) return 0;
+    if (y > SCREEN_H - 30) return (SCREEN_H - 4 - y) * 32 / 26;
+    if (y < REMEMBER_BAND_TOP + 22) return (y - REMEMBER_BAND_TOP + 4) * 32 / 26;
+    return 32;
+}
+
+static void draw_remember(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t now = SDL_GetTicks(), t = now - g->scene_started;
+    int pan = 0, i, y, fade, last;
+    float drift;
+    /* The field, drifting slowly to the right and resting at its end. */
+    drift = t >= REMEMBER_PAN_MS ? 1.0f : (float)t / (float)REMEMBER_PAN_MS;
+    drift = drift * drift * (3.0f - 2.0f * drift);
+#ifdef REMEMBER_LAYERS
+    if (g->remember_layer[0]) {
+        /* Sky, distance, middle ground and foreground, each a strip that
+         * slides at its own pace: the near poppies pass, the far church
+         * hardly moves. */
+        for (i = 0; i < REMEMBER_LAYERS; ++i) {
+            SDL_Surface *layer = g->remember_layer[i];
+            SDL_Rect src, dst;
+            if (!layer) continue;
+            src.x = (int)((float)(layer->w - SCREEN_W) * drift);
+            src.y = 0; src.w = SCREEN_W; src.h = layer->h;
+            dst.x = 0; dst.y = remember_layer_info[i][1];
+            dst.w = SCREEN_W; dst.h = layer->h;
+            SDL_BlitSurface(layer, &src, s, &dst);
+            if (i == REMEMBER_LAYERS - 1) pan = src.x;
+        }
+    } else
+#endif
+    if (g->remember_field) {
+        SDL_Rect src, dst;
+        pan = (int)((float)(g->remember_field->w - SCREEN_W) * drift);
+        src.x = pan; src.y = 0; src.w = SCREEN_W; src.h = SCREEN_H;
+        dst.x = 0; dst.y = 0; dst.w = SCREEN_W; dst.h = SCREEN_H;
+        SDL_BlitSurface(g->remember_field, &src, s, &dst);
+    } else {
+        gradient(s, 120, 140, 160, 90, 104, 70);
+    }
+    /* Poppies and grass along the foot, nearer than the painting and so
+     * passing a little faster, each swaying as the gusts come through. */
+    if (g->remember_poppies) {
+        float gust = 0.5f + 0.5f * sinf((float)now * 0.0011f) *
+                            sinf((float)now * 0.00037f + 1.3f);
+        for (i = 0; i < REMEMBER_POPPY_COUNT; ++i) {
+            uint32_t h = scene_hash((uint32_t)i * 2654435761u + 77u);
+            int variant = (int)(h % REMEMBER_POPPY_VARIANTS);
+            int span = SCREEN_W + 120;
+            int x = (int)((h >> 8) % (uint32_t)span) - pan % span;
+            /* The frames lean one way, stand, and lean the other:
+             * played 0 1 2 3 2 1 for the to-and-fro. */
+            static const unsigned char sway[6] = {0, 1, 2, 3, 2, 1};
+            int phase = sway[(now / (170u + (h >> 20) % 90u) + (h >> 12)) %
+                             6u];
+            const short *f;
+            SDL_Rect src, dst;
+            while (x < -60) x += span;
+            if (gust < 0.35f) phase = 1 + (phase & 1);   /* barely stirring */
+            f = remember_poppy_frames[variant][phase % REMEMBER_SWAY_FRAMES];
+            src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
+            dst.x = x;
+            dst.y = SCREEN_H - f[3] - (int)((h >> 4) % 18u);
+            dst.w = f[2]; dst.h = f[3];
+            SDL_BlitSurface(g->remember_poppies, &src, s, &dst);
+        }
+    }
+#ifdef REMEMBER_LIFE_SPRITES
+    /* A butterfly or two over the poppies, a lark high up, thistledown
+     * drifting on the wind. */
+    if (g->remember_life)
+        for (i = 0; i < REMEMBER_LIFE_COUNT; ++i) {
+            const RememberLife *l = &remember_life[i];
+            uint32_t h = scene_hash((uint32_t)i * 40503u + 9u);
+            float u = (float)((t + h % 20000u) % l->period_ms) /
+                      (float)l->period_ms;
+            int x = (int)(u * (SCREEN_W + 80)) - 40 - pan * l->depth / 32;
+            int y = l->y + (int)(sinf(u * 6.283f * l->bobs + (float)i) *
+                                 (float)l->bob);
+            const short *f = remember_life_frames[l->sprite]
+                [(now / l->frame_ms + h) %
+                 (uint32_t)remember_life_frame_count[l->sprite]];
+            SDL_Rect src, dst;
+            while (x < -40) x += SCREEN_W + 80;
+            src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
+            dst.x = x; dst.y = y; dst.w = f[2]; dst.h = f[3];
+            SDL_BlitSurface(g->remember_life, &src, s, &dst);
+        }
+#endif
+    fade = t >= REMEMBER_HEADING_MS ? 32 :
+           (int)(t * 32u / REMEMBER_HEADING_MS);
+    remember_line(g, FONT_TITLE, 74, "WE REMEMBER", fade);
+    if (t < REMEMBER_SCROLL_AT) return;
+    /* The roll rises through a gently shaded band low in the picture,
+     * fading in at its foot and out at its head, so the field above
+     * stays open.  When the closing lines reach the band's middle it
+     * stops, and the field is left to the wind. */
+    for (i = 0; i < 8; ++i)
+        blend_rect(s, 0, REMEMBER_BAND_TOP - 24 + i * 3, SCREEN_W, 3,
+                   8, 9, 8, (uint8_t)(6 + i * 7));
+    blend_rect(s, 0, REMEMBER_BAND_TOP, SCREEN_W,
+               SCREEN_H - REMEMBER_BAND_TOP, 8, 9, 8, 48);
+    last = (g->remember_count ? g->remember_count * REMEMBER_LINE + 90 : 0) +
+           REMEMBER_LINE;
+    y = SCREEN_H + 6 -
+        (int)((t - REMEMBER_SCROLL_AT) * (uint32_t)REMEMBER_RISE / 1000u);
+    if (y + last < REMEMBER_REST_Y) y = REMEMBER_REST_Y - last;
+    for (i = 0; i < g->remember_count; ++i)
+        remember_line(g, FONT_LABEL, y + i * REMEMBER_LINE,
+                      g->remember_names[i],
+                      remember_band_fade(y + i * REMEMBER_LINE));
+    y += last - REMEMBER_LINE;
+    for (i = 0; i < 2; ++i)
+        remember_line(g, i ? FONT_TYPE_SMALL : FONT_LABEL, y + i * 20,
+                      remember_closing[i], remember_band_fade(y + i * 20));
+}
+
 static void advance_after_debrief(Game *g)
 {
     if (!g->success && g->fatal_sortie && g->lives <= 0) {
@@ -15419,21 +15812,13 @@ static void advance_after_debrief(Game *g)
         set_scene(g, SCENE_TITLE);
     }
     else if (!g->success) set_scene(g, SCENE_BRIEFING);
-    else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
-        ++g->mission;
-        /* Grounded: the squadron flies the next sortie without him. */
-        if (g->grounded_next && g->mission + 1 < MISSIONS_PER_CHAPTER) {
-            ++g->mission;
-            g->grounded_next = 0;
-        }
-        apply_story_wingmen(g);
-        set_scene(g, SCENE_STORY);
-    } else if (g->chapter + 1 >= CHAPTER_COUNT) {
-        g->campaign_complete = 1;
+    /* Grounded: the squadron flies the next sortie without him, and
+     * career_advance strikes it off just as save_mission_result did. */
+    else if (career_advance(&g->chapter, &g->mission, &g->campaign_complete,
+                            &g->grounded_next, CHAPTER_COUNT,
+                            MISSIONS_PER_CHAPTER) == CAREER_WAR_OVER)
         set_scene(g, SCENE_EPILOGUE);
-    } else {
-        ++g->chapter;
-        g->mission = 0;
+    else {
         apply_story_wingmen(g);
         set_scene(g, SCENE_STORY);
     }
@@ -15482,6 +15867,16 @@ static void handle_event(Game *g, SDL_Event *ev)
         return;
     if (g->scene == SCENE_SETTINGS) {
         handle_settings_key(g, ev->key.keysym.sym);
+        return;
+    }
+    if (g->scene == SCENE_REMEMBER) {
+        /* Once the heading has been read, Escape or Enter leaves it. */
+        SDL_Keycode k = ev->key.keysym.sym;
+        if ((k == SDLK_ESCAPE || k == SDLK_RETURN || k == SDLK_KP_ENTER) &&
+            SDL_GetTicks() - g->scene_started > REMEMBER_HEADING_MS + 1500u) {
+            g->last_action_key = SDL_GetTicks();
+            set_scene(g, SCENE_TITLE);
+        }
         return;
     }
     if (g->scene == SCENE_FILM) {
@@ -15581,6 +15976,8 @@ static void handle_event(Game *g, SDL_Event *ev)
                 memcpy(g->wingman_health, g->saved_wingman_health,
                        sizeof(g->wingman_health));
                 restore_saved_career(g);
+                apply_story_wingmen(g);
+                qa_report_flight(g, "CONTINUE");
                 if (g->campaign_complete) {
                     set_scene(g, SCENE_EPILOGUE);
                     break;
@@ -15723,7 +16120,7 @@ static void handle_event(Game *g, SDL_Event *ev)
             } else {
                 set_scene(g, SCENE_BRIEFING);
             }
-        } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);
+        } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_REMEMBER);
         else if (g->scene == SCENE_SCRAPBOOK) set_scene(g, SCENE_MENU);
         break;
     case SDLK_LEFT:
@@ -15774,7 +16171,9 @@ int main(int argc, char **argv)
             "TRACERS",
             "TRUCE",
             "UNARMED",
-            "UNARMED_GUNNER"
+            "UNARMED_GUNNER",
+            /* The flight's health and a grounding, carried by the save. */
+            "GROUNDED", "QASAVE", "WINGMEN"
         };
         int q;
         for (q = 0; q < (int)(sizeof(qa_modes) / sizeof(qa_modes[0])); ++q)
@@ -15917,6 +16316,10 @@ int main(int argc, char **argv)
         if (argc > 2 && strcmp(argv[2], "WAKE") == 0)
             g.wingman_hit_today[0] = 1;
         set_scene(&g, SCENE_MESS);
+    } else if (argc > 1 && strcmp(argv[1], "REMEMBER") == 0) {
+        /* The roll at the very end. */
+        g.chapter = CHAPTER_COUNT - 1;
+        set_scene(&g, SCENE_REMEMBER);
     } else if (argc > 2 && strcmp(argv[1], "FILM") == 0) {
         /* One aerodrome film, 0..7, then the title. */
         g.film_next = SCENE_TITLE;
@@ -16068,7 +16471,42 @@ int main(int argc, char **argv)
         g.kills = current_mission_goal(&g);
         g.score = g.kills * 250;
         set_scene(&g, SCENE_DEBRIEF);
+    } else if (argc > 1 && strcmp(argv[1], "WINGMEN") == 0) {
+        /* WINGMEN e t b: Eccles, Gridpipe Thyne and Bluebottle at the
+         * given health (1..100, 100 if left out) on the morning of
+         * "The Interrupter", the 1915 cockpit patrol.  The QA save is written
+         * at once and the briefing's roster shows the flight; Enter flies
+         * the sortie as the campaign would, and the debrief saves what
+         * the fight left them with.  QASAVE then continues from it. */
+        int k;
+        g.chapter = 1;
+        g.mission = 5;
+        for (k = 0; k < 3; ++k) {
+            int hp = argc > 2 + k ? atoi(argv[2 + k]) : 100;
+            g.wingman_health[k] = hp < 1 ? 1 : hp > 100 ? 100 : hp;
+        }
+        apply_story_wingmen(&g);
+        save_campaign(&g);
+        qa_report_flight(&g, "WINGMEN");
+        set_scene(&g, SCENE_BRIEFING);
+    } else if (argc > 1 && strcmp(argv[1], "GROUNDED") == 0) {
+        /* A second offence with no rank to lose, on "Fog on the Somme"
+         * (1918, mission 1): the debrief saves, the memorandum grounds
+         * him, and the war must go on at "Westward" (mission 3) with
+         * "Burn the Stores" flown without him, whether the evening is
+         * seen through or the game is quit and QASAVE continued. */
+        g.chapter = 5;
+        g.mission = 0;
+        reset_sortie(&g);
+        g.offences = 1;
+        g.sortie_offences = 1;
+        g.sortie_offence_kind = CIV_AMBULANCE;
+        g.success = 1;
+        g.kills = 0;
+        set_scene(&g, SCENE_DEBRIEF);
     }
+    /* QASAVE: the ordinary title and officers' menu, on the QA save, so
+     * Continue can be tried on what the entries above wrote. */
     if (g.scene == SCENE_SORTIE && qa_run_arg) {
         g.qa_hold = 0;
         g.qa_run = 1;
@@ -16113,6 +16551,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
             g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
             g.scene == SCENE_CINEMA || g.scene == SCENE_FILM ||
+            g.scene == SCENE_REMEMBER ||
             g.redraw_static) {
             uint32_t drawn_from = SDL_GetTicks();
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
@@ -16132,6 +16571,7 @@ int main(int argc, char **argv)
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
             case SCENE_SETTINGS: draw_settings(&g); break;
+            case SCENE_REMEMBER: draw_remember(&g); break;
             case SCENE_FILM:
                 update_film(&g);
                 if (g.scene == SCENE_FILM) draw_film(&g);
@@ -16173,6 +16613,7 @@ int main(int argc, char **argv)
     if (g.audio.record_data) SDL_free(g.audio.record_data);
     newsreel_free(&g.newsreel);
     film_free(&g);
+    remember_free(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
     if (g.fullscreen) {

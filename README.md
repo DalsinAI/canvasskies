@@ -9,13 +9,30 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.2.0 RC3**, a release candidate. Download it from
-[the v0.2.0-rc3 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc3).
-New in RC3: the cockpit seen from the pilot's seat, machines that change with
-the war, top-down raids on convoys, railways, aerodromes and trench lines,
-civilians and ambulances to spare on pain of court martial, the morning paper
-set like a real one, and a picture house showing real film of the war. The
-earlier alpha is described in
+Current release: **0.2.0 RC5**, a release candidate. Download it from
+[the v0.2.0-rc5 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc5).
+
+New in RC5:
+
+- **Missions:** something to do all the way:
+  - Archie, ground machine guns, riflemen taking pot shots, kite balloons and
+    squalls;
+  - 1914's work of marking columns, dropping message bags and photographing
+    batteries;
+  - a run home to land at the aerodrome.
+- **Aerodrome films:** take-offs and landings on old film, with their own
+  sound, before and after each sortie.
+- **1914 rear seat:** the observer's carbine swings right round the tail, and
+  attackers come from the flanks and break off when hit.
+- **The mess:** three evenings (quiet, rowdy, and a wake after a loss) with the
+  squadron by lamplight.
+- **The Officer's Preferences:** keep the art in memory, music and effects
+  volume, full screen.
+- **Memory:** about 25 MB of fast memory instead of 63, as each scene loads only
+  its own art.
+- **Workbench:** returned intact after full screen.
+
+The earlier alpha is described in
 [docs/ALPHA_RELEASE_NOTES.md](docs/ALPHA_RELEASE_NOTES.md).
 
 ## Features
@@ -41,6 +58,9 @@ earlier alpha is described in
 - Resumable campaign saves
 - Period typefaces, painted art and period gramophone records
 - F9 toggles aspect-correct fullscreen
+- Take-offs and landings on old film, and the mess in three moods
+- The Officer's Preferences: art kept in memory or loaded as needed, music and
+  effects volume
 
 ## Screenshots
 
@@ -102,6 +122,38 @@ the assets the game loads, without the source PNGs.
 - [Implementation status](docs/CANVAS_SKIES_STATUS.md)
 - [Delivery vision](CANVAS_SKIES_DELIVERY_VISION.md)
 - [Historical sources](CANVAS_SKIES_SOURCES.md)
+
+## We Remember
+
+At the very end of the game, after the Armistice, the camera drifts across
+the old front in the summer of 1919, the trenches grassed over and the
+poppies grown up through the wire, with nothing but the wind. Over it, under
+the words **WE REMEMBER**, a roll of names is shown.
+
+Those names are given by people who have given to the
+[Royal British Legion](https://www.britishlegion.org.uk/get-involved/donate),
+in memory of someone of theirs who served.
+
+**To give:** please give directly on the Legion's own site,
+<https://www.britishlegion.org.uk/get-involved/donate>. The game is free;
+we never see or handle any money, and we do not ask how much you gave.
+
+**To add a name:** after giving, either
+[open a We Remember request](https://github.com/DalsinAI/canvasskies/issues/new?template=we-remember.yml)
+or, without a GitHub account, email
+[amigachrome@gmail.com](mailto:amigachrome@gmail.com?subject=We%20Remember)
+with the rank, name, unit and years of the person to be remembered (rank,
+unit and years are optional), saying that you have given to the Legion and
+that you consent to the name being shown in the game and this repository.
+Names are shown as `Rank. Name, Unit, Year`. Names are added in the next release, in `WeRemember.txt` in the
+`CanvasSkies` drawer, which the game reads (in this repository it is
+`ports/amigaos3/package/WeRemember.txt`). Only the name to be
+remembered is shown, never yours, and no email addresses or amounts are kept
+in the game or this repository.
+
+**To remove a name:** open an issue or email amigachrome@gmail.com asking
+for it to be taken off,
+and it will be removed in the next release.
 
 ## Licence
 

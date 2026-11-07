@@ -1,0 +1,70 @@
+name: We Remember - add a name to the roll
+description: Ask for someone who served to be named on the roll at the end of Canvas Skies.
+title: "We Remember: "
+labels: ["we-remember"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        At the very end of Canvas Skies, over the old front in the summer of
+        1919, a roll is shown under the words **WE REMEMBER**. The names on it
+        are given by people who have given to the Royal British Legion, in
+        memory of someone of theirs who served.
+
+        If you would like to give, please do so directly on the Legion's own
+        site: https://www.britishlegion.org.uk/get-involved/donate. We never
+        see or handle the money, and we do not ask what you gave.
+
+        The name appears as you write it below, in the next release and in
+        this repository. Only the name, rank, unit and years are shown. Your
+        own name is not.
+
+        No GitHub account? Email amigachrome@gmail.com instead, with the rank,
+        name, unit and years, and say that you have given to the Legion and
+        consent to the name being shown in the game and this repository.
+
+        To have a name taken off later, open an issue asking for its removal,
+        reply on this one, or email amigachrome@gmail.com, and it will be
+        removed in the next release.
+  - type: input
+    id: rank
+    attributes:
+      label: Rank (optional)
+      description: As it should be shown, e.g. Pte., Cpl., Sgt., 2nd Lt., Capt., Nurse
+    validations:
+      required: false
+  - type: input
+    id: name
+    attributes:
+      label: Full name
+      description: The name of the person to be remembered, as it should be shown.
+    validations:
+      required: true
+  - type: input
+    id: unit
+    attributes:
+      label: Unit (optional)
+      description: Regiment, battalion, squadron, ship or service.
+    validations:
+      required: false
+  - type: input
+    id: years
+    attributes:
+      label: Year or years (optional)
+      description: e.g. 1916, or 1914-1918
+    validations:
+      required: false
+  - type: input
+    id: relationship
+    attributes:
+      label: Your relationship to them (optional, not shown in the game)
+      description: Only to help us get the name right.
+    validations:
+      required: false
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Your consent
+      options:
+        - label: I have given to the Royal British Legion, and I consent to this name being shown in the game and in this repository.
+          required: true
