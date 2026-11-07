@@ -4,8 +4,9 @@
 A minute of gentle wind, synthesised here and nowhere else: a soft body
 of air that rises and falls in slow gusts, brightening a little as each
 gust comes on, and the dry rustle of the long grass and the seed heads
-stirring in it, with now and then a stalk ticking against another.  No
-music and no birds.
+stirring in it, the rustle changing as patches of grass near and far
+take the gust, with now and then a stalk ticking against another, and
+twice in the minute, very faint and far up, a skylark's song.  No music.
 
 Every part of it is made to repeat exactly once a minute: the noise is
 shaped in the frequency domain over the whole minute, the gusts rise and
@@ -52,6 +53,28 @@ def slow(rng, cycles, depth):
     return out
 
 
+def lark(rng):
+    """A skylark far up: runs of quick warbled notes, rising and falling,
+    so faint they come and go under the wind.  Twice in the minute."""
+    out = np.zeros(N)
+    for start, length in ((14.0, 4.5), (41.0, 3.5)):
+        t = start
+        while t < start + length:
+            L = int(rng.uniform(0.03, 0.09) * SR)
+            k = np.arange(L) / SR
+            f0 = rng.uniform(2600, 4200)
+            sweep = f0 + rng.uniform(-900, 900) * k / k[-1] + 260 * np.sin(2 * math.pi * rng.uniform(25, 60) * k)
+            ph = np.cumsum(sweep / SR)
+            note = np.sin(2 * math.pi * ph) * np.sin(math.pi * k / k[-1]) ** 2
+            i0 = int(t * SR)
+            out[i0:i0 + L] += note[:max(0, min(L, N - i0))] * rng.uniform(0.3, 1.0)
+            t += L / SR + rng.uniform(0.01, 0.06)
+        # Fade in and out as it drifts on the air.
+        a, b = int(start * SR), int((start + length) * SR)
+        out[a:b] *= np.sin(np.linspace(0, math.pi, b - a)) ** 1.5
+    return out * 0.014
+
+
 def wind():
     rng = np.random.default_rng(1919)
     # The gusts: a long swell with lesser ones riding on it.
@@ -63,10 +86,15 @@ def wind():
     body = band(rng, 50, 700, tilt=-0.6) * (0.35 + 0.65 * g)
     # The gust's breath, brighter as it comes on.
     breath = band(rng, 250, 2200, tilt=-0.3) * np.clip(g - 0.35, 0, None) ** 1.6
-    # The grass: a dry hiss, fluttering, stronger in the gusts.
+    # The grass: a dry hiss, fluttering, stronger in the gusts; two
+    # patches of it, a nearer brighter one and a farther duller one, each
+    # taking the gusts at its own moment, so the rustle moves about.
     flutter = np.abs(band(rng, 6, 28))
     flutter = 0.4 + 0.6 * flutter / flutter.max()
-    hiss = band(rng, 2200, 5200) * flutter * np.clip(g - 0.2, 0, None) ** 1.4
+    g2 = np.roll(g, int(SR * 2.3))
+    swap = 0.5 + 0.5 * slow(rng, (3, 7), (0.7, 0.3))
+    hiss = band(rng, 2200, 5200) * flutter * np.clip(g - 0.2, 0, None) ** 1.4 * swap + \
+        band(rng, 1400, 3600) * np.roll(flutter, 4000) * np.clip(g2 - 0.2, 0, None) ** 1.4 * (1.2 - swap) * 0.8
     # Stalks and seed heads ticking against each other, now and then.
     ticks = np.zeros(N)
     L = 90
@@ -82,7 +110,7 @@ def wind():
     T *= 1 / (1 + (1800 / np.maximum(f, 1)) ** 2) / (1 + (f / 4800) ** 4)
     ticks = np.fft.irfft(T, N)
     ticks /= np.std(ticks) + 1e-12
-    x = 0.110 * body + 0.045 * breath + 0.022 * hiss + 0.010 * ticks
+    x = 0.110 * body + 0.045 * breath + 0.022 * hiss + 0.010 * ticks + lark(rng)
     # Keep the loudest gust well inside the range; no limiter needed.
     return x * (0.55 / np.abs(x).max())
 

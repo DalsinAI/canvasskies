@@ -91,6 +91,7 @@ sample or outside sound of any kind is used.
 ## We Remember: the wind
 
 `remember-wind.wav` (a minute of gentle wind and dry grass, looping without
-a seam) is synthesised for this game by `ports/amigaos3/make_remember_wind.py`
+a seam, with a skylark very faint and far off twice in it) is synthesised
+for this game by `ports/amigaos3/make_remember_wind.py`
 from shaped noise. No recording or sample of any kind is used.
 

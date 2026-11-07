@@ -65,6 +65,11 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_REMEMBER_FIELD_BMP=\"PROGDIR:assets/canvas-skies/remember-field.bmp\" \
 	-DCANVAS_REMEMBER_POPPIES_BMP=\"PROGDIR:assets/canvas-skies/remember-poppies.bmp\" \
 	-DCANVAS_REMEMBER_WIND_WAV=\"PROGDIR:assets/canvas-skies/remember-wind.wav\" \
+	-DCANVAS_REMEMBER_SKY_BMP=\"PROGDIR:assets/canvas-skies/remember-sky.bmp\" \
+	-DCANVAS_REMEMBER_FAR_BMP=\"PROGDIR:assets/canvas-skies/remember-far.bmp\" \
+	-DCANVAS_REMEMBER_MID_BMP=\"PROGDIR:assets/canvas-skies/remember-mid.bmp\" \
+	-DCANVAS_REMEMBER_NEAR_BMP=\"PROGDIR:assets/canvas-skies/remember-near.bmp\" \
+	-DCANVAS_REMEMBER_LIFE_BMP=\"PROGDIR:assets/canvas-skies/remember-life.bmp\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
