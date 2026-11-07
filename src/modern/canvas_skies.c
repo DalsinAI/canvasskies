@@ -256,6 +256,9 @@
 #ifndef CANVAS_SAVE_NEW_PATH
 #define CANVAS_SAVE_NEW_PATH "PROGDIR:CanvasSkies.save.new"
 #endif
+#ifndef CANVAS_AIRFIELD_FILMS_BIN
+#define CANVAS_AIRFIELD_FILMS_BIN "assets/canvas-skies/airfield-films.bin"
+#endif
 #ifndef CANVAS_PREFS_PATH
 #define CANVAS_PREFS_PATH "PROGDIR:CanvasSkies.prefs"
 #endif
@@ -356,7 +359,8 @@ typedef enum {
     SCENE_CONDUCT,  /* the Officer Commanding's memorandum */
     SCENE_COURT_MARTIAL, /* the end of a career in disgrace */
     SCENE_CINEMA,   /* the picture house, a chapter's first morning */
-    SCENE_SETTINGS  /* the officer's preferences */
+    SCENE_SETTINGS, /* the officer's preferences */
+    SCENE_FILM      /* a take-off or a landing, on old film */
 } Scene;
 
 typedef enum {
@@ -607,6 +611,16 @@ typedef struct {
     uint8_t pix[192 * 120];     /* the frame being shown, 0..15 */
 } Newsreel;
 
+/* One of the aerodrome films (make_airfield_films.py): the newsreel codec
+ * at the size its file names, with its own soundtrack. */
+typedef struct {
+    uint8_t *data;              /* the film's picture bytes */
+    uint8_t *pix;               /* the frame being shown, 0..15 */
+    int16_t *sound;             /* big-endian 16-bit mono */
+    uint32_t len, cursor, started, sound_len;
+    int w, h, fps, frames, shown, index;
+} AirfieldFilm;
+
 #define MAX_TD_OBJECTS 64
 #define MAX_TD_STRIPS 10
 
@@ -736,6 +750,8 @@ typedef struct {
     float gramophone_lp;
     float gramophone_hp;
     float gramophone_previous;
+    const int16_t *film_sound;  /* the aerodrome film's soundtrack */
+    uint32_t film_len, film_pos;
     float music_gain;     /* the settings' two sliders, 0..1 */
     float effects_gain;
 } AudioState;
@@ -786,6 +802,8 @@ typedef struct {
     SDL_Surface *office_stamp;      /* the rubber stamp's frame and its wear */
     SDL_Surface *loss_card;         /* the empty chair, by candlelight */
     Newsreel newsreel;
+    AirfieldFilm film;
+    Scene film_next;        /* where the film leads when it ends */
     int cinema_reel_slot;
     int cinema_seen;                /* chapter + 1 whose reels were shown */
     SDL_Surface *fonts;     /* pre-rendered glyph coverage, 8 bits */
@@ -985,6 +1003,7 @@ static float random_unit(Game *g);
 static int personal_shot(Game *g, int revolver);
 static void ensure_scene_assets(Game *g, Scene scene);
 static void ensure_music(Game *g, int mood);
+static int film_start_for(Game *g, Scene from, Scene to);
 static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void qa_log_sortie(Game *g);
@@ -2689,9 +2708,13 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         }
         /* Music on one slider; in a sortie the engines' drone goes with
          * the guns and bangs on the other. */
-        float bed = sample * (a->scene == SCENE_SORTIE ? a->effects_gain :
+        float bed = a->scene == SCENE_FILM ? 0.0f :
+                    sample * (a->scene == SCENE_SORTIE ? a->effects_gain :
                                                         a->music_gain);
         sample = 0.0f;
+        if (a->film_sound && a->film_pos < a->film_len)
+            sample += (float)(int16_t)SDL_SwapBE16(
+                          (uint16_t)a->film_sound[a->film_pos++]) / 32768.0f;
         if (a->shot > 0) {
             int gun_phase = a->shot % 540;
             if (gun_phase < 100) {
@@ -2890,6 +2913,8 @@ static void prepare_record(Game *g, Scene scene)
 static void set_scene(Game *g, Scene scene)
 {
     MusicMood previous_mood = (MusicMood)g->audio.music_mood;
+    /* Into the air and back down again on film, when there is film. */
+    if (film_start_for(g, g->scene, scene)) return;
     /* A test entry's safety net never follows the player into a campaign. */
     if (scene == SCENE_TITLE) g->qa_hold = g->qa_run = 0;
     ensure_scene_assets(g, scene);
@@ -14237,6 +14262,7 @@ static unsigned asset_groups_for_scene(const Game *g, Scene scene)
     case SCENE_CONDUCT: return AG_MEDALS | AG_OFFICE;
     case SCENE_COURT_MARTIAL: return AG_JOURNAL;
     case SCENE_CINEMA: return AG_CINEMA;
+    case SCENE_FILM: return 0;
     case SCENE_SORTIE:
         if (mode == MISSION_SIDE)
             return AG_SIDE | AG_SKY | AG_EXPLODE | AG_RIFLEMEN;
@@ -14916,6 +14942,224 @@ static void draw_cinema(Game *g)
                     7, 11, PIX_PACK(226, 206, 166));
 }
 
+/* ---- The aerodrome films -------------------------------------------------
+ *
+ * Before each sortie a take-off, after it a landing, shown full screen on
+ * old film with their own sound (make_airfield_films.py).  One film is
+ * held at a time, and Enter or fire skips it. */
+enum {
+    FILM_DAWN, FILM_FLIGHT_OF_THREE, FILM_MUD, FILM_1914_OBSERVER,
+    FILM_DUSK, FILM_SHOT_UP, FILM_DEAD_STICK, FILM_RAIN
+};
+
+static uint32_t be32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | p[3];
+}
+
+static void film_free(Game *g)
+{
+    AirfieldFilm *f = &g->film;
+    if (g->audio.device) {
+        SDL_LockAudioDevice(g->audio.device);
+        g->audio.film_sound = NULL;
+        g->audio.film_len = g->audio.film_pos = 0;
+        SDL_UnlockAudioDevice(g->audio.device);
+    }
+    free(f->data);
+    free(f->pix);
+    free(f->sound);
+    memset(f, 0, sizeof(*f));
+}
+
+static int film_load(Game *g, int index)
+{
+    AirfieldFilm *f = &g->film;
+    FILE *file = fopen(CANVAS_AIRFIELD_FILMS_BIN, "rb");
+    uint8_t head[16], entry[56];
+    uint32_t pic_at, pic_len, snd_at, snd_len;
+    int k, count;
+    film_free(g);
+    if (!file) return 0;
+    if (fread(head, 1, 16, file) != 16 || memcmp(head, "CSAF", 4) != 0) {
+        fclose(file);
+        return 0;
+    }
+    f->w = (head[6] << 8) | head[7];
+    f->h = (head[8] << 8) | head[9];
+    f->fps = (head[10] << 8) | head[11];
+    count = (head[14] << 8) | head[15];
+    if (index < 0 || index >= count || f->w <= 0 || f->h <= 0 ||
+        f->w % 8 || f->h % 8 || f->fps <= 0 ||
+        fseek(file, 16L + (long)index * 56L, SEEK_SET) != 0 ||
+        fread(entry, 1, 56, file) != 56) {
+        fclose(file);
+        return 0;
+    }
+    pic_at = be32(entry); pic_len = be32(entry + 4);
+    snd_at = be32(entry + 8); snd_len = be32(entry + 12);
+    f->data = (uint8_t *)malloc(pic_len);
+    f->pix = (uint8_t *)malloc((size_t)f->w * f->h);
+    f->sound = snd_len ? (int16_t *)malloc(snd_len) : NULL;
+    if (!f->data || !f->pix || (snd_len && !f->sound) ||
+        pic_len < 2u + (uint32_t)(f->w * f->h / 2) ||
+        fseek(file, (long)pic_at, SEEK_SET) != 0 ||
+        fread(f->data, 1, pic_len, file) != pic_len ||
+        (snd_len && (fseek(file, (long)snd_at, SEEK_SET) != 0 ||
+                     fread(f->sound, 1, snd_len, file) != snd_len))) {
+        fclose(file);
+        film_free(g);
+        return 0;
+    }
+    fclose(file);
+    f->len = pic_len;
+    f->sound_len = snd_len / 2;
+    f->frames = (f->data[0] << 8) | f->data[1];
+    for (k = 0; k < f->w * f->h / 2; ++k) {
+        f->pix[k * 2] = f->data[2 + k] >> 4;
+        f->pix[k * 2 + 1] = f->data[2 + k] & 15;
+    }
+    f->cursor = 2u + (uint32_t)(f->w * f->h / 2);
+    f->shown = 1;
+    f->index = index;
+    f->started = SDL_GetTicks();
+    if (g->audio.device && f->sound) {
+        SDL_LockAudioDevice(g->audio.device);
+        g->audio.film_sound = f->sound;
+        g->audio.film_len = f->sound_len;
+        g->audio.film_pos = 0;
+        SDL_UnlockAudioDevice(g->audio.device);
+    }
+    return 1;
+}
+
+/* Applies the changed blocks of each frame due by now. */
+static void film_advance(AirfieldFilm *f, uint32_t now)
+{
+    int bw = f->w / 8, blocks = (f->w / 8) * (f->h / 8);
+    uint32_t map = (uint32_t)(blocks + 7) / 8;
+    uint32_t due;
+    if (!f->data) return;
+    due = (now - f->started) * (uint32_t)f->fps / 1000u + 1u;
+    while ((uint32_t)f->shown < due && f->shown < f->frames &&
+           f->cursor + map <= f->len) {
+        const uint8_t *bits = f->data + f->cursor;
+        int k;
+        f->cursor += map;
+        for (k = 0; k < blocks; ++k) {
+            int bx, by, y, x;
+            const uint8_t *b;
+            if (!(bits[k >> 3] & (0x80 >> (k & 7)))) continue;
+            if (f->cursor + 32 > f->len) return;
+            b = f->data + f->cursor;
+            f->cursor += 32;
+            bx = (k % bw) * 8;
+            by = (k / bw) * 8;
+            for (y = 0; y < 8; ++y)
+                for (x = 0; x < 8; x += 2) {
+                    uint8_t v = b[y * 4 + x / 2];
+                    f->pix[(by + y) * f->w + bx + x] = v >> 4;
+                    f->pix[(by + y) * f->w + bx + x + 1] = v & 15;
+                }
+        }
+        ++f->shown;
+    }
+}
+
+static int film_done(const AirfieldFilm *f, uint32_t now)
+{
+    return !f->data || (f->shown >= f->frames &&
+           now >= f->started + (uint32_t)f->frames * 1000u /
+                               (uint32_t)f->fps + 300u);
+}
+
+/* The take-off the day calls for. */
+static int takeoff_film_for(const Game *g)
+{
+    MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    uint32_t h = scene_hash((uint32_t)(g->chapter * 16 + g->mission) +
+                            0x5eedu);
+    if (g->chapter == 0) return FILM_1914_OBSERVER;
+    if (mode == MISSION_DOGFIGHT_3D) return FILM_FLIGHT_OF_THREE;
+    return h % 3u == 0u ? FILM_MUD : FILM_DAWN;
+}
+
+/* The landing the sortie earned: shot about if the airframe is, a dead
+ * stick if the tank ran dry, otherwise dusk or rain as the day goes. */
+static int landing_film_for(const Game *g)
+{
+    uint32_t h = scene_hash((uint32_t)(g->chapter * 16 + g->mission) +
+                            0x1a0du);
+    if (g->fuel <= 0.0f) return FILM_DEAD_STICK;
+    if (g->health < 50) return FILM_SHOT_UP;
+    return h % 3u == 0u ? FILM_RAIN : FILM_DUSK;
+}
+
+static int film_start_for(Game *g, Scene from, Scene to)
+{
+    int index;
+    if (g->qa_hold || g->qa_run || from == SCENE_FILM) return 0;
+    if (from == SCENE_DAWN && to == SCENE_SORTIE)
+        index = takeoff_film_for(g);
+    else if (from == SCENE_SORTIE && to == SCENE_DEBRIEF &&
+             g->health > 0 && !g->fatal_sortie && !g->flight_crashed &&
+             g->tail_integrity > 0)
+        index = landing_film_for(g);
+    else
+        return 0;
+    g->film_next = to;
+    set_scene(g, SCENE_FILM);
+    if (!film_load(g, index)) {
+        set_scene(g, to);
+        return 1;
+    }
+    return 1;
+}
+
+static void film_end(Game *g)
+{
+    Scene next = g->film_next;
+    film_free(g);
+    set_scene(g, next);
+}
+
+static void update_film(Game *g)
+{
+    uint32_t now = SDL_GetTicks();
+    film_advance(&g->film, now);
+    if (film_done(&g->film, now)) film_end(g);
+}
+
+static void draw_film(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    AirfieldFilm *f = &g->film;
+    uint32_t now = SDL_GetTicks();
+    pix_t lut[16];
+    int x, y, flicker = (int)(scene_hash(now / 70u) % 14u);
+    if (!f->data || f->w * 2 != SCREEN_W || f->h * 2 != SCREEN_H) {
+        rect(s, 0, 0, SCREEN_W, SCREEN_H, PIX_PACK(10, 8, 6));
+        return;
+    }
+    for (x = 0; x < 16; ++x) {
+        /* The picture-house lamp's curve, in the same sepia. */
+        int v = 14 + (int)(241.0f * powf((float)x / 15.0f, 0.8f)) - flicker;
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+        lut[x] = PIX_PACK(v * 236 / 240, v * 214 / 240, v * 172 / 240);
+    }
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (y = 0; y < f->h; ++y) {
+        pix_t *row = PIX_ROW(s, y * 2);
+        const uint8_t *src = f->pix + y * f->w;
+        for (x = 0; x < f->w; ++x)
+            row[x * 2] = row[x * 2 + 1] = lut[src[x]];
+        memcpy(PIX_ROW(s, y * 2 + 1), row, sizeof(pix_t) * SCREEN_W);
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
 static void advance_after_debrief(Game *g)
 {
     if (!g->success && g->fatal_sortie && g->lives <= 0) {
@@ -14986,6 +15230,16 @@ static void handle_event(Game *g, SDL_Event *ev)
         return;
     if (g->scene == SCENE_SETTINGS) {
         handle_settings_key(g, ev->key.keysym.sym);
+        return;
+    }
+    if (g->scene == SCENE_FILM) {
+        /* Enter, the fire key or Escape cuts to the next scene. */
+        SDL_Keycode k = ev->key.keysym.sym;
+        if (k == SDLK_RETURN || k == SDLK_KP_ENTER || k == SDLK_SPACE ||
+            k == SDLK_ESCAPE) {
+            g->last_action_key = SDL_GetTicks();
+            film_end(g);
+        }
         return;
     }
     switch (ev->key.keysym.sym) {
@@ -15382,6 +15636,11 @@ int main(int argc, char **argv)
         if (argc > 2 && strcmp(argv[2], "WAKE") == 0)
             g.wingman_hit_today[0] = 1;
         set_scene(&g, SCENE_MESS);
+    } else if (argc > 2 && strcmp(argv[1], "FILM") == 0) {
+        /* One aerodrome film, 0..7, then the title. */
+        g.film_next = SCENE_TITLE;
+        set_scene(&g, SCENE_FILM);
+        if (!film_load(&g, atoi(argv[2]))) set_scene(&g, SCENE_TITLE);
     } else if (argc > 1 && strcmp(argv[1], "SETTINGS") == 0) {
         /* The preferences page; SETTINGS ALL first loads every scene's
          * art, as a long campaign with the art kept in memory would. */
@@ -15591,6 +15850,10 @@ int main(int argc, char **argv)
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
             case SCENE_SETTINGS: draw_settings(&g); break;
+            case SCENE_FILM:
+                update_film(&g);
+                if (g.scene == SCENE_FILM) draw_film(&g);
+                break;
             }
             if (qa_frame_time && g.scene == SCENE_SORTIE) {
                 /* The mean over the last 64 frames, in tenths of a ms. */
@@ -15626,6 +15889,7 @@ int main(int argc, char **argv)
     if (g.audio.piper_data) SDL_free(g.audio.piper_data);
     if (g.audio.record_data) SDL_free(g.audio.record_data);
     newsreel_free(&g.newsreel);
+    film_free(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
     if (g.fullscreen) {
