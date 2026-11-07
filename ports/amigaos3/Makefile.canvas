@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -111,6 +111,7 @@ PACKAGE_DOCS := README.md LICENSE \
 
 .PHONY: package
 package: $(OUT)
+	python3 ports/amigaos3/check_campaign.py
 	rm -rf $(PACKAGE)
 	mkdir -p $(PACKAGE)/assets/canvas-skies
 	cp $(OUT) $(PACKAGE)/CanvasSkies
