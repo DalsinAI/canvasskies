@@ -994,7 +994,23 @@ typedef struct {
     int qa_logged;
     int qa_run;             /* test entry: a real sortie that ends */
     SDL_Surface *riflemen_sheet;
+    /* The sortie's own clock: the same clamped steps the flying uses, in
+     * milliseconds, so a slow frame never lets a gun fire faster than the
+     * world moves.  Wall-clock time stays for films, scenes and sound. */
+    uint32_t sim_ms;
+    float sim_carry;
+    /* QA: rounds fired each way, and damage taken, for the sortie log. */
+    int qa_shots, qa_enemy_shots, qa_damage, qa_last_health;
 } Game;
+
+/* The sortie clock starts here rather than at nought, so a time of nought
+ * ("never") is always long past. */
+#define SIM_EPOCH 10000u
+
+static uint32_t sim_now(const Game *g)
+{
+    return g->sim_ms;
+}
 
 static void flight_state_init(FlightState *f, float heading, float pitch,
                               float bank, float speed, float throttle);
@@ -3277,6 +3293,8 @@ static void reset_sortie_legs(Game *g)
     g->fabric_hole_count = 0;
     g->qa_time = g->qa_idle = g->qa_idle_run = g->qa_idle_longest = 0.0f;
     g->qa_logged = 0;
+    g->qa_shots = g->qa_enemy_shots = g->qa_damage = 0;
+    g->qa_last_health = 100;
     g->front_at = mode == MISSION_SIDE ? 1500.0f : 1400.0f;
     g->home_line_at = 1.0e9f;
     g->field_at = 1.0e9f;
@@ -3294,6 +3312,8 @@ static void reset_sortie(Game *g)
     int perspective_enemy_count;
     const Chapter *chapter = &chapters[g->chapter];
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    g->sim_ms = SIM_EPOCH;
+    g->sim_carry = 0.0f;
     g->mission_save_state = 0;
     g->mess_done = 0;
     g->fatal_sortie = 0;
@@ -3436,11 +3456,11 @@ static void reset_sortie(Game *g)
         g->enemies[i].crash_size = 0;
         g->enemies[i].active = is_perspective_mode(mode) &&
                                i < perspective_enemy_count;
-        g->enemies[i].last_shot = SDL_GetTicks() + 650u + (uint32_t)i * 390u;
+        g->enemies[i].last_shot = sim_now(g) + 650u + (uint32_t)i * 390u;
     }
     memset(g->rounds, 0, sizeof(g->rounds));
     memset(g->sparks, 0, sizeof(g->sparks));
-    g->combat_seed ^= SDL_GetTicks() * 2654435761u + 12345u;
+    g->combat_seed ^= sim_now(g) * 2654435761u + 12345u;
     g->home_heading = (float)M_PI;
     g->guns_jammed = 0;
     g->jam_clear_until = 0;
@@ -3521,7 +3541,7 @@ static void reset_sortie(Game *g)
         }
         snprintf(g->notice, sizeof(g->notice), "%s",
                  airship ? "NIGHT OVER ESSEX" : "OVER THE THAMES");
-        g->notice_until = SDL_GetTicks() + 4000u;
+        g->notice_until = sim_now(g) + 4000u;
     }
 }
 
@@ -3536,6 +3556,10 @@ static Bullet *new_bullet(Game *g, float x, float y, float vx, float vy,
             b->enemy = enemy; b->type = type; b->missed = 0;
             b->life = life; b->initial_life = life;
             b->active = 1;
+            if (type == 0 || type == 2 || type == 3) {
+                if (enemy) ++g->qa_enemy_shots;
+                else ++g->qa_shots;
+            }
             return b;
         }
     }
@@ -3636,7 +3660,7 @@ static void artillery_fire(Game *g, Target *target, float x, float y,
 
 static void fire(Game *g)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     float mx, my, nose;
     if (g->ammunition <= 0) return;
     if (now - g->last_shot < 130) return;
@@ -3652,7 +3676,7 @@ static void fire(Game *g)
 
 static void drop_bomb(Game *g)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     if (g->bombs_remaining <= 0) return;
     if (now - g->last_bomb < 550) return;
     if (new_bullet(g, g->player_x, g->player_y + 16.0f,
@@ -4226,7 +4250,7 @@ static int enemies_falling(const Game *g)
  * Returns 1 while the hold lasts. */
 static int hold_for_wreck(Game *g, float x, float y)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     if (!g->wreck_started) {
         g->wreck_started = now ? now : 1u;
         new_explosion(g, x, y, 2);
@@ -4580,7 +4604,7 @@ static void td_wreck(Game *g, TdObject *o, int by_bomb)
     float sx, sy;
     td_screen(g, o, &sx, &sy);
     o->wrecked = 1;
-    o->wrecked_at = SDL_GetTicks();
+    o->wrecked_at = sim_now(g);
     o->speed = 0.0f;
     new_ground_explosion(g, sx, sy, by_bomb || k->hp >= 3 ? 3 : 1);
     g->audio.blast = 7000;
@@ -4715,7 +4739,7 @@ static void td_draw_ground(Game *g)
 static void td_draw_objects(Game *g)
 {
     SDL_Surface *s = g->screen;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int i;
     for (i = 0; i < g->td_count; ++i) {
         const TdObject *o = &g->td[i];
@@ -4769,6 +4793,9 @@ static MissionMode sortie_mode(const Game *g)
  * QA run still flies its sortie to the end. */
 /* QA: TIME on the command line; see main(). */
 static int qa_frame_time;
+/* QA: SLOWFRAMES holds every sortie frame to about eight a second, to show
+ * that a slow machine meets the same sortie as a fast one. */
+static int qa_slow_frames;
 
 static int qa_spared(const Game *g)
 {
@@ -4827,7 +4854,7 @@ static int near_the_lines(const Game *g, float world)
  * stay on the machine for the rest of the sortie. */
 static void add_fabric_hole(Game *g)
 {
-    uint32_t h = scene_hash(SDL_GetTicks() ^ (uint32_t)g->fabric_hole_count *
+    uint32_t h = scene_hash(sim_now(g) ^ (uint32_t)g->fabric_hole_count *
                             2654435761u);
     int k = g->fabric_hole_count % MAX_FABRIC_HOLES;
     int side = sortie_mode(g) == MISSION_SIDE;
@@ -4858,14 +4885,14 @@ static void small_hit(Game *g, int damage)
 {
     MissionMode mode = sortie_mode(g);
     if (!qa_spared(g) || g->health > 30) g->health -= damage;
-    g->last_damage = SDL_GetTicks();
+    g->last_damage = sim_now(g);
     g->audio.plink = 900;
     if (mode == MISSION_SIDE || mode == MISSION_TOP_DOWN) add_fabric_hole(g);
     else if (mode == MISSION_DOGFIGHT_3D)
-        add_dogfight_bullet_hole(g, SDL_GetTicks() * 7919u);
+        add_dogfight_bullet_hole(g, sim_now(g) * 7919u);
     else {
         BulletHole *hole = &g->bullet_holes[g->next_bullet_hole];
-        uint32_t scatter = scene_hash(SDL_GetTicks() * 31u);
+        uint32_t scatter = scene_hash(sim_now(g) * 31u);
         hole->x = 190.0f + (float)(scatter % 261u);
         hole->y = 205.0f + (float)((scatter >> 9) % 126u);
         hole->active = 1;
@@ -5852,7 +5879,7 @@ static void spawn_scouts_2d(Game *g, int count, int chasing)
         e->max_hp = e->hp;
         e->phase = random_unit(g) * 6.0f;
         e->ai_side = chasing ? 1.0f : -1.0f;
-        e->last_shot = SDL_GetTicks() + 600u + (uint32_t)k * 300u;
+        e->last_shot = sim_now(g) + 600u + (uint32_t)k * 300u;
         if (side) {
             e->x = chasing ? g->scroll - 70.0f - (float)k * 110.0f :
                              g->scroll + SCREEN_W + 60.0f + (float)k * 150.0f;
@@ -5966,7 +5993,7 @@ static void draw_top_scouts(Game *g)
         const Enemy *e = &g->enemies[i];
         if (!e->active) continue;
         draw_top_scout(g->screen, (int)e->x, (int)e->y, e->ai_side < 0.0f ? 1 : -1);
-        if (SDL_GetTicks() - e->last_shot < 60u)
+        if (sim_now(g) - e->last_shot < 60u)
             blend_circle(g->screen, (int)e->x,
                          (int)e->y + (e->ai_side < 0.0f ? 26 : -26), 4,
                          255, 190, 90, 230);
@@ -6073,7 +6100,7 @@ static int update_legs_2d(Game *g, float dt)
     int side = sortie_mode(g) == MISSION_SIDE;
     float here = player_world(g);
     int goal = current_mission_goal(g);
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     g->leg_time += dt;
     g->sortie_clock += dt;
     if (g->tree_struck < 10.0f) g->tree_struck += dt;
@@ -6164,7 +6191,7 @@ static void draw_side_task(Game *g, Target *t, int sx, int ty)
     if (t->task == TASK_MARK) {
         int base = rifleman_side_base(g);
         for (k = 0; k < 7; ++k) {
-            int sprite = base + ((k + (int)(SDL_GetTicks() / 400u)) % 3 == 0 ? 0 : 1);
+            int sprite = base + ((k + (int)(sim_now(g) / 400u)) % 3 == 0 ? 0 : 1);
             rifleman_blit(g, sprite, sx - 70 + k * 20, ty + 14 - rifleman_rect[sprite][3], 0);
         }
         if (t->done) draw_field_sign(g, sx - 50, ty - 70, 100, "MARKED");
@@ -6296,7 +6323,7 @@ static void draw_top_task(Game *g, const TdObject *o, int sx, int sy)
     int task = td_kinds[o->kind].task, k;
     if (task == TASK_MARK) {
         /* Three abreast and eight ranks, marching. */
-        int step = (int)(SDL_GetTicks() / 300u) & 1;
+        int step = (int)(sim_now(g) / 300u) & 1;
         for (k = 0; k < 24; ++k)
             td_blit_plain(g, TD_MAN_THEIRS, sx - 10 + (k % 3) * 10,
                           sy - 50 + (k / 3) * 13 + ((k + step) & 1));
@@ -6325,7 +6352,7 @@ static int sortie_needs_input(Game *g)
 {
     MissionMode mode = sortie_mode(g);
     int i;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     if (g->notice_until && now < g->notice_until &&
         (g->leg == LEG_LANDING || g->landed)) return 1;
     for (i = 0; i < MAX_ARCHIE; ++i) {
@@ -6438,6 +6465,13 @@ static int sortie_needs_input(Game *g)
 
 static void sortie_tally(Game *g, float dt)
 {
+    /* Damage taken, frame by frame.  A QA run keeps the pilot in the air
+     * by patching him up below half, so every hit is counted, not only
+     * those above the floor that keeps a held view alive. */
+    if (g->health < g->qa_last_health)
+        g->qa_damage += g->qa_last_health - g->health;
+    if (g->qa_run && g->health > 0 && g->health < 50) g->health = 100;
+    g->qa_last_health = g->health;
     g->qa_time += dt;
     if (sortie_needs_input(g)) {
         g->qa_idle_run = 0.0f;
@@ -6462,19 +6496,21 @@ static void qa_log_sortie(Game *g)
     f = fopen(CANVAS_SORTIE_LOG, "a");
     if (!f) return;
     fprintf(f, "C%d M%02d %s MIX%d %s total=%d.%d idle=%d.%d longest=%d.%d "
-            "success=%d objectives=%d/%d kills=%d health=%d fuel=%d\n",
+            "success=%d objectives=%d/%d kills=%d health=%d fuel=%d "
+            "shots=%d enemy_shots=%d damage=%d sim=%u\n",
             g->chapter + 1, g->mission + 1, modes[sortie_mode(g)], g->td_mix,
             personal_arms(g) ? "UNARMED" : mission_armed(g) ? "ARMED" : "QUIET",
             t / 10, t % 10, idle / 10, idle % 10, longest / 10, longest % 10,
             g->success, g->objectives, current_mission_goal(g), g->kills,
-            g->health, (int)g->fuel);
+            g->health, (int)g->fuel, g->qa_shots, g->qa_enemy_shots,
+            g->qa_damage, (unsigned)((g->sim_ms - SIM_EPOCH) / 1000u));
     fclose(f);
 }
 
 static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
 {
     int i, j;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     float old_x = g->player_x;
     if (keys[SDL_SCANCODE_X]) g->airspeed += 42.0f * dt;
     if (keys[SDL_SCANCODE_Z]) g->airspeed -= 42.0f * dt;
@@ -6702,7 +6738,7 @@ static void update_perspective_sortie(Game *g, float dt,
     int crashing_enemies = 0;
     int tail_strike = 0;
     int legs_done = 0;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int aim_x;
     int aim_y;
     int personal = !mission_armed(g) && personal_arms(g);
@@ -7019,7 +7055,7 @@ static float random_unit(Game *g)
  * round is spent, the report sounds, and the bolt or the reload starts. */
 static int personal_shot(Game *g, int revolver)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     if (now < g->arms_ready_at) return 0;
     if (g->arms_rounds <= 0)
         g->arms_rounds = revolver ? REVOLVER_ROUNDS : CARBINE_ROUNDS;
@@ -7065,6 +7101,8 @@ static WorldRound *new_round(Game *g, Vec3 from, Vec3 velocity, int owner,
         r->owner = owner;
         r->target = -1;
         r->active = 1;
+        if (owner == 0) ++g->qa_shots;
+        else if (owner == 1) ++g->qa_enemy_shots;
         return r;
     }
     return NULL;
@@ -7189,11 +7227,11 @@ static void enemy_round_arrives(Game *g, WorldRound *r)
         if (g->flight_doomed || g->flight_crashed) return;
         if (!qa_spared(g) || g->health > 30) {
             g->health -= player_machine_gun_damage(g);
-            add_dogfight_bullet_hole(g, SDL_GetTicks() ^ (uint32_t)(r - g->rounds));
+            add_dogfight_bullet_hole(g, sim_now(g) ^ (uint32_t)(r - g->rounds));
         }
         g->audio.hit_player = 1;
         g->audio.hit = 1400;
-        g->last_damage = SDL_GetTicks();
+        g->last_damage = sim_now(g);
         g->shake = 1.0f;
     } else if (r->target < 3 && g->wingmen[r->target].active) {
         Enemy *w = &g->wingmen[r->target];
@@ -7205,7 +7243,7 @@ static void enemy_round_arrives(Game *g, WorldRound *r)
             g->wingman_hit_today[r->target] = 1;
             snprintf(g->notice, sizeof(g->notice), "%s IS HIT",
                      allied_pilot_names[r->target]);
-            g->notice_until = SDL_GetTicks() + 2200u;
+            g->notice_until = sim_now(g) + 2200u;
         }
     }
 }
@@ -7322,7 +7360,7 @@ static void enemy_burst(Game *g, Enemy *enemy, Vec3 target, Vec3 target_v,
             r->target = target_index;
         }
     }
-    enemy->last_shot = SDL_GetTicks();
+    enemy->last_shot = sim_now(g);
 }
 
 /* Shared autopilot: steer toward a heading and pitch with a bank limit. */
@@ -7417,7 +7455,7 @@ static void reset_wingmen(Game *g)
         w->ai_state = AI_FORMATION;
         w->ai_timer = 7.0f + (float)i * 1.5f;
         w->target = -1;
-        w->last_shot = SDL_GetTicks() + 2000u;
+        w->last_shot = sim_now(g) + 2000u;
     }
 }
 
@@ -7425,7 +7463,7 @@ static void update_wingmen(Game *g, float dt)
 {
     static const float slot[3][2] = {{-34.0f, 30.0f}, {40.0f, 45.0f},
                                      {-72.0f, 60.0f}};
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
     AircraftPose my_pose = pose_from_flight(&g->flight, me);
     int i, e;
@@ -7610,7 +7648,7 @@ static void enemy_think(Game *g, Enemy *enemy, int index, float dt,
 /* Fires when the attacker's nose is on its target. */
 static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     Vec3 me = {enemy->world_x, enemy->world_y, enemy->world_z};
     Vec3 target = {g->flight_x, g->flight_y, g->flight_z};
     Vec3 target_v = aircraft_velocity(&g->flight);
@@ -7620,7 +7658,7 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
     if (g->special == SPECIAL_GOTHA) {
         /* The rear gunner covers the tail of the bomber. */
         distance = vec3_length(vec3_sub(target, me));
-        if (now - g->scene_started < 5200u || now < enemy->last_shot ||
+        if (now - SIM_EPOCH < 5200u || now < enemy->last_shot ||
             now - enemy->last_shot < 1400u + (uint32_t)(index * 211 % 500) ||
             distance > 450.0f || off_nose(enemy, target) < 1.9f) return;
         enemy_burst(g, enemy, target, target_v, -1,
@@ -7629,7 +7667,7 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
     }
     if (!(enemies_hostile(g) || personal_arms(g)) ||
         enemy->ai_state != AI_ATTACK ||
-        now - g->scene_started < 5200u || now < enemy->last_shot) return;
+        now - SIM_EPOCH < 5200u || now < enemy->last_shot) return;
     if (enemy->target >= 0) {
         Enemy *w = &g->wingmen[enemy->target];
         target = (Vec3){w->world_x, w->world_y, w->world_z};
@@ -7742,7 +7780,7 @@ static void enemy_fresh(Game *g, Enemy *e, int i)
     e->hp = 3 + g->chapter / 2;
     e->max_hp = e->hp;
     e->active = 1;
-    e->last_shot = SDL_GetTicks() + 650u + (uint32_t)i * 390u;
+    e->last_shot = sim_now(g) + 650u + (uint32_t)i * 390u;
 }
 
 /* An enemy machine some way off, turning in towards us; behind us on the
@@ -7924,8 +7962,8 @@ static int update_df_legs(Game *g, float dt)
                     df_turn_for_home(g);
                 } else {
                     /* A breath, then the next lot. */
-                    if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
-                    if (SDL_GetTicks() - g->mission_clear_at > 6000u) {
+                    if (!g->mission_clear_at) g->mission_clear_at = sim_now(g);
+                    if (sim_now(g) - g->mission_clear_at > 6000u) {
                         g->mission_clear_at = 0;
                         df_spawn_wave(g, df_wave_size(g, g->wave), 0);
                     }
@@ -8064,8 +8102,8 @@ static int update_gunner_legs(Game *g, float dt)
                 show_notice(g, "TOM TURNS FOR HOME");
             }
         } else if (alive == 0 && !enemies_falling(g)) {
-            if (!g->mission_clear_at) g->mission_clear_at = SDL_GetTicks();
-            if (SDL_GetTicks() - g->mission_clear_at > 2500u &&
+            if (!g->mission_clear_at) g->mission_clear_at = sim_now(g);
+            if (sim_now(g) - g->mission_clear_at > 2500u &&
                 g->wave_clock > 7.0f) {
                 g->mission_clear_at = 0;
                 gunner_spawn_wave(g, gunner_wave_size(g, g->wave), 0);
@@ -8235,7 +8273,7 @@ static const uint8_t *qa_gunner_keys(Game *g, const uint8_t *keys)
      * fires once he has held it in the sight for half a second. */
     {
         static uint32_t held_since;
-        uint32_t now = SDL_GetTicks();
+        uint32_t now = sim_now(g);
         if (tx < (int)g->player_x - 14) fake[SDL_SCANCODE_LEFT] = 1;
         if (tx > (int)g->player_x + 14) fake[SDL_SCANCODE_RIGHT] = 1;
         if (ty < (int)g->player_y - 14) fake[SDL_SCANCODE_UP] = 1;
@@ -8251,7 +8289,7 @@ static const uint8_t *qa_gunner_keys(Game *g, const uint8_t *keys)
 static void update_dogfight_3d_sortie(Game *g, float dt,
                                       const uint8_t *keys)
 {
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int i;
     int active = 0;
     /* Campaign sorties fly in legs; the specials and the held QA views
@@ -8603,7 +8641,7 @@ static void own_bomb_blast(Game *g, float x, float y, uint32_t now)
 static void update_side_sortie(Game *g, float dt, const uint8_t *keys)
 {
     int i, j;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int ground;
     if (g->qa_autopilot) keys = qa_side_keys(g, keys);
     {
@@ -8899,6 +8937,7 @@ static void update_side_sortie(Game *g, float dt, const uint8_t *keys)
 static void update_sortie(Game *g, float dt, const uint8_t *keys)
 {
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
+    sim_advance(&g->sim_ms, &g->sim_carry, dt);
     if (mode == MISSION_TOP_DOWN) update_top_down_sortie(g, dt, keys);
     else if (mode == MISSION_DOGFIGHT_3D) update_dogfight_3d_sortie(g, dt, keys);
     else if (mode == MISSION_GUNNER_3D) update_gunner_3d_sortie(g, dt, keys);
@@ -10200,7 +10239,7 @@ static void draw_ground_gun(Game *g, int sx, int ty, Target *target)
     uint32_t iron = rgb(s, 45, 46, 39);
     uint32_t olive = rgb(s, 72, 75, 57);
     uint32_t sand = rgb(s, 119, 96, 66);
-    int flash = SDL_GetTicks() - target->last_shot < 180;
+    int flash = sim_now(g) - target->last_shot < 180;
     if (sprite) {
         SDL_Rect dst = {sx - sprite->w / 2, ty + 12 - sprite->h, 0, 0};
         SDL_BlitSurface(sprite, NULL, s, &dst);
@@ -10632,7 +10671,7 @@ static void draw_aircraft_smoke(Game *g, int x, int y, int health,
 static void draw_player_damage(Game *g)
 {
     SDL_Surface *s = g->screen;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     if (g->health >= 80) return;
     draw_aircraft_smoke(g, (int)g->player_x, (int)g->player_y,
                         g->health, -1, 0x4e454444u);
@@ -10953,7 +10992,7 @@ static void draw_top_down_sortie(Game *g)
     }
     draw_squall_2d(g);
     if (g->shake > 0.0f) {
-        uint32_t t = SDL_GetTicks();
+        uint32_t t = sim_now(g);
         shift_frame(s, (int)(sinf((float)t * 0.093f) * g->shake * 6.0f),
                     (int)(cosf((float)t * 0.077f) * g->shake * 5.0f));
     }
@@ -10988,7 +11027,7 @@ static void draw_top_down_sortie(Game *g)
     draw_field_sign(g, 526, 8, 106, buf);
     snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
     draw_field_sign(g, 502, 39, 130, buf);
-    if (g->notice_until && SDL_GetTicks() < g->notice_until)
+    if (g->notice_until && sim_now(g) < g->notice_until)
         draw_field_sign(g, 200, 140, 240, g->notice);
 }
 
@@ -11992,7 +12031,7 @@ static void draw_player_crash_overlay(Game *g)
     float collapse;
     int i;
     if (!g->flight_crashed) return;
-    age = (float)(SDL_GetTicks() - g->flight_crash_started) / 1000.0f;
+    age = (float)(sim_now(g) - g->flight_crash_started) / 1000.0f;
     collapse = age / 0.72f;
     if (collapse > 1.0f) collapse = 1.0f;
 
@@ -13130,7 +13169,7 @@ static void draw_needle(SDL_Surface *s, const CockpitDial *d, int ox, int oy,
  * comes round. */
 static float personal_kick(const Game *g)
 {
-    uint32_t since = SDL_GetTicks() - g->last_shot;
+    uint32_t since = sim_now(g) - g->last_shot;
     return since < 260u ? 1.0f - (float)since / 260.0f : 0.0f;
 }
 
@@ -13205,7 +13244,7 @@ static void draw_carbine_in_hand(Game *g)
 static void draw_living_cockpit(Game *g)
 {
     SDL_Surface *s = g->screen;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int ox = 0, oy = 0;
     float vibration = 0.35f + g->flight_throttle * 0.9f;
     float altitude_fraction;
@@ -13253,7 +13292,7 @@ static void draw_cockpit_plate(Game *g)
 {
     SDL_Surface *s = g->screen;
     char buf[64];
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     int health = g->health > 0 ? g->health : 0;
     blend_rect(s, 8, 54, 176, 38, 24, 18, 14, 170);
     rect(s, 8, 54, 176, 1, PIX_PACK(176, 134, 62));
@@ -13283,7 +13322,7 @@ static void draw_cockpit_plate(Game *g)
 static void show_notice(Game *g, const char *text)
 {
     snprintf(g->notice, sizeof(g->notice), "%s", text);
-    g->notice_until = SDL_GetTicks() + 1800u;
+    g->notice_until = sim_now(g) + 1800u;
 }
 
 static const AircraftLivery airship_livery = {
@@ -13306,7 +13345,7 @@ static void draw_dogfight_simulator(Game *g)
     float depth[MAX_ENEMIES + 3];
     int count = 0;
     int i, j;
-    uint32_t now = SDL_GetTicks();
+    uint32_t now = sim_now(g);
     draw_simulator_terrain(g);
     draw_simulator_clouds(g);
     draw_squall_3d(g);
@@ -13573,7 +13612,7 @@ static void draw_dogfight_3d_sortie(Game *g)
     draw_field_sign(g, 526, 342, 106, buf);
     snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
     draw_field_sign(g, 502, 371, 130, buf);
-    if (g->notice_until && SDL_GetTicks() < g->notice_until)
+    if (g->notice_until && sim_now(g) < g->notice_until)
         draw_field_sign(g, 200, 140, 240, g->notice);
 }
 
@@ -13719,8 +13758,8 @@ static void draw_sortie(Game *g)
                 if (g->side_civilians)
                     SDL_BlitSurface(g->side_civilians, &src, s, &dst);
                 if (g->targets[i].wrecked)
-                    blend_circle(s, sx + (int)(SDL_GetTicks() / 60u % 12u),
-                                 ty - r[3] / 2 - (int)(SDL_GetTicks() / 60u % 12u),
+                    blend_circle(s, sx + (int)(sim_now(g) / 60u % 12u),
+                                 ty - r[3] / 2 - (int)(sim_now(g) / 60u % 12u),
                                  10, 40, 38, 36, 110);
             } else if (g->targets[i].task) {
                 draw_side_task(g, &g->targets[i], sx, ty);
@@ -13744,14 +13783,14 @@ static void draw_sortie(Game *g)
             if (g->enemies[i].ai_side > 0.0f) {
                 /* One of those come up from behind, facing our way. */
                 draw_plane_mirrored(g, sx, sy, 2);
-                if (SDL_GetTicks() - g->enemies[i].last_shot < 70u)
+                if (sim_now(g) - g->enemies[i].last_shot < 70u)
                     blend_circle(s, sx + 32, sy - 3, 5, 255, 190, 90, 230);
                 continue;
             }
             draw_plane(g, sx, sy, 1, frame);
             if (mission_armed(g))
                 draw_side_gun(g, sx, sy, 1, frame,
-                              SDL_GetTicks() - g->enemies[i].last_shot < 70u);
+                              sim_now(g) - g->enemies[i].last_shot < 70u);
         }
     }
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
@@ -13794,12 +13833,12 @@ static void draw_sortie(Game *g)
         draw_plane(g, (int)g->player_x, (int)g->player_y, 0, pitch);
         if (mission_armed(g))
             draw_side_gun(g, (int)g->player_x, (int)g->player_y, 0, pitch,
-                          SDL_GetTicks() - g->last_shot < 60u);
+                          sim_now(g) - g->last_shot < 60u);
         draw_fabric_holes(g, (int)g->player_x, (int)g->player_y);
     }
     draw_squall_2d(g);
     if (g->shake > 0.0f) {
-        uint32_t now = SDL_GetTicks();
+        uint32_t now = sim_now(g);
         shift_frame(s, (int)(sinf((float)now * 0.093f) * g->shake * 6.0f),
                     (int)(cosf((float)now * 0.077f) * g->shake * 5.0f));
     }
@@ -13836,7 +13875,7 @@ static void draw_sortie(Game *g)
     draw_field_sign(g, 526, 8, 106, buf);
     snprintf(buf, sizeof(buf), "AIRFRAME %03d", g->health > 0 ? g->health : 0);
     draw_field_sign(g, 502, 39, 130, buf);
-    if (g->notice_until && SDL_GetTicks() < g->notice_until)
+    if (g->notice_until && sim_now(g) < g->notice_until)
         draw_field_sign(g, 200, 140, 240, g->notice);
 }
 
@@ -15644,6 +15683,7 @@ int main(int argc, char **argv)
             if (k > 1 && strcmp(argv[k], "RUN") == 0) qa_run_arg = 1;
             else if (k > 1 && strcmp(argv[k], "FLY") == 0) qa_fly_arg = 1;
             else if (k > 1 && strcmp(argv[k], "TIME") == 0) qa_frame_time = 1;
+            else if (k > 1 && strcmp(argv[k], "SLOWFRAMES") == 0) qa_slow_frames = 1;
             else argv[n++] = argv[k];
         }
         argc = n;
@@ -15861,7 +15901,7 @@ int main(int argc, char **argv)
         g.health = 0;
         g.fatal_sortie = 1;
         g.flight_doomed = 1;
-        g.flight_doomed_started = SDL_GetTicks();
+        g.flight_doomed_started = sim_now(&g);
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "HOSPITAL") == 0) {
         /* The same fatal crash with lives in reserve must recover into the
@@ -15874,7 +15914,7 @@ int main(int argc, char **argv)
         g.health = 0;
         g.fatal_sortie = 1;
         g.flight_doomed = 1;
-        g.flight_doomed_started = SDL_GetTicks();
+        g.flight_doomed_started = sim_now(&g);
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "GUNNER") == 0) {
         /* Late-war QA keeps more durable attackers in view long enough to
@@ -15951,7 +15991,7 @@ int main(int argc, char **argv)
         now = SDL_GetTicks();
         dt = (float)(now - previous) / 1000.0f;
         previous = now;
-        if (dt > 0.05f) dt = 0.05f;
+        if (dt > SIM_MAX_STEP) dt = SIM_MAX_STEP;
         {
             static uint8_t merged[SDL_NUM_SCANCODES];
             memcpy(merged, SDL_GetKeyboardState(NULL), sizeof(merged));
@@ -16012,6 +16052,7 @@ int main(int argc, char **argv)
             g.redraw_static = 0;
         }
         SDL_Delay(8);
+        if (qa_slow_frames && g.scene == SCENE_SORTIE) SDL_Delay(117);
     }
     if (g.audio.device) SDL_CloseAudioDevice(g.audio.device);
     free_asset_groups(&g, ~0u);
