@@ -29,8 +29,13 @@ static const char *allied_pilot_names[3] = {
     "ECCLES", "GRIDPIPE THYNE", "BLUEBOTTLE"
 };
 
-/* Neddy Seagoon's continuous first-person campaign. The modes rotate
- * four times per chapter so no period of the war belongs to one game style. */
+/* Neddy Seagoon's continuous first-person campaign.  Every chapter's twelve
+ * missions are exactly four side-on, four top-down, two cockpit dogfights
+ * and two from the rear gunner's seat, mixed through the chapter so no
+ * period of the war belongs to one game style and no style comes in a long
+ * run.  ports/amigaos3/check_campaign.py checks the rule before packaging.
+ * The order of the entries is what the save file records: change a
+ * mission's mode or words, never its place. */
 /* Most missions are ordinary: their special is left as SPECIAL_NONE. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -45,7 +50,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_TOP_DOWN, "THE EMPTY FLANK", "The gap on Tom's map changed the army's march."},
         {MISSION_SIDE, "RAIN OVER MEAUX", "The engine coughed all the way home. Alfie never complained."},
         {MISSION_GUNNER_3D, "A FACE IN THE WIND", "For one moment I saw the other pilot's eyes."},
-        {MISSION_TOP_DOWN, "TURN OF THE ARMIES", "The roads bent north. The retreat had become a pursuit."},
+        {MISSION_SIDE, "TURN OF THE ARMIES", "The roads bent north. The retreat had become a pursuit."},
         {MISSION_DOGFIGHT_3D, "EYES ABOVE THE MARNE", "Tom said the aeroplane had earned its place in the war."},
         {MISSION_TOP_DOWN, "THE SILENT FRONT", "Nobody fired all day. Below us men kicked a ball where the wire had been.", SPECIAL_TRUCE}
     },
@@ -69,7 +74,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_GUNNER_3D, "ABOVE ALBERT", "Three enemy scouts came out of the sun."},
         {MISSION_TOP_DOWN, "ZERO HOUR", "Tom marked the falling shells while the earth disappeared."},
         {MISSION_SIDE, "THE FIRST TRENCH", "Our bombs found the gun pit; the infantry found the wire."},
-        {MISSION_DOGFIGHT_3D, "ECCLES' WING", "Eccles brought me home with half his left wing gone."},
+        {MISSION_SIDE, "THE SUNKEN ROAD", "We bombed the guns behind the sunken road. Eccles came home with half a wing."},
         {MISSION_TOP_DOWN, "A RED ROCKET", "The signal rocket rose from men cut off beyond the line."},
         {MISSION_SIDE, "SUPPLIES AT POZIERES", "We dropped ammunition into a village made of brick dust."},
         {MISSION_GUNNER_3D, "THE EMPTY SEAT", "Tom's replacement sat quietly where Tom had been wounded."},
@@ -83,7 +88,7 @@ static const CampaignMission campaign_missions[8][MISSIONS_PER_CHAPTER] = {
         {MISSION_GUNNER_3D, "THE CIRCUS", "Their painted scouts arrived above us in perfect formation."},
         {MISSION_TOP_DOWN, "MISSING PATROL", "I found their wrecks before I found the objective."},
         {MISSION_SIDE, "VIMY RIDGE", "We silenced a gun that had held the ridge since winter."},
-        {MISSION_DOGFIGHT_3D, "SIX AGAINST TWO", "Bluebottle laughed over the signal lamp. I did not."},
+        {MISSION_SIDE, "ALONE OVER THE SCARPE", "Their scouts came six at a time. I bombed the guns and ran for home."},
         {MISSION_TOP_DOWN, "THE PHOTOGRAPH", "One clear plate was worth three lost machines."},
         {MISSION_SIDE, "TOM RETURNS", "Tom climbed back into the rear cockpit with a stiff left arm."},
         {MISSION_GUNNER_3D, "CAPTAIN MERCER", "The promotion came with a desk I refused to use."},

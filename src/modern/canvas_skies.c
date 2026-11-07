@@ -3189,8 +3189,8 @@ static int perspective_spawn_count(const Game *g)
     return count;
 }
 
-/* Every other side-on sortie from 1915 crosses a village whose people are
- * still at home; the briefing names it. */
+/* From 1915 the fifth and eleventh missions, when flown side-on, cross a
+ * village whose people are still at home; the briefing names it. */
 static const char *const side_village_names[CHAPTER_COUNT] = {
     NULL, "LA BASSEE", "MARTINPUICH", "MONCHY", "FLESQUIERES", "ALBERT",
     "VILLERS-BRETONNEUX", NULL
@@ -3198,14 +3198,14 @@ static const char *const side_village_names[CHAPTER_COUNT] = {
 
 static int side_village_today(const Game *g)
 {
-    int m, k = 0;
+    /* The fifth and eleventh missions, when they are flown side-on: the
+     * places the village sorties have always fallen, whatever else in the
+     * chapter is flown side-on. */
     if (!side_village_names[g->chapter] ||
         campaign_missions[g->chapter][g->mission].mode != MISSION_SIDE ||
         campaign_missions[g->chapter][g->mission].special != SPECIAL_NONE)
         return 0;
-    for (m = 0; m < g->mission; ++m)
-        if (campaign_missions[g->chapter][m].mode == MISSION_SIDE) ++k;
-    return k & 1;
+    return g->mission == 4 || g->mission == 10;
 }
 
 /* Side-on: an approach over the lines, a first group of targets, a long
@@ -15836,7 +15836,8 @@ int main(int argc, char **argv)
             int m;
             g.chapter = argv[2][0] - '0';
             for (m = 0; m < MISSIONS_PER_CHAPTER; ++m)
-                if (campaign_missions[g.chapter][m].mode == MISSION_DOGFIGHT_3D) {
+                if (campaign_missions[g.chapter][m].mode == MISSION_DOGFIGHT_3D &&
+                    campaign_missions[g.chapter][m].special == SPECIAL_NONE) {
                     g.mission = m;
                     break;
                 }

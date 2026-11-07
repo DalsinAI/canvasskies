@@ -102,6 +102,7 @@ RUNTIME_ASSETS := $(sort $(patsubst PROGDIR:%,%,$(filter PROGDIR:%,$(subst \", ,
 
 .PHONY: package
 package: $(OUT)
+	python3 ports/amigaos3/check_campaign.py
 	rm -rf $(PACKAGE)
 	mkdir -p $(PACKAGE)/assets/canvas-skies
 	cp $(OUT) $(PACKAGE)/CanvasSkies
