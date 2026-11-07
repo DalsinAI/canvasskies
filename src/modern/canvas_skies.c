@@ -15830,7 +15830,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_STORY || g.scene == SCENE_AWARD ||
             g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
             g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
-            g.scene == SCENE_CINEMA ||
+            g.scene == SCENE_CINEMA || g.scene == SCENE_FILM ||
             g.redraw_static) {
             uint32_t drawn_from = SDL_GetTicks();
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
