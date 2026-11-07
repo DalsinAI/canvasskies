@@ -77,3 +77,14 @@ surface noise is kept.
 | `holyrood-gramophone.wav` | Holyrood | Kenneth J. Alford, 1912 | Band of the Welsh Guards | April 1917, March 1918 | `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f` |
 | `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` |
 | `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` |
+
+## The aerodrome films' sound
+
+The soundtracks of the eight aerodrome films (stored with their pictures in
+`airfield-films.bin`) are synthesised for this game by
+`ports/amigaos3/films/sound.py`, from the same account of each film that its
+pictures are drawn from: engine firings, the triangle-wave drone of the
+game's own engine sound, the airscrew, wheels, thumps, the tail skid, wind,
+the wires, rain and birdsong, finished as an optical track. No recording,
+sample or outside sound of any kind is used.
+

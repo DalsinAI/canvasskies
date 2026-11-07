@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -48,16 +48,20 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/topdown-explosion-atlas.bmp\" \
 	-DCANVAS_TOPDOWN_TARGETS_BMP=\"PROGDIR:assets/canvas-skies/topdown-targets.bmp\" \
 	-DCANVAS_SIDE_CIVILIANS_BMP=\"PROGDIR:assets/canvas-skies/side-civilians.bmp\" \
+	-DCANVAS_RIFLEMEN_BMP=\"PROGDIR:assets/canvas-skies/riflemen.bmp\" \
 	-DCANVAS_NEWSPAPER_TABLE_BMP=\"PROGDIR:assets/canvas-skies/newspaper-table.bmp\" \
 	-DCANVAS_CINEMA_HUT_BMP=\"PROGDIR:assets/canvas-skies/cinema-hut.bmp\" \
 	-DCANVAS_COCKPIT_CELLULE_BMP=\"PROGDIR:assets/canvas-skies/cockpit-cellule.bmp\" \
 	-DCANVAS_MEDALS_BMP=\"PROGDIR:assets/canvas-skies/medals.bmp\" \
 	-DCANVAS_MESS_BMP=\"PROGDIR:assets/canvas-skies/mess.bmp\" \
+	-DCANVAS_MESS_ROWDY_BMP=\"PROGDIR:assets/canvas-skies/mess-rowdy.bmp\" \
+	-DCANVAS_MESS_WAKE_BMP=\"PROGDIR:assets/canvas-skies/mess-wake.bmp\" \
 	-DCANVAS_OFFICE_PAPER_BMP=\"PROGDIR:assets/canvas-skies/office-paper.bmp\" \
 	-DCANVAS_OFFICE_STAMP_BMP=\"PROGDIR:assets/canvas-skies/office-stamp.bmp\" \
 	-DCANVAS_MACHINE_CARDS_BMP=\"PROGDIR:assets/canvas-skies/machine-cards.bmp\" \
 	-DCANVAS_LOSS_CARD_BMP=\"PROGDIR:assets/canvas-skies/loss-card.bmp\" \
 	-DCANVAS_NEWSREELS_BIN=\"PROGDIR:assets/canvas-skies/newsreels.bin\" \
+	-DCANVAS_AIRFIELD_FILMS_BIN=\"PROGDIR:assets/canvas-skies/airfield-films.bin\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \

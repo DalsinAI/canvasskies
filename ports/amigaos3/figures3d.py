@@ -1,4 +1,8 @@
-"""Seated soldiers seen from behind, built from lit solids (scene3d.py).
+"""Soldiers built from lit solids (scene3d.py), and the mess furniture.
+
+soldier() and bench_row() are the picture house's audience, seated and
+seen from behind; bentwood() and dog() furnish the mess.  The officers in
+the mess are made with the rigged figure kit, figurekit.py.
 
 Each man is his own: a greatcoat over sloping shoulders with folds down
 the back, the turned-up collar, the nape of his neck and his ears, his
@@ -11,7 +15,7 @@ import math
 
 import numpy as np
 
-from scene3d import fbm, rot_x, rot_y, rot_z
+from scene3d import axis_frame, fbm, rot_x, rot_y, rot_z
 
 COATS = [(84, 74, 50), (92, 82, 56), (76, 70, 52), (88, 76, 48),
          (70, 66, 50), (96, 86, 60)]
@@ -118,3 +122,101 @@ def bench_row(sc, y, s, z, x0, seed, width=640, gap=4.9, avoid=None):
             soldier(sc, x, y + rng.normal(0, 1.5 * s), s * rng.normal(1, 0.06),
                     z + rng.normal(0, 2), rng)
         x += 9 * s * gap + rng.integers(0, 16)
+
+
+# ---- Furniture for the mess --------------------------------------------------
+#
+# The officers themselves are made with the figure kit (figurekit.py); what
+# is left here is the furniture and the dog, built in the same way as the
+# picture house's audience: a frame in head-heights ('u', thirteen pixels at
+# scale 1), x across, y down, z away, turned by 'yaw' and set into the room.
+
+CHAIR = (62, 40, 24)
+U = 13.0
+
+
+def limb(sc, a, b, rad, albedo, **kw):
+    """A rounded rod (an ellipsoid drawn out along a to b, at 1x)."""
+    a = np.asarray(a, np.float32)
+    b = np.asarray(b, np.float32)
+    d = b - a
+    L = float(np.linalg.norm(d))
+    if L < 1e-3:
+        sc.ellipsoid(tuple(a), (rad, rad, rad), albedo, **kw)
+        return
+    sc.ellipsoid(tuple((a + b) / 2), (rad, rad, L / 2 + rad * 0.55), albedo,
+                 R=axis_frame(d), **kw)
+
+
+class Body:
+    """A frame for furniture: local points in head-heights, turned and
+    placed."""
+
+    def __init__(self, sc, hip, s, yaw):
+        self.sc = sc
+        self.o = np.array(hip, np.float32)
+        self.u = U * s
+        self.Ry = rot_y(yaw)
+
+    def at(self, p):
+        return self.o + self.Ry @ (np.asarray(p, np.float32) * self.u)
+
+    def blob(self, p, r, col, R=None, **kw):
+        Rl = np.eye(3, dtype=np.float32) if R is None else R
+        self.sc.ellipsoid(tuple(self.at(p)), tuple(np.asarray(r) * self.u),
+                          col, R=(self.Ry @ Rl).astype(np.float32), **kw)
+
+    def limb(self, a, b, rad, col, **kw):
+        limb(self.sc, self.at(a), self.at(b), rad * self.u, col, **kw)
+
+
+def bentwood(b, cap=False):
+    """A bentwood chair under (or behind) a seated man."""
+    b.blob((0, 0.22, -0.05), (0.85, 0.1, 0.8), CHAIR, spec=0.4)
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            b.limb((sx * 0.65, 0.3, sz * 0.62), (sx * 0.75, 1.9, sz * 0.72),
+                   0.07, CHAIR, spec=0.4)
+        b.limb((sx * 0.62, 0.2, 0.7), (sx * 0.55, -1.8, 0.88), 0.08, CHAIR,
+               spec=0.5, shine=20)
+    b.blob((0, -1.75, 0.88), (0.62, 0.12, 0.1), CHAIR, spec=0.5, shine=20)
+    b.blob((0, -1.05, 0.84), (0.55, 0.07, 0.08), CHAIR, spec=0.5, shine=20)
+    if cap:
+        # His cap hung on the chair's back: khaki crown, the dark band, the
+        # glazed peak and the badge catching the light.
+        Rc = rot_z(0.35) @ rot_x(-0.25)
+        c = np.array((0.42, -1.92, 0.95), np.float32)
+
+        def cp(p):
+            return c + Rc @ np.asarray(p, np.float32)
+        b.blob(cp((0, -0.08, 0)), (0.56, 0.15, 0.54), (122, 110, 74),
+               R=Rc, rim=0.7)
+        b.blob(cp((0, 0.06, 0)), (0.47, 0.13, 0.45), (66, 58, 42), R=Rc,
+               rim=0.6)
+        b.blob(cp((0, 0.14, -0.42)), (0.4, 0.045, 0.3), (40, 30, 22), R=Rc,
+               spec=1.0, shine=30)
+        b.blob(cp((0, -0.02, -0.5)), (0.09, 0.09, 0.04), (210, 186, 120),
+               R=Rc, spec=1.2, shine=30)
+
+
+def dog(sc, x, y, z, s, coat=(212, 200, 178), patch=(120, 78, 44)):
+    """A terrier asleep, curled nose to tail.  (x, y) is the middle of his
+    back as he lies on the floor."""
+    k = s
+    def tex(q, n):
+        return np.where(np.sin(q[..., 0] * 3 + 1.3) + q[..., 2] * 1.4 > 0.6,
+                        np.mean(patch) / np.mean(coat), 1.0)
+    sc.ellipsoid((x, y, z), (15 * k, 6.5 * k, 9 * k), coat, rim=0.6,
+                 texture=tex)
+    sc.ellipsoid((x - 9 * k, y + 1 * k, z - 4 * k), (6.5 * k, 5 * k, 5 * k),
+                 coat, R=rot_z(-0.3), rim=0.6)             # haunch
+    sc.ellipsoid((x + 10 * k, y + 2.5 * k, z - 6 * k), (6 * k, 4.2 * k, 5 * k),
+                 coat, R=rot_z(0.2), rim=0.6)               # his head, down
+    sc.ellipsoid((x + 15 * k, y + 4 * k, z - 7 * k), (3 * k, 2.4 * k, 2.6 * k),
+                 coat, rim=0.5)                            # the muzzle
+    sc.ellipsoid((x + 17.5 * k, y + 3.6 * k, z - 7.5 * k),
+                 (1.0 * k, 0.9 * k, 0.9 * k), (24, 20, 18), spec=0.8)
+    sc.ellipsoid((x + 8 * k, y - 1 * k, z - 6.5 * k), (3 * k, 2 * k, 1.5 * k),
+                 patch, R=rot_z(0.5), rim=0.6)              # an ear, flopped
+    sc.ellipsoid((x + 4 * k, y + 4.5 * k, z - 8 * k), (5 * k, 1.6 * k, 2 * k),
+                 coat, R=rot_z(0.15), rim=0.5)              # the tail round
