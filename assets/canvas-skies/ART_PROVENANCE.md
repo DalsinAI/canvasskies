@@ -86,3 +86,20 @@ wire set into it by `ports/amigaos3/make_side_trenches.py`.
 `ports/amigaos3/make_cards.py`; `office-paper.bmp` and `office-stamp.bmp`
 (the adjutant's desk, the foolscap and the rubber stamp) by
 `ports/amigaos3/make_office_paper.py`.
+
+## The aerodrome films
+
+The eight take-off and landing films in `airfield-films.bin` are original
+work for this game, rendered on the host by our own small ray-caster in
+`ports/amigaos3/films/` (`render.py` for the solids, the sun's shadows,
+the sky and the haze; `models.py` for the machines, the men and the
+aerodrome; `airfield.py` for the films themselves and their old-newsreel
+finish), then packed for the game by `ports/amigaos3/make_airfield_films.py`.
+Everything in them is built from simple solids and procedural noise: the
+grass and its wear, the Bessonneau hangars with their ropes and pegs, the
+tents, windsock, drums, hedges, poplars and farms, the three machines (after
+the game's own 1914 two-seater, Sopwith-type scout and late-war flat-nosed
+scout sprites), the ground crew, the weather and the light. No photograph,
+film still, outside texture or reference image was used or is kept in the
+repository.
+
