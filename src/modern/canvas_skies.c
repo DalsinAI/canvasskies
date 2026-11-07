@@ -23,6 +23,7 @@
 #include "canvas_machine_sprites.h"
 #include "canvas_side_civilians.h"
 #include "canvas_rear_carbine.h"
+#include "canvas_ticks.h"
 #include "canvas_riflemen.h"
 
 #ifndef M_PI
@@ -5888,7 +5889,7 @@ static void update_side_chasers(Game *g, float dt, uint32_t now)
         if (sx > SCREEN_W + 70.0f) { e->active = 0; continue; }
         if (sx > -10.0f && g->player_x - sx > 50.0f && g->player_x - sx < 330.0f &&
             fabsf(g->player_y - sy) < 50.0f &&
-            now - e->last_shot > (uint32_t)(900 - g->chapter * 40)) {
+            ticks_past(now, e->last_shot, (uint32_t)(900 - g->chapter * 40))) {
             float dx = g->player_x - sx, dy = g->player_y - sy;
             float len = sqrtf(dx * dx + dy * dy);
             if (new_bullet(g, sx + 30.0f, sy - 3.0f, dx / len * 280.0f,
@@ -5931,7 +5932,7 @@ static void update_top_scouts(Game *g, float dt, uint32_t now)
         if (fabsf(e->x - g->player_x) < 140.0f &&
             ((head_on && e->y > 10.0f && e->y < g->player_y - 70.0f) ||
              (!head_on && e->y > g->player_y + 50.0f && e->y < SCREEN_H)) &&
-            now - e->last_shot > (uint32_t)(820 - g->chapter * 35)) {
+            ticks_past(now, e->last_shot, (uint32_t)(820 - g->chapter * 35))) {
             aimed_fire(g, e->x, e->y + (head_on ? 24.0f : -24.0f), 260.0f, 0);
             e->last_shot = now;
         }
@@ -7488,7 +7489,7 @@ static void update_wingmen(Game *g, float dt)
                 w->throttle = 0.85f;
                 if (distance < 120.0f) heading += (i & 1) ? 0.9f : -0.9f;
                 if (distance < 420.0f && off_nose(w, tp) < 0.12f &&
-                    now - w->last_shot > 900u) {
+                    ticks_past(now, w->last_shot, 900u)) {
                     enemy_burst(g, w, tp, aircraft_velocity(&target->flight),
                                 -2, 0.0f);
                     /* Wingmen harry the enemy but leave the kill to you. */
@@ -7636,7 +7637,8 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
     }
     distance = vec3_length(vec3_sub(target, me));
     cooldown = 1150.0f - (float)g->chapter * 45.0f + (float)((index * 173) % 400);
-    if (distance > 600.0f || now - enemy->last_shot < (uint32_t)cooldown ||
+    if (distance > 600.0f ||
+        !ticks_past(now, enemy->last_shot, (uint32_t)cooldown) ||
         off_nose(enemy, target) > 0.1f) return;
     chance = (0.3f + (float)g->chapter * 0.035f + (ace ? 0.15f : 0.0f)) *
              (1.0f - distance / 700.0f);
@@ -7644,7 +7646,8 @@ static void enemy_maybe_fire(Game *g, Enemy *enemy, int index)
     if (qa_spared(g) && enemy->target < 0 && g->health <= 30) chance = 0.0f;
     if (personal_arms(g)) {
         /* 1914: the enemy observer's rifle, as seldom as ours. */
-        if (now - enemy->last_shot < (uint32_t)cooldown * 3u) return;
+        if (!ticks_past(now, enemy->last_shot, (uint32_t)cooldown * 3u))
+            return;
         chance *= 0.4f;
     }
     enemy_burst(g, enemy, target, target_v, enemy->target, chance);
@@ -8740,7 +8743,8 @@ static void update_side_sortie(Game *g, float dt, const uint8_t *keys)
             g->enemies[i].active = 0;
         if (g->enemies[i].ai_side <= 0.0f &&
             sx > g->player_x + 65.0f && sx < SCREEN_W + 20.0f &&
-            now - g->enemies[i].last_shot > fire_delay + (uint32_t)(i * 47 % 260)) {
+            ticks_past(now, g->enemies[i].last_shot,
+                       fire_delay + (uint32_t)(i * 47 % 260))) {
             /* A scout's guns are fixed: it fires along its nose, so it
              * holds fire until the nose is within about 15 degrees of us,
              * and the pilot's last touch of rudder bends the line half way. */
