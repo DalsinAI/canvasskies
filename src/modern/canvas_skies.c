@@ -965,6 +965,7 @@ typedef struct {
     /* The legs of the sortie and what is sent against it on the way. */
     int leg;                /* LEG_OUT, LEG_HOME, LEG_LANDING */
     int task_total;         /* the observers' tasks on this sortie */
+    int order_met_told;     /* the "order met" notice has been shown */
     float leg_time;         /* seconds into the leg */
     float sortie_clock;     /* seconds since take-off */
     float front_at;         /* side, top-down: where their ground begins */
@@ -1001,6 +1002,9 @@ typedef struct {
     float sim_carry;
     /* QA: rounds fired each way, and damage taken, for the sortie log. */
     int qa_shots, qa_enemy_shots, qa_damage, qa_last_health;
+    /* QA: the targets on offer, those left unreached when the run home
+     * began, and the bombs carried. */
+    int qa_offered, qa_unreached, qa_bombs_carried;
 } Game;
 
 /* The sortie clock starts here rather than at nought, so a time of nought
@@ -3127,11 +3131,13 @@ static int current_mission_goal(const Game *g)
         return goal;
     }
     if (mode == MISSION_SIDE) {
-        /* Two groups of targets: the order is never met by the first
-         * alone.  1914's sorties carry four tasks, three of them to do. */
+        /* Two groups of targets: the first holds one fewer than the
+         * order (side_layout), so the second must be reached, and a
+         * careful pilot has a target or two to spare.  1914's sorties
+         * carry four tasks, three of them to do.  check_campaign.py
+         * checks these orders against the targets and bombs on offer. */
         if (g->chapter == 0) return 3;
-        return chapters[g->chapter].goal +
-               (g->chapter == CHAPTER_COUNT - 1 ? 1 : 2);
+        return chapters[g->chapter].goal + 1;
     }
     return chapters[g->chapter].goal;
 }
@@ -3271,6 +3277,7 @@ static void reset_sortie_legs(Game *g)
 {
     MissionMode mode = campaign_missions[g->chapter][g->mission].mode;
     g->leg = LEG_OUT;
+    g->order_met_told = 0;
     g->leg_time = 0.0f;
     g->sortie_clock = 0.0f;
     g->home_progress = 0.0f;
@@ -3295,6 +3302,7 @@ static void reset_sortie_legs(Game *g)
     g->qa_logged = 0;
     g->qa_shots = g->qa_enemy_shots = g->qa_damage = 0;
     g->qa_last_health = 100;
+    g->qa_unreached = 0;
     g->front_at = mode == MISSION_SIDE ? 1500.0f : 1400.0f;
     g->home_line_at = 1.0e9f;
     g->field_at = 1.0e9f;
@@ -3513,6 +3521,9 @@ static void reset_sortie(Game *g)
         for (i = 0; i < MAX_TARGETS; ++i) g->targets[i].active = 0;
     }
     reset_sortie_legs(g);
+    /* Bombs enough for the order and two that miss. */
+    if (mission_armed(g) && g->bombs_remaining < current_mission_goal(g) + 2)
+        g->bombs_remaining = current_mission_goal(g) + 2;
     g->pudding_delivered = 0;
     g->raider_through = 0;
     g->wreck_started = 0;
@@ -4583,7 +4594,9 @@ static void td_build_mission(Game *g)
     if (tasks > 0) {
         g->td_goal = tasks > 1 ? tasks - 1 : 1;
     } else {
-        g->td_goal = (military * 3 + 4) / 5;
+        /* Half the military targets: enough that both groups matter,
+         * with room for a bomb that falls wide. */
+        g->td_goal = (military + 1) / 2;
         if (g->td_goal < 2) g->td_goal = 2;
     }
 }
@@ -6081,12 +6094,19 @@ static void start_run_home(Game *g)
     /* What lay further on is left to another day. */
     if (side) {
         for (i = 0; i < MAX_TARGETS; ++i)
-            if (g->targets[i].active && g->targets[i].world_x > view_end)
+            if (g->targets[i].active && g->targets[i].world_x > view_end) {
+                if (!g->targets[i].civilian && !g->targets[i].hazard &&
+                    !g->targets[i].done) ++g->qa_unreached;
                 g->targets[i].active = 0;
+            }
     } else {
         for (i = 0; i < g->td_count; ++i)
-            if (g->td[i].active && g->td[i].world_x > view_end)
+            if (g->td[i].active && g->td[i].world_x > view_end) {
+                if (!g->td[i].hazard && !g->td[i].done && !g->td[i].wrecked &&
+                    (td_kinds[g->td[i].kind].military ||
+                     td_kinds[g->td[i].kind].task)) ++g->qa_unreached;
                 g->td[i].active = 0;
+            }
     }
     /* Their scouts come up after us. */
     if (mission_armed(g) && g->chapter >= 1)
@@ -6108,9 +6128,16 @@ static int update_legs_2d(Game *g, float dt)
     if (g->tree_struck < 10.0f) g->tree_struck += dt;
     if (g->leg == LEG_OUT) {
         /* The observers do all their work if they can; the order is met
-         * with one task to spare. */
-        int done = g->task_total > 0 ? g->objectives >= g->task_total :
-                   goal > 0 && g->objectives >= goal;
+         * with one task to spare.  A raid flies on through its second
+         * group even when the order is met in the first: the order is
+         * the least the squadron will accept, and what is left on the
+         * ground is there for the taking. */
+        int done = g->task_total > 0 && g->objectives >= g->task_total;
+        if (g->task_total == 0 && goal > 0 && g->objectives == goal &&
+            !g->order_met_told) {
+            g->order_met_told = 1;
+            show_notice(g, "ORDER MET");
+        }
         if (done || here > g->task_end)
             start_run_home(g);
     } else if (g->leg == LEG_HOME) {
@@ -6242,11 +6269,13 @@ static void update_side_task(Game *g, Target *t, float dt)
         if (fabsf(sx - g->player_x) < 70.0f && g->player_y > ground - 150.0f)
             task_done(g, t, "COLUMN MARKED");
     } else if (t->task == TASK_PHOTO) {
-        if (fabsf(sx - g->player_x) < 70.0f && g->player_y < ground - 50.0f &&
-            fabsf(g->player_vy) < 35.0f) {
+        /* Near enough level for long enough over the guns.  A careful
+         * pilot settles the machine as the battery comes up. */
+        if (fabsf(sx - g->player_x) < 80.0f && g->player_y < ground - 50.0f &&
+            fabsf(g->player_vy) < 50.0f) {
             g->photo_hold += dt;
-            if (g->photo_hold > 0.9f) task_done(g, t, "PLATE EXPOSED");
-        } else if (fabsf(sx - g->player_x) >= 70.0f) {
+            if (g->photo_hold > 0.7f) task_done(g, t, "PLATE EXPOSED");
+        } else if (fabsf(sx - g->player_x) >= 80.0f) {
             g->photo_hold = 0.0f;
         }
     }
@@ -6465,8 +6494,30 @@ static int sortie_needs_input(Game *g)
     return 0;
 }
 
+/* The targets a flat sortie offers towards its order: the gun pits or
+ * the observers' tasks side-on, the military targets or the tasks from
+ * above. */
+static int targets_on_offer(const Game *g)
+{
+    int i, n = 0;
+    for (i = 0; i < MAX_TARGETS; ++i)
+        if (g->targets[i].active && !g->targets[i].civilian &&
+            !g->targets[i].hazard && (sortie_mode(g) == MISSION_SIDE ||
+                                      g->td_mix == MIX_NONE))
+            ++n;
+    for (i = 0; i < g->td_count; ++i)
+        if (!g->td[i].hazard &&
+            (td_kinds[g->td[i].kind].military || td_kinds[g->td[i].kind].task))
+            ++n;
+    return n;
+}
+
 static void sortie_tally(Game *g, float dt)
 {
+    if (g->qa_time == 0.0f) {
+        g->qa_bombs_carried = g->bombs_remaining;
+        g->qa_offered = targets_on_offer(g);
+    }
     /* Damage taken, frame by frame.  A QA run keeps the pilot in the air
      * by patching him up below half, so every hit is counted, not only
      * those above the floor that keeps a held view alive. */
@@ -6499,13 +6550,16 @@ static void qa_log_sortie(Game *g)
     if (!f) return;
     fprintf(f, "C%d M%02d %s MIX%d %s total=%d.%d idle=%d.%d longest=%d.%d "
             "success=%d objectives=%d/%d kills=%d health=%d fuel=%d "
-            "shots=%d enemy_shots=%d damage=%d sim=%u\n",
+            "shots=%d enemy_shots=%d damage=%d sim=%u offered=%d "
+            "unreached=%d bombs=%d/%d\n",
             g->chapter + 1, g->mission + 1, modes[sortie_mode(g)], g->td_mix,
             personal_arms(g) ? "UNARMED" : mission_armed(g) ? "ARMED" : "QUIET",
             t / 10, t % 10, idle / 10, idle % 10, longest / 10, longest % 10,
             g->success, g->objectives, current_mission_goal(g), g->kills,
             g->health, (int)g->fuel, g->qa_shots, g->qa_enemy_shots,
-            g->qa_damage, (unsigned)((g->sim_ms - SIM_EPOCH) / 1000u));
+            g->qa_damage, (unsigned)((g->sim_ms - SIM_EPOCH) / 1000u),
+            g->qa_offered, g->qa_unreached,
+            g->qa_bombs_carried - g->bombs_remaining, g->qa_bombs_carried);
     fclose(f);
 }
 
@@ -6556,7 +6610,11 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                 continue;
             }
             bomb = td_kinds[o->kind].bomb_only || td_kinds[o->kind].hp >= 3;
-            if (bomb && ahead > 95.0f && ahead < 135.0f &&
+            /* A bomb falls for about a second while the ground runs on
+             * under it, and strikes in its last moments: let go when the
+             * target is that second's run, less the bomb's own fall,
+             * ahead. */
+            if (bomb && fabsf(ahead - ((g->airspeed - 42.0f) * 0.97f + 4.0f)) < 10.0f &&
                 fabsf(sx - g->player_x) < 16.0f) {
                 int c, near_civ = 0;
                 for (c = 0; c < g->td_count; ++c) {
@@ -8139,7 +8197,7 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
     float ground = (float)(terrain_y(g->scroll + g->player_x) - 19);
     float want = 190.0f, best = 1e9f;
     float here = g->scroll + g->player_x;
-    int i;
+    int i, task_close = 0;
     memcpy(fake, keys, sizeof(fake));
     fake[SDL_SCANCODE_UP] = fake[SDL_SCANCODE_DOWN] = 0;
     fake[SDL_SCANCODE_SPACE] = fake[SDL_SCANCODE_B] = 0;
@@ -8150,14 +8208,20 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
         if (!t->active || t->civilian || t->done || t->wrecked) continue;
         if (dx < -30.0f || dx > 360.0f || dx > best) continue;
         best = dx;
+        if (t->task && dx < 260.0f) task_close = 1;
         if (t->task == TASK_MARK) {
             want = ground - 110.0f;
         } else if (t->task) {
             want = ground - 130.0f;
+            if (t->task == TASK_PHOTO && dx < 220.0f) {
+                /* Level over the guns while the plate is exposed. */
+                want = g->player_y;
+            }
             if (t->task == TASK_DROP && g->bags > 0) {
                 float h = fmaxf(ground + 15.0f - g->player_y - 14.0f, 1.0f);
                 float fall = (-50.0f + sqrtf(50.0f * 50.0f + 210.0f * h)) / 105.0f;
-                if (fabsf(dx - (40.0f + g->airspeed) * fall) < 22.0f)
+                float off = dx - (40.0f + g->airspeed) * fall;
+                if (off > -8.0f && off < 6.0f)
                     fake[SDL_SCANCODE_B] = 1;
             }
         } else if (mission_armed(g)) {
@@ -8165,8 +8229,11 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
              * reach the gun's height? */
             float h = fmaxf(ground + 19.0f - 12.0f - 32.0f - g->player_y, 1.0f);
             float fall = (-55.0f + sqrtf(55.0f * 55.0f + 210.0f * h)) / 105.0f;
+            /* Let go on the mark, not at the edge of the window, or the
+             * bomb falls a gun's length short. */
+            float off = dx - (42.0f + g->airspeed) * fall;
             want = ground - 185.0f;
-            if (fabsf(dx - (42.0f + g->airspeed) * fall) < 24.0f)
+            if (off > -8.0f && off < 6.0f)
                 fake[SDL_SCANCODE_B] = 1;
         }
     }
@@ -8186,14 +8253,19 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
     }
     if (g->balloon.active && !g->balloon.cut) {
         float bx = g->balloon.x - here;
-        if (bx > -30.0f && bx < 380.0f) want = fminf(want, g->balloon.y - 26.0f);
+        /* Over the cable, unless the work is in hand and the cable is
+         * not yet near: then the work first. */
+        if (bx > -30.0f && bx < (task_close ? 110.0f : 380.0f))
+            want = fminf(want, g->balloon.y - 26.0f);
     }
-    if (g->squall.active && g->squall.a - here < 420.0f && g->squall.b > here &&
+    if (!task_close && g->squall.active && g->squall.a - here < 420.0f &&
+        g->squall.b > here &&
         want > g->squall.lo - 20.0f && want < g->squall.hi + 20.0f)
         want = g->squall.lo > 60.0f ? g->squall.lo - 28.0f : g->squall.hi + 28.0f;
     for (i = 0; i < MAX_ARCHIE; ++i) {
         const Archie *a = &g->archie[i];
-        if (a->active && a->kind == ARCHIE_RANGING && a->fuse > 0.0f &&
+        if (!task_close && a->active && a->kind == ARCHIE_RANGING &&
+            a->fuse > 0.0f &&
             fabsf(a->ty - g->player_y) < 50.0f)
             want = g->player_y > 170.0f ? g->player_y - 90.0f : g->player_y + 90.0f;
     }
@@ -15696,7 +15768,7 @@ int main(int argc, char **argv)
             "DAWN", "DEATH", "LOSS",
             "DEBRIEF",
             "DEBRIEF_SUCCESS", "DIARY", "DOGFIGHT", "FINAL_SUCCESS", "GOTHA",
-            "GUNNER", "HOSPITAL", "MACHINES", "MESS", "MISSION", "NEWS",
+            "GOALS", "GUNNER", "HOSPITAL", "MACHINES", "MESS", "MISSION", "NEWS",
             "REPRIMAND", "SIDE", "TOPDOWN",
             "TOPMIX",
             "TRACERS",
@@ -15765,6 +15837,33 @@ int main(int argc, char **argv)
         g.qa_hold = 1;
         g.qa_autopilot = argc > 3;   /* TOPMIX n FLY: the autopilot flies it */
         set_scene(&g, SCENE_SORTIE);
+    } else if (argc > 1 && strcmp(argv[1], "GOALS") == 0) {
+        /* QA: every flat sortie's order against what it offers.  Each is
+         * laid out as for flying; an order above the targets on offer,
+         * or an armed sortie with fewer than the order and two bombs, is
+         * a failure, and the game exits with 1. */
+        int c, m, bad = 0;
+        for (c = 0; c < CHAPTER_COUNT; ++c)
+            for (m = 0; m < MISSIONS_PER_CHAPTER; ++m) {
+                MissionMode mode = campaign_missions[c][m].mode;
+                int goal, offered, ok;
+                if ((mode != MISSION_SIDE && mode != MISSION_TOP_DOWN) ||
+                    campaign_missions[c][m].special != SPECIAL_NONE) continue;
+                g.chapter = c;
+                g.mission = m;
+                reset_sortie(&g);
+                goal = current_mission_goal(&g);
+                offered = targets_on_offer(&g);
+                ok = goal <= offered &&
+                     (!mission_armed(&g) || g.task_total > 0 ||
+                      g.bombs_remaining >= goal + 2);
+                printf("C%d M%02d %-7s order %2d offered %2d bombs %2d bags %d %s\n",
+                       c + 1, m + 1, mode == MISSION_SIDE ? "SIDE" : "TOPDOWN",
+                       goal, offered, g.bombs_remaining, g.bags,
+                       ok ? "ok" : "TOO HIGH");
+                if (!ok) bad = 1;
+            }
+        return bad;
     } else if (argc > 3 && strcmp(argv[1], "MISSION") == 0) {
         /* MISSION c m: chapter c, mission m of the campaign, from 1. */
         g.chapter = (atoi(argv[2]) + CHAPTER_COUNT - 1) % CHAPTER_COUNT;
