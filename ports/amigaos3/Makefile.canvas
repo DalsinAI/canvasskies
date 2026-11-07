@@ -62,6 +62,9 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_LOSS_CARD_BMP=\"PROGDIR:assets/canvas-skies/loss-card.bmp\" \
 	-DCANVAS_NEWSREELS_BIN=\"PROGDIR:assets/canvas-skies/newsreels.bin\" \
 	-DCANVAS_AIRFIELD_FILMS_BIN=\"PROGDIR:assets/canvas-skies/airfield-films.bin\" \
+	-DCANVAS_REMEMBER_FIELD_BMP=\"PROGDIR:assets/canvas-skies/remember-field.bmp\" \
+	-DCANVAS_REMEMBER_POPPIES_BMP=\"PROGDIR:assets/canvas-skies/remember-poppies.bmp\" \
+	-DCANVAS_REMEMBER_WIND_WAV=\"PROGDIR:assets/canvas-skies/remember-wind.wav\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
