@@ -23,6 +23,7 @@
 #include "canvas_machine_sprites.h"
 #include "canvas_side_civilians.h"
 #include "canvas_rear_carbine.h"
+#include "canvas_remember.h"
 #include "canvas_riflemen.h"
 
 #ifndef M_PI
@@ -259,6 +260,18 @@
 #ifndef CANVAS_AIRFIELD_FILMS_BIN
 #define CANVAS_AIRFIELD_FILMS_BIN "assets/canvas-skies/airfield-films.bin"
 #endif
+#ifndef CANVAS_REMEMBER_FIELD_BMP
+#define CANVAS_REMEMBER_FIELD_BMP "assets/canvas-skies/remember-field.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_POPPIES_BMP
+#define CANVAS_REMEMBER_POPPIES_BMP "assets/canvas-skies/remember-poppies.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_WIND_WAV
+#define CANVAS_REMEMBER_WIND_WAV "assets/canvas-skies/remember-wind.wav"
+#endif
+#ifndef CANVAS_WE_REMEMBER_TXT
+#define CANVAS_WE_REMEMBER_TXT "PROGDIR:WeRemember.txt"
+#endif
 #ifndef CANVAS_PREFS_PATH
 #define CANVAS_PREFS_PATH "PROGDIR:CanvasSkies.prefs"
 #endif
@@ -360,7 +373,8 @@ typedef enum {
     SCENE_COURT_MARTIAL, /* the end of a career in disgrace */
     SCENE_CINEMA,   /* the picture house, a chapter's first morning */
     SCENE_SETTINGS, /* the officer's preferences */
-    SCENE_FILM      /* a take-off or a landing, on old film */
+    SCENE_FILM,     /* a take-off or a landing, on old film */
+    SCENE_REMEMBER  /* the old front in 1919, and the roll */
 } Scene;
 
 typedef enum {
@@ -750,6 +764,8 @@ typedef struct {
     float gramophone_lp;
     float gramophone_hp;
     float gramophone_previous;
+    const int16_t *wind;        /* the wind over the old front, looped */
+    uint32_t wind_len, wind_pos;
     const int16_t *film_sound;  /* the aerodrome film's soundtrack */
     uint32_t film_len, film_pos;
     float music_gain;     /* the settings' two sliders, 0..1 */
@@ -803,6 +819,10 @@ typedef struct {
     SDL_Surface *loss_card;         /* the empty chair, by candlelight */
     Newsreel newsreel;
     AirfieldFilm film;
+    SDL_Surface *remember_field;    /* the old front in summer 1919 */
+    SDL_Surface *remember_poppies;  /* poppies and grass in the wind */
+    char **remember_names;          /* the roll, from WeRemember.txt */
+    int remember_count;
     Scene film_next;        /* where the film leads when it ends */
     int cinema_reel_slot;
     int cinema_seen;                /* chapter + 1 whose reels were shown */
@@ -1004,6 +1024,8 @@ static int personal_shot(Game *g, int revolver);
 static void ensure_scene_assets(Game *g, Scene scene);
 static void ensure_music(Game *g, int mood);
 static int film_start_for(Game *g, Scene from, Scene to);
+static void remember_start(Game *g);
+static void remember_free(Game *g);
 static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void qa_log_sortie(Game *g);
@@ -2708,10 +2730,15 @@ static void audio_callback(void *userdata, uint8_t *stream, int len)
         }
         /* Music on one slider; in a sortie the engines' drone goes with
          * the guns and bangs on the other. */
-        float bed = a->scene == SCENE_FILM ? 0.0f :
+        float bed = a->scene == SCENE_FILM || a->scene == SCENE_REMEMBER ?
+                    0.0f :
                     sample * (a->scene == SCENE_SORTIE ? a->effects_gain :
                                                         a->music_gain);
         sample = 0.0f;
+        if (a->scene == SCENE_REMEMBER && a->wind && a->wind_len) {
+            sample += (float)a->wind[a->wind_pos] / 32768.0f;
+            if (++a->wind_pos >= a->wind_len) a->wind_pos = 0;
+        }
         if (a->film_sound && a->film_pos < a->film_len)
             sample += (float)(int16_t)SDL_SwapBE16(
                           (uint16_t)a->film_sound[a->film_pos++]) / 32768.0f;
@@ -2928,6 +2955,9 @@ static void set_scene(Game *g, Scene scene)
         g->reveal_started = SDL_GetTicks();
     if (scene == SCENE_DEBRIEF && g->health <= 0) g->fatal_sortie = 1;
     if (scene == SCENE_CINEMA) cinema_start(g);
+    if (g->scene == SCENE_REMEMBER && scene != SCENE_REMEMBER)
+        remember_free(g);
+    if (scene == SCENE_REMEMBER) remember_start(g);
     if (scene == SCENE_COURT_MARTIAL) {
         /* Cashiered: the career ends here and the save says so. */
         g->court_martial_stage = 0;
@@ -14227,7 +14257,7 @@ typedef enum {
     AG_SIDE = 1u << 12, AG_SKY = 1u << 13, AG_TOPDOWN = 1u << 14,
     AG_TARGETS = 1u << 15, AG_EXPLODE = 1u << 16, AG_COCKPIT = 1u << 17,
     AG_GROUND = 1u << 18, AG_GUNNER = 1u << 19, AG_LEWIS = 1u << 20,
-    AG_CARBINE = 1u << 21, AG_RIFLEMEN = 1u << 22
+    AG_CARBINE = 1u << 21, AG_RIFLEMEN = 1u << 22, AG_REMEMBER = 1u << 23
 } AssetGroup;
 
 enum { ASSET_PLAIN, ASSET_LOOSE_KEY, ASSET_EXACT_KEY, ASSET_INDEX_KEY };
@@ -14298,7 +14328,10 @@ static const AssetSpec asset_specs[] = {
     ASSET(machine_cards, CANVAS_MACHINE_CARDS_BMP, AG_CARDS, 1, ASSET_EXACT_KEY),
     ASSET(office_paper, CANVAS_OFFICE_PAPER_BMP, AG_OFFICE, 1, ASSET_PLAIN),
     ASSET(office_stamp, CANVAS_OFFICE_STAMP_BMP, AG_OFFICE, 1, ASSET_EXACT_KEY),
-    ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN)
+    ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN),
+    ASSET(remember_field, CANVAS_REMEMBER_FIELD_BMP, AG_REMEMBER, 1, ASSET_PLAIN),
+    ASSET(remember_poppies, CANVAS_REMEMBER_POPPIES_BMP, AG_REMEMBER, 1,
+          ASSET_LOOSE_KEY)
 };
 #define ASSET_COUNT ((int)(sizeof(asset_specs) / sizeof(asset_specs[0])))
 
@@ -14398,6 +14431,7 @@ static unsigned asset_groups_for_scene(const Game *g, Scene scene)
     case SCENE_COURT_MARTIAL: return AG_JOURNAL;
     case SCENE_CINEMA: return AG_CINEMA;
     case SCENE_FILM: return 0;
+    case SCENE_REMEMBER: return AG_REMEMBER;
     case SCENE_SORTIE:
         if (mode == MISSION_SIDE)
             return AG_SIDE | AG_SKY | AG_EXPLODE | AG_RIFLEMEN;
@@ -15295,6 +15329,210 @@ static void draw_film(Game *g)
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
 }
 
+/* ---- We remember ----------------------------------------------------------
+ *
+ * The very end: the old front in the summer of 1919, the trenches grassed
+ * over and the poppies grown up through the wire, the camera drifting
+ * slowly across it with nothing but the wind.  Over it, WE REMEMBER and
+ * the roll: names given by people who have given to the Royal British
+ * Legion, of someone of theirs who served, read from WeRemember.txt
+ * beside the program so that the roll can grow without a new program.
+ * One line a name; blank lines and lines starting with # are passed over;
+ * UTF-8 or Latin-1, with accents folded to the plain letters the period
+ * faces carry. */
+#define REMEMBER_MAX_NAMES 4000
+#define REMEMBER_NAME_LEN 72
+#define REMEMBER_HEADING_MS 2500u      /* the heading fades in over this */
+#define REMEMBER_SCROLL_AT 7000u       /* and the roll begins to rise */
+#define REMEMBER_LINE 26               /* pixels from one name to the next */
+#define REMEMBER_RISE 16               /* pixels a second */
+#define REMEMBER_PAN_MS 150000u        /* to drift from one end to the other */
+#define REMEMBER_POPPY_COUNT 34
+
+static const char *const remember_closing[2] = {
+    "PLEASE CONSIDER A GIFT TO THE ROYAL BRITISH LEGION.",
+    "BRITISHLEGION.ORG.UK/GET-INVOLVED/DONATE"
+};
+
+/* A Latin-1 letter to the plain one the faces have. */
+static char fold_latin1(unsigned c)
+{
+    static const char *const from =
+        "\xc0\xc1\xc2\xc3\xc4\xc5\xc7\xc8\xc9\xca\xcb\xcc\xcd\xce\xcf\xd1"
+        "\xd2\xd3\xd4\xd5\xd6\xd8\xd9\xda\xdb\xdc\xdd"
+        "\xe0\xe1\xe2\xe3\xe4\xe5\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf1"
+        "\xf2\xf3\xf4\xf5\xf6\xf8\xf9\xfa\xfb\xfc\xfd\xff";
+    static const char *const to =
+        "AAAAAACEEEEIIIIN" "OOOOOOUUUUY"
+        "aaaaaaceeeeiiiin" "oooooouuuuyy";
+    const char *at;
+    if (c < 0x80) return (char)c;
+    at = c ? strchr(from, (int)c) : NULL;
+    return at ? to[at - from] : '\0';
+}
+
+static void remember_load_names(Game *g)
+{
+    FILE *f = fopen(CANVAS_WE_REMEMBER_TXT, "rb");
+    char line[256];
+    if (!f) return;
+    g->remember_names = (char **)calloc(REMEMBER_MAX_NAMES, sizeof(char *));
+    if (!g->remember_names) {
+        fclose(f);
+        return;
+    }
+    while (g->remember_count < REMEMBER_MAX_NAMES &&
+           fgets(line, sizeof(line), f)) {
+        char name[REMEMBER_NAME_LEN + 1];
+        const unsigned char *p = (const unsigned char *)line;
+        int n = 0;
+        if (p[0] == 0xef && p[1] == 0xbb && p[2] == 0xbf) p += 3;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (*p == '#' || *p == '\r' || *p == '\n' || !*p) continue;
+        while (*p && *p != '\r' && *p != '\n' && n < REMEMBER_NAME_LEN) {
+            unsigned c = *p++;
+            char out;
+            /* Two-byte UTF-8 for the Latin-1 range; anything wider is
+             * dropped, as the faces could not show it. */
+            if (c >= 0xc0 && c < 0xe0 && (*p & 0xc0) == 0x80) {
+                c = ((c & 0x1f) << 6) | (*p++ & 0x3f);
+            } else if (c >= 0xe0) {
+                while ((*p & 0xc0) == 0x80) ++p;
+                continue;
+            }
+            out = fold_latin1(c);
+            if (out >= 'a' && out <= 'z') out = (char)(out - 'a' + 'A');
+            if (out >= 32 && out <= 126) name[n++] = out;
+        }
+        while (n > 0 && name[n - 1] == ' ') --n;
+        if (!n) continue;
+        name[n] = '\0';
+        g->remember_names[g->remember_count] = (char *)malloc((size_t)n + 1);
+        if (!g->remember_names[g->remember_count]) break;
+        memcpy(g->remember_names[g->remember_count], name, (size_t)n + 1);
+        ++g->remember_count;
+    }
+    fclose(f);
+}
+
+static void remember_start(Game *g)
+{
+    uint32_t len = 0;
+    uint8_t *wind;
+    g->scene_started = SDL_GetTicks();
+    if (!g->remember_names) remember_load_names(g);
+    if (!g->audio.device || g->audio.wind) return;
+    wind = load_mono_wav(CANVAS_REMEMBER_WIND_WAV, &len);
+    if (!wind) return;
+    SDL_LockAudioDevice(g->audio.device);
+    g->audio.wind = (const int16_t *)(void *)wind;
+    g->audio.wind_len = len / 2;
+    g->audio.wind_pos = 0;
+    SDL_UnlockAudioDevice(g->audio.device);
+}
+
+static void remember_free(Game *g)
+{
+    int i;
+    if (g->audio.device && g->audio.wind) {
+        const int16_t *wind;
+        SDL_LockAudioDevice(g->audio.device);
+        wind = g->audio.wind;
+        g->audio.wind = NULL;
+        g->audio.wind_len = g->audio.wind_pos = 0;
+        SDL_UnlockAudioDevice(g->audio.device);
+        SDL_free((void *)wind);
+    }
+    for (i = 0; i < g->remember_count; ++i) free(g->remember_names[i]);
+    free(g->remember_names);
+    g->remember_names = NULL;
+    g->remember_count = 0;
+}
+
+/* Lettering centred over the field, darkened behind so it reads. */
+static void remember_line(Game *g, FontId face, int y, const char *text,
+                          int fade)
+{
+    int w = font_width(face, text);
+    int v = 236 * fade / 32;
+    if (y < -40 || y > SCREEN_H + 40) return;
+    font_text(g, face, 320 - w / 2 + 1, y + 1, text, PIX_PACK(0, 0, 0));
+    font_text(g, face, 320 - w / 2, y, text,
+              PIX_PACK(v, v * 226 / 236, v * 198 / 236));
+}
+
+static void draw_remember(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    uint32_t now = SDL_GetTicks(), t = now - g->scene_started;
+    int pan = 0, i, y, fade, last;
+    float drift;
+    /* The field, drifting slowly to the right and resting at its end. */
+    drift = t >= REMEMBER_PAN_MS ? 1.0f : (float)t / (float)REMEMBER_PAN_MS;
+    drift = drift * drift * (3.0f - 2.0f * drift);
+    if (g->remember_field) {
+        SDL_Rect src, dst;
+        pan = (int)((float)(g->remember_field->w - SCREEN_W) * drift);
+        src.x = pan; src.y = 0; src.w = SCREEN_W; src.h = SCREEN_H;
+        dst.x = 0; dst.y = 0; dst.w = SCREEN_W; dst.h = SCREEN_H;
+        SDL_BlitSurface(g->remember_field, &src, s, &dst);
+    } else {
+        gradient(s, 120, 140, 160, 90, 104, 70);
+    }
+    /* Poppies and grass along the foot, nearer than the painting and so
+     * passing a little faster, each swaying as the gusts come through. */
+    if (g->remember_poppies) {
+        float gust = 0.5f + 0.5f * sinf((float)now * 0.0011f) *
+                            sinf((float)now * 0.00037f + 1.3f);
+        for (i = 0; i < REMEMBER_POPPY_COUNT; ++i) {
+            uint32_t h = scene_hash((uint32_t)i * 2654435761u + 77u);
+            int variant = (int)(h % REMEMBER_POPPY_VARIANTS);
+            int span = SCREEN_W + 120;
+            int x = (int)((h >> 8) % (uint32_t)span) - pan * 13 / 10 % span;
+            int phase = (int)((now / (170u + (h >> 20) % 90u) +
+                               (h >> 12)) & 3u);
+            const short *f;
+            SDL_Rect src, dst;
+            while (x < -60) x += span;
+            if (gust < 0.35f) phase = phase & 1;   /* barely stirring */
+            f = remember_poppy_frames[variant][phase % REMEMBER_SWAY_FRAMES];
+            src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
+            dst.x = x;
+            dst.y = SCREEN_H - f[3] - (int)((h >> 4) % 18u);
+            dst.w = f[2]; dst.h = f[3];
+            SDL_BlitSurface(g->remember_poppies, &src, s, &dst);
+        }
+    }
+    /* A soft shade down the middle for the lettering. */
+    for (i = 0; i < 6; ++i)
+        blend_rect(s, 150 + i * 12, 0, 340 - i * 24, SCREEN_H, 6, 8, 10,
+                   (uint8_t)(16 + i * 6));
+    fade = t >= REMEMBER_HEADING_MS ? 32 :
+           (int)(t * 32u / REMEMBER_HEADING_MS);
+    remember_line(g, FONT_TITLE, 74, "WE REMEMBER", fade);
+    if (t < REMEMBER_SCROLL_AT) return;
+    /* The roll rises from the foot of the screen; when the closing lines
+     * reach the middle it stops, and the field is left to the wind. */
+    last = SCREEN_H + 40 + (g->remember_count + 2) * REMEMBER_LINE;
+    y = SCREEN_H + 30 -
+        (int)((t - REMEMBER_SCROLL_AT) * (uint32_t)REMEMBER_RISE / 1000u);
+    if (y + last - SCREEN_H - 30 < 236) y = 236 - (last - SCREEN_H - 30);
+    for (i = 0; i < g->remember_count; ++i) {
+        int ny = y + i * REMEMBER_LINE;
+        if (ny > 104 && ny < SCREEN_H + 20)
+            remember_line(g, FONT_SUBHEAD, ny, g->remember_names[i],
+                          ny < 130 ? (ny - 104) * 32 / 26 : 32);
+    }
+    y += g->remember_count * REMEMBER_LINE + (g->remember_count ? 60 : 0);
+    for (i = 0; i < 2; ++i) {
+        int ny = y + i * 22;
+        if (ny > 104)
+            remember_line(g, i ? FONT_TYPE_SMALL : FONT_LABEL, ny,
+                          remember_closing[i],
+                          ny < 130 ? (ny - 104) * 32 / 26 : 32);
+    }
+}
+
 static void advance_after_debrief(Game *g)
 {
     if (!g->success && g->fatal_sortie && g->lives <= 0) {
@@ -15365,6 +15603,16 @@ static void handle_event(Game *g, SDL_Event *ev)
         return;
     if (g->scene == SCENE_SETTINGS) {
         handle_settings_key(g, ev->key.keysym.sym);
+        return;
+    }
+    if (g->scene == SCENE_REMEMBER) {
+        /* Once the heading has been read, Escape or Enter leaves it. */
+        SDL_Keycode k = ev->key.keysym.sym;
+        if ((k == SDLK_ESCAPE || k == SDLK_RETURN || k == SDLK_KP_ENTER) &&
+            SDL_GetTicks() - g->scene_started > REMEMBER_HEADING_MS + 1500u) {
+            g->last_action_key = SDL_GetTicks();
+            set_scene(g, SCENE_TITLE);
+        }
         return;
     }
     if (g->scene == SCENE_FILM) {
@@ -15606,7 +15854,7 @@ static void handle_event(Game *g, SDL_Event *ev)
             } else {
                 set_scene(g, SCENE_BRIEFING);
             }
-        } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_TITLE);
+        } else if (g->scene == SCENE_EPILOGUE) set_scene(g, SCENE_REMEMBER);
         else if (g->scene == SCENE_SCRAPBOOK) set_scene(g, SCENE_MENU);
         break;
     case SDLK_LEFT:
@@ -15772,6 +16020,10 @@ int main(int argc, char **argv)
         if (argc > 2 && strcmp(argv[2], "WAKE") == 0)
             g.wingman_hit_today[0] = 1;
         set_scene(&g, SCENE_MESS);
+    } else if (argc > 1 && strcmp(argv[1], "REMEMBER") == 0) {
+        /* The roll at the very end. */
+        g.chapter = CHAPTER_COUNT - 1;
+        set_scene(&g, SCENE_REMEMBER);
     } else if (argc > 2 && strcmp(argv[1], "FILM") == 0) {
         /* One aerodrome film, 0..7, then the title. */
         g.film_next = SCENE_TITLE;
@@ -15967,6 +16219,7 @@ int main(int argc, char **argv)
             g.scene == SCENE_DAWN || g.scene == SCENE_MESS ||
             g.scene == SCENE_CONDUCT || g.scene == SCENE_COURT_MARTIAL ||
             g.scene == SCENE_CINEMA || g.scene == SCENE_FILM ||
+            g.scene == SCENE_REMEMBER ||
             g.redraw_static) {
             uint32_t drawn_from = SDL_GetTicks();
             if (SDL_MUSTLOCK(g.screen)) SDL_LockSurface(g.screen);
@@ -15986,6 +16239,7 @@ int main(int argc, char **argv)
             case SCENE_COURT_MARTIAL: draw_court_martial(&g); break;
             case SCENE_CINEMA: update_cinema(&g); draw_cinema(&g); break;
             case SCENE_SETTINGS: draw_settings(&g); break;
+            case SCENE_REMEMBER: draw_remember(&g); break;
             case SCENE_FILM:
                 update_film(&g);
                 if (g.scene == SCENE_FILM) draw_film(&g);
@@ -16026,6 +16280,7 @@ int main(int argc, char **argv)
     if (g.audio.record_data) SDL_free(g.audio.record_data);
     newsreel_free(&g.newsreel);
     film_free(&g);
+    remember_free(&g);
     if (g.joystick) SDL_JoystickClose(g.joystick);
     if (g.screen) SDL_FreeSurface(g.screen);
     if (g.fullscreen) {

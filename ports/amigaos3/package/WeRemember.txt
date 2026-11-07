@@ -1,0 +1,15 @@
+# We Remember
+#
+# The roll shown at the very end of Canvas Skies, over the old front in
+# the summer of 1919.  Each name here was given by someone who has given
+# to the Royal British Legion, in memory of someone of theirs who served.
+#
+# One name a line, as it should be shown, for example:
+#   Rank. Name, Unit, Year
+# Rank, unit and year may be left out.  Lines starting with # and blank
+# lines are passed over.  Plain letters show best; accents are shown
+# without them.
+#
+# To add a name, see "We Remember" in the README at
+# https://github.com/DalsinAI/canvasskies
+# To have a name taken off, ask in the same place.
