@@ -120,15 +120,19 @@ we never see or handle any money, and we do not ask how much you gave.
 
 **To add a name:** after giving, either
 [open a We Remember request](https://github.com/DalsinAI/canvasskies/issues/new?template=we-remember.yml)
-or email us at WE-REMEMBER-ADDRESS-TO-COME, with the name as it should be
-shown, for example `Rank. Name, Unit, Year` (rank, unit and year are
-optional). Names are added in the next release, in
+or, without a GitHub account, email
+[amigachrome@gmail.com](mailto:amigachrome@gmail.com?subject=We%20Remember)
+with the rank, name, unit and years of the person to be remembered (rank,
+unit and years are optional), saying that you have given to the Legion and
+that you consent to the name being shown in the game and this repository.
+Names are shown as `Rank. Name, Unit, Year`. Names are added in the next release, in
 [`ports/amigaos3/package/WeRemember.txt`](ports/amigaos3/package/WeRemember.txt),
 which the game reads from the `CanvasSkies` drawer. Only the name to be
 remembered is shown, never yours, and no email addresses or amounts are kept
 in the game or this repository.
 
-**To remove a name:** open an issue or email asking for it to be taken off,
+**To remove a name:** open an issue or email amigachrome@gmail.com asking
+for it to be taken off,
 and it will be removed in the next release.
 
 ## Licence

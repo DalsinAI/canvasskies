@@ -19,8 +19,13 @@ body:
         this repository. Only the name, rank, unit and years are shown. Your
         own name is not.
 
-        To have a name taken off later, open an issue asking for its removal
-        or reply on this one, and it will be removed in the next release.
+        No GitHub account? Email amigachrome@gmail.com instead, with the rank,
+        name, unit and years, and say that you have given to the Legion and
+        consent to the name being shown in the game and this repository.
+
+        To have a name taken off later, open an issue asking for its removal,
+        reply on this one, or email amigachrome@gmail.com, and it will be
+        removed in the next release.
   - type: input
     id: rank
     attributes:
