@@ -8,14 +8,37 @@
  * foot of each frame is its bottom edge.  The frames lean from one
  * side to the other: play them 0 1 2 3 2 1 for a to-and-fro. */
 static const short remember_poppy_frames[REMEMBER_POPPY_VARIANTS][REMEMBER_SWAY_FRAMES][4] = {
-    {{0, 0, 34, 40}, {35, 0, 34, 40}, {70, 0, 34, 40}, {105, 0, 34, 40}}, /* tall poppy */
-    {{0, 41, 34, 32}, {35, 41, 34, 32}, {70, 41, 34, 32}, {105, 41, 34, 32}}, /* poppy pair */
-    {{0, 74, 30, 28}, {31, 74, 30, 28}, {62, 74, 30, 28}, {93, 74, 30, 28}}, /* poppy and bud */
-    {{0, 103, 22, 20}, {23, 103, 22, 20}, {46, 103, 22, 20}, {69, 103, 22, 20}}, /* small poppy */
-    {{0, 124, 32, 36}, {33, 124, 32, 36}, {66, 124, 32, 36}, {99, 124, 32, 36}}, /* grass tuft */
-    {{0, 161, 26, 18}, {27, 161, 26, 18}, {54, 161, 26, 18}, {81, 161, 26, 18}}, /* low tuft */
+    {{0, 0, 40, 48}, {41, 0, 40, 48}, {82, 0, 40, 48}, {123, 0, 40, 48}}, /* tall poppy */
+    {{0, 49, 40, 40}, {41, 49, 40, 40}, {82, 49, 40, 40}, {123, 49, 40, 40}}, /* poppy pair */
+    {{0, 90, 34, 36}, {35, 90, 34, 36}, {70, 90, 34, 36}, {105, 90, 34, 36}}, /* poppy and bud */
+    {{0, 127, 30, 32}, {31, 127, 30, 32}, {62, 127, 30, 32}, {93, 127, 30, 32}}, /* seed head and poppy */
+    {{0, 160, 30, 30}, {31, 160, 30, 30}, {62, 160, 30, 30}, {93, 160, 30, 30}}, /* daisy and cornflower */
+    {{0, 191, 34, 44}, {35, 191, 34, 44}, {70, 191, 34, 44}, {105, 191, 34, 44}}, /* grass in seed */
 };
 #define REMEMBER_FIELD_QUIET_TOP 12    /* the calm band for lettering */
 #define REMEMBER_FIELD_QUIET_BOTTOM 118
+
+#define REMEMBER_LAYERS 4
+/* sky, far, mid, near: width, top y on screen, height.  Slide them at
+ * about 0.15, 0.35, 0.6 and 1.0 of the near layer's speed. */
+static const short remember_layer_info[REMEMBER_LAYERS][3] = {
+    {1000, 0, 400}, /* sky */
+    {1300, 166, 64}, /* far */
+    {1600, 186, 214}, /* mid */
+    {2000, 270, 130}, /* near */
+};
+
+#define REMEMBER_LIFE_SPRITES 5   /* 0 small tortoiseshell butterfly, 1 cabbage white butterfly, 2 common blue butterfly, 3 lark, 4 thistledown */
+#define REMEMBER_LIFE_FRAMES 3
+static const unsigned char remember_life_frame_count[REMEMBER_LIFE_SPRITES] = {3, 3, 3, 2, 2};
+/* x, y, w, h in remember-life.bmp; unused frames all zero.  The
+ * butterflies' frames run open, half, closed: play 0 1 2 1. */
+static const short remember_life_frames[REMEMBER_LIFE_SPRITES][REMEMBER_LIFE_FRAMES][4] = {
+    {{0, 0, 12, 12}, {13, 0, 12, 12}, {26, 0, 12, 12}}, /* small tortoiseshell butterfly */
+    {{0, 13, 11, 11}, {12, 13, 11, 11}, {24, 13, 11, 11}}, /* cabbage white butterfly */
+    {{0, 25, 9, 9}, {10, 25, 9, 9}, {20, 25, 9, 9}}, /* common blue butterfly */
+    {{0, 35, 5, 3}, {6, 35, 5, 3}, {0, 0, 0, 0}}, /* lark, high up */
+    {{0, 39, 8, 8}, {9, 39, 8, 8}, {0, 0, 0, 0}}, /* thistledown */
+};
 
 #endif
