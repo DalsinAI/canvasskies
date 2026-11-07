@@ -11241,6 +11241,29 @@ static void measure_ground_tint(Game *g)
     if (ground) SDL_FreeSurface(ground);
 }
 
+/* The top-down painting does not tile from its foot back to its head:
+ * the long sorties scroll past the join, where fields and craters were cut
+ * off along a straight line.  Its last rows are faded into its first, so
+ * it wraps without a seam. */
+static void blend_vertical_seam(SDL_Surface *s)
+{
+    const int band = 128;
+    int y, x;
+    if (!s || s->h < band * 4 || s->format->BytesPerPixel != sizeof(pix_t))
+        return;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    /* The foot fades into the head seen in a mirror, so that its last row
+     * is the first row again and the wrap carries straight on. */
+    for (y = 0; y < band; ++y) {
+        pix_t *row = PIX_ROW(s, s->h - band + y);
+        const pix_t *head = PIX_ROW(s, band - 1 - y);
+        int weight = (y + 1) * 32 / band;
+        for (x = 0; x < s->w; ++x)
+            row[x] = pix_mix(row[x], head[x], weight);
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
 /* The cockpit view's ground: the top-down painting and its mipmaps, so
  * the fields far off are filtered rather than sparkling. */
 static void build_ground_mips(Game *g, SDL_Surface *src)
@@ -14236,6 +14259,7 @@ static void load_asset_groups(Game *g, unsigned want)
             SDL_SetColorKey(*slot, SDL_TRUE, 255);
     }
     if (fresh & AG_SKY) prepare_sky(g);
+    if (fresh & AG_TOPDOWN) blend_vertical_seam(g->topdown_battlefield);
     if (fresh & AG_COCKPIT) build_cockpit_composite(g);
     if (fresh & AG_GROUND) {
         /* Built from the top-down painting, which need not stay. */
@@ -14243,6 +14267,7 @@ static void load_asset_groups(Game *g, unsigned want)
         if (!ground) {
             ground = SDL_LoadBMP(CANVAS_TOPDOWN_BATTLEFIELD_BMP);
             convert_to_screen(g, &ground);
+            blend_vertical_seam(ground);
         }
         build_ground_mips(g, ground);
         if (ground != g->topdown_battlefield) SDL_FreeSurface(ground);
