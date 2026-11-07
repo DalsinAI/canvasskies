@@ -121,13 +121,24 @@ scout sprites), the ground crew, the weather and the light. No photograph,
 film still, outside texture or reference image was used or is kept in the
 repository.
 
+Their soundtracks are synthesised by `ports/amigaos3/films/sound.py` from
+the same account of each film (see `MUSIC_LICENSE.md`); no recording or
+sample is used. The shipped file has SHA-256
+`33f74c8a4fd18e83727442b0c3416ec9e04e7ee8e723460a28001db258aebc44`. It is
+rebuilt, from `ports/amigaos3`, with:
+
+    python3 films/airfield.py out/master
+    python3 films/sound.py out/sound
+    python3 make_airfield_films.py out/master/frames out/sound
+
+
 ## We Remember
 
 The roll call's picture of the old front in the summer of 1919 is original
 art for this game, painted on the host by `ports/amigaos3/make_remember.py`.
 It comes in four layers that the game slides at different speeds
 (`remember-sky.bmp`, `remember-far.bmp`, `remember-mid.bmp`,
-`remember-near.bmp`, with `remember-field.bmp` the same flattened into one),
+`remember-near.bmp`),
 with swaying plants (`remember-poppies.bmp`) and butterflies, a lark and
 thistledown (`remember-life.bmp`). The land is a height field lit by a low
 evening sun with its shadows traced across it; the clouds are built from

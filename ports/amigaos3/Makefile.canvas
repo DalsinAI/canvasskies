@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_remember.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_career.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h src/modern/canvas_remember.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -106,19 +106,29 @@ clean:
 # game loads at run time.  Source PNGs and unused experiments stay out.
 PACKAGE := build-canvas-skies/package/CanvasSkies
 RUNTIME_ASSETS := $(sort $(patsubst PROGDIR:%,%,$(filter PROGDIR:%,$(subst \", ,$(subst =, ,$(CFLAGS))))))
+# The ReadMe, the licences and provenance, and every document and picture
+# the ReadMe links to, each at the same path in the drawer as in the
+# repository so the ReadMe's links work there too.
+PACKAGE_DOCS := README.md LICENSE \
+	CANVAS_SKIES.md CANVAS_SKIES_DELIVERY_VISION.md CANVAS_SKIES_SOURCES.md \
+	assets/canvas-skies/MUSIC_LICENSE.md assets/canvas-skies/ART_PROVENANCE.md \
+	docs/ALPHA_RELEASE_NOTES.md docs/CANVAS_SKIES_STORY_AND_DESIGN.md \
+	docs/CANVAS_SKIES_STATUS.md \
+	$(sort $(wildcard docs/screenshots/*.png))
 
 .PHONY: package
 package: $(OUT)
+	python3 ports/amigaos3/check_campaign.py
 	rm -rf $(PACKAGE)
 	mkdir -p $(PACKAGE)/assets/canvas-skies
 	cp $(OUT) $(PACKAGE)/CanvasSkies
 	cp "ports/amigaos3/package/Start Canvas Skies" "ports/amigaos3/package/Start Canvas Skies.info" \
-	   ports/amigaos3/package/WeRemember.txt $(PACKAGE)/
+	   ports/amigaos3/package/ReadMe ports/amigaos3/package/WeRemember.txt $(PACKAGE)/
 	cp ports/amigaos3/package/Drawer.info build-canvas-skies/package/CanvasSkies.info
 	cp $(RUNTIME_ASSETS) $(PACKAGE)/assets/canvas-skies/
-	cp LICENSE README.md assets/canvas-skies/MUSIC_LICENSE.md \
-	   assets/canvas-skies/ART_PROVENANCE.md \
-	   $(PACKAGE)/
+	for f in $(PACKAGE_DOCS); do \
+	    mkdir -p "$(PACKAGE)/$$(dirname $$f)" && cp "$$f" "$(PACKAGE)/$$f" || exit 1; done
 	mkdir -p $(PACKAGE)/Fonts-Licences
 	for f in assets/fonts/*/; do \
 	    cp $$f/*.txt "$(PACKAGE)/Fonts-Licences/$$(basename $$f).txt"; done
+	python3 ports/amigaos3/check_package_links.py $(PACKAGE)

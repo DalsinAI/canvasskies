@@ -153,21 +153,39 @@ chapter's year; the epilogue plays Holst. Each comes from the collection
 *British Military Music 1912-1927* (gramophone transfers, MP3, album tag
 "Gramophone Marches 1912-1927"; archive SHA-256
 `4d6c90419073d317d9445c2db8a0f04beea7057b77607ad368a095495465f4dc`). The
-compositions and these recordings are in the public domain.
+compositions are in the public domain. **The recordings' provenance is not
+established, and they must not go into a public release as they stand:**
+no archive, item page, source URL or licence for the collection was ever
+recorded, the performers and years come only from the MP3 tags, and the
+three Guards bands' records of these pieces held by the Internet Archive
+are on the Boosey & Hawkes label, which dates from 1930 or later. The
+details are in `assets/canvas-skies/MUSIC_LICENSE.md`.
 
 For the Amiga build each MP3 was decoded to mono, signed 16-bit PCM at
 11.025 kHz. The needle run-in and run-out were cut where the music begins
 and ends, with a 0.3 s fade-in and a 1.5 s fade-out at the loop point. The
 surface noise is kept.
 
-| Game file | Title | Composer | Performer (tag) | Chapters | Source MP3 SHA-256 |
-|---|---|---|---|---|---|
-| `tipperary-gramophone.wav` | It's a Long, Long Way to Tipperary | Jack Judge and Harry Williams, 1912 | Prince's Band (1914) | 1914 | `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6` |
-| `home-fires-gramophone.wav` | Keep the Home Fires Burning | Ivor Novello, words Lena Guilbert Ford, 1914 | Frederick Wheeler (1915) | 1915 | `b9acb6e5db8df31bf1dbf53bfee201658e27a26e7be99e852e7235b92e846a3a` |
-| `kit-bag-gramophone.wav` | Pack Up Your Troubles in Your Old Kit-Bag | Felix Powell, words George Asaf, 1915 | Knickerbocker Quartet (1916) | 1916 | `6d91a03eea8ea284da7b3bf55581919c043a11a2ea80866d42524bed2ad6a285` |
-| `holyrood-gramophone.wav` | Holyrood | Kenneth J. Alford, 1912 | Band of the Welsh Guards | April 1917, March 1918 | `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f` |
-| `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` |
-| `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` |
+| Game file | Title | Composer | Performer (tag) | Chapters | Source MP3 SHA-256 | Shipped WAV SHA-256 |
+|---|---|---|---|---|---|---|
+| `tipperary-gramophone.wav` | It's a Long, Long Way to Tipperary | Jack Judge and Harry Williams, 1912 | Prince's Band (1914) | 1914 | `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6` | `33829dcb7c7ac7c4451295eb9860eb448e45667116102f2c34b493acac079bd1` |
+| `home-fires-gramophone.wav` | Keep the Home Fires Burning | Ivor Novello, words Lena Guilbert Ford, 1914 | Frederick Wheeler (1915) | 1915 | `b9acb6e5db8df31bf1dbf53bfee201658e27a26e7be99e852e7235b92e846a3a` | `fa6aee87872acb4766896cf3b6b9e9b530f02e4fb8545866784716313618c163` |
+| `kit-bag-gramophone.wav` | Pack Up Your Troubles in Your Old Kit-Bag | Felix Powell, words George Asaf, 1915 | Knickerbocker Quartet (1916) | 1916 | `6d91a03eea8ea284da7b3bf55581919c043a11a2ea80866d42524bed2ad6a285` | `ac7845c0be6f6b0a1d9a73e65b3d35782a2855419a3848f2f2e67d66bcfdd35d` |
+| `holyrood-gramophone.wav` | Holyrood | Kenneth J. Alford, 1912 | Band of the Welsh Guards | April 1917, March 1918 | `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f` | `33be8c56189f748254a57e0b8fa6c424baf112ff48696c4b3348c14ce4518d92` |
+| `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` | `aa48b70b2b8254bf287143217e4e3d329c098464490010895c18a9d3c0650295` |
+| `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` | `41192fe8077b5596e10208d766f9839a7b4c9f29555661983909722a40d91638` |
+
+## Other music in the game
+
+| Game file | What it is | Source | Shipped SHA-256 |
+|---|---|---|---|
+| `colonel-bogey-gramophone.wav` | Kenneth J. Alford's *Colonel Bogey March* (1914, public domain), played by our own synthesised band on a synthesised gramophone | `ports/amigaos3/make_colonel_bogey.py`, which rebuilds the file exactly | `06b6b3808c32c5e516f441cc48befdd5f709d7ca805ad1370bcb2f457764d223` |
+| `cinema-piano.wav` | The picture-house pianist, composed for the game | `ports/amigaos3/make_cinema_piano.py`, which rebuilds the file exactly | `64e500e57e1b4a76893de0b9fe94cbab881e9a2d48d38d31b2570e8bd5523994` |
+| `washington-post-gramophone.wav` | Sousa's *The Washington Post* (1889), our FluidR3_GM render of the Mutopia Project's MIDI (piece 1321, CC BY-SA 3.0, MIDI SHA-256 `d5b3295e89cea010736b57e8b11962d87ed1bfdb553a841acf84e28fc4552dfa`) | <https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1321> | `ef6ec4b0b7571fc6bbea3c7e92a4c929ba3303a3edc1b6851d987d1d7fb354f8` |
+| `amazing-grace-bagpipes.wav` | Band of the U.S. Air Force Reserve, public domain (US government work); recording date not given, a modern recording | <https://archive.org/details/AmazingGraceBagpipes>, `amazing_grace.mp3`, SHA-256 `17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0` | `523d80020a8f1291eafa969fa8283ac13d4dcae49c4d6cb1610db7f653c8bbb7` |
+
+The full record for each, and how each is cleared, is in
+`assets/canvas-skies/MUSIC_LICENSE.md`.
 
 ## Period newspaper copy
 
@@ -270,8 +288,10 @@ notices are written for the game.
 ## The picture house's newsreels
 
 The reels shown in the picture house (`newsreels.bin`, made by
-`ports/amigaos3/make_cinema_reels.py`) are five-second cuts of real film of
-1914-1919, each public domain or released under CC0. Australia Prepared
+`ports/amigaos3/make_cinema_reels.py`, SHA-256
+`2bb6e03f9016a4d4980cafef26ba4a066e37dac536cfe32111482e458908bd0f`) are
+five-second cuts of real film shot in 1914-1918, each tagged public domain
+or CC0 where it is hosted. Australia Prepared
 (1916) was shortlisted but left out because its scan carries the archive's
 logo and timecode. The pianist's score (`cinema-piano.wav`) is composed
 for the game by `ports/amigaos3/make_cinema_piano.py`.
@@ -314,3 +334,27 @@ With thanks to the US National Archives and Records Administration, the
 Musée départemental Albert-Kahn, the Internet Archive and Wikimedia Commons.
 The sha256 of each source file is recorded with the cuts in
 `ports/amigaos3/newsreel-sources.json`.
+
+### Rights records for the films (checked 7 November 2026)
+
+| Film | Made by, date | Catalogue record | Rights as recorded there |
+|---|---|---|---|
+| German War Film, 1914-1918 | German footage of 1914-1918, compiled by the US Army Signal Corps | NARA 24610, 111-H-1102 <https://catalog.archives.gov/id/24610> | NARA: "Copyright: Restricted - Possibly". Commons: PD US Government |
+| The Battle of the Somme (1916) | Geoffrey Malins and John McDowell, 1916 | <https://commons.wikimedia.org/wiki/File:The_Battle_of_the_Somme_(1916).webm> | Commons: PD-1923 and PD-UKGov (expired Crown copyright) |
+| Kitchener's Great Army in the Battle of the Somme (1916) | Geoffrey Malins, released 21 August 1916 | <https://archive.org/details/kitcheners-great-army-in-the-battle-of-the-somme-1916> | Commons: PD-1923 (published before 1931) |
+| BL 9.2 inch howitzer firing | US Army Signal Corps, from *America Goes Over* (1918) | <https://archive.org/details/AmericaG1918_2> | Commons: PD US Government, CC Public Domain Mark |
+| Third Aviation Instruction Center (France, 1917-1918) | War Department, Office of the Chief Signal Officer; footage 1917-1918, compiled 1936 | NARA 24982, 111-H-1481 <https://catalog.archives.gov/id/24982> | NARA: "Copyright: Restricted - Possibly" |
+| Flashes of Action: Actualities of the World War | Office of the Chief Signal Officer; footage 1917-1918, compiled about 1921 | NARA 35458, 111-M-50 <https://catalog.archives.gov/id/35458> | NARA: "Undetermined". Commons: PD US Government |
+| Paris manifeste sa joie le jour de l'Armistice | Lucien Le Saint, 11 November 1918, inventory AI90875 | <https://collections.albert-kahn.hauts-de-seine.fr/document/paris-manifeste-sa-joie-le-jour-de-l-armistice/617aa7e0cf8b8968b338c393> | CC0 1.0 |
+| The First Air Depot (France, 1918) | War Department, Office of the Chief Signal Officer; footage 1918, compiled 1936 | NARA 24981, 111-H-1480 <https://catalog.archives.gov/id/24981> | NARA: "Copyright: Restricted - Possibly" |
+
+**Release status of `newsreels.bin`: kept; rights confirmation for four
+films being sought by the project owner.** Four films are clear: the
+two Malins films, the howitzer and the Albert-Kahn film. The other four are
+US Army Signal Corps films, which would be US government works, and their
+footage was shot before 1931. But the National Archives' own catalogue does
+not clear them: three are marked "Restricted - Possibly" and one
+"Undetermined". The 111-H compilations sometimes include outside footage.
+Ten of the sixteen reels come from these four films. They should be cleared
+with the National Archives, or those reels recut from the four clear films,
+before a public release.
