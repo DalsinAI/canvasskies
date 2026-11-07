@@ -322,10 +322,15 @@ These are not optional polish if the game is to become an RC.
   this has not received a final signed-off listening test on the real instance.
 - Mission-complete music still needs a better period-appropriate cue and a
   selection matched to drama.
-- `colonel-bogey-gramophone.wav` is used by the build, but its exact recording
-  provenance and redistribution licence are not described in
-  `MUSIC_LICENSE.md`. Do not release it until that is resolved or replace it
-  with a project-made render from a documented public-domain/compatible source.
+- `colonel-bogey-gramophone.wav` is now our own synthesised band and
+  gramophone (`ports/amigaos3/make_colonel_bogey.py`); the untraceable
+  recording it replaced is described in `MUSIC_LICENSE.md`. Give the new cue
+  a listening test on the real instance, including its loop.
+- Release blockers recorded in `assets/canvas-skies/MUSIC_LICENSE.md`: the six
+  period gramophone records have no traceable source or licence, the
+  Amazing Grace recording is modern and undated, and four of the eight
+  newsreel films carry a "Restricted - Possibly" or "Undetermined" rights
+  status in the National Archives' catalogue.
 - Joystick/pad behaviour and actual speaker output need qualification on the
   intended Amiga instance.
 
