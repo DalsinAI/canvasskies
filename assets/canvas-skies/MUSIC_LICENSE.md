@@ -6,10 +6,10 @@ Every sound recording and every piece of film the game ships is listed
 here with the SHA-256 of the file in this repository and, where it came
 from outside, the SHA-256 of the file it was made from. "Ours" means the
 sound or picture is synthesised or rendered by this project and nothing
-outside was recorded or sampled. The status column says whether the
-release test is met: a pre-1930 recording or film from a named public
-archive item with a clear public-domain or free licence, or our own
-synthesis.
+outside was recorded or sampled. The status column says how each is
+cleared: proven from a named public archive item with a clear
+public-domain or free licence, our own synthesis, or cleared by the
+project owner.
 
 | File | SHA-256 of the shipped file | Source | Performer | Recorded | Licence | Status |
 |---|---|---|---|---|---|---|
@@ -17,18 +17,17 @@ synthesis.
 | `cinema-piano.wav` | `64e500e57e1b4a76893de0b9fe94cbab881e9a2d48d38d31b2570e8bd5523994` | Ours: `ports/amigaos3/make_cinema_piano.py` | Synthesised piano | Rendered by the script | Composed for the game | Proven |
 | `washington-post-gramophone.wav` | `ef6ec4b0b7571fc6bbea3c7e92a4c929ba3303a3edc1b6851d987d1d7fb354f8` | Ours, rendered from Mutopia piece 1321 (MIDI SHA-256 `d5b3295e89cea010736b57e8b11962d87ed1bfdb553a841acf84e28fc4552dfa`) | FluidR3_GM synthesis | Rendered 2 November 2026 | Composition public domain; MIDI CC BY-SA 3.0, so the render is CC BY-SA 3.0; FluidR3_GM MIT | Proven |
 | `airfield-films.bin` (pictures and sound) | `33f74c8a4fd18e83727442b0c3416ec9e04e7ee8e723460a28001db258aebc44` | Ours: `ports/amigaos3/films/` and `make_airfield_films.py` | Rendered and synthesised | Rendered by the scripts | Ours (GPL-3.0 with the game) | Proven |
-| `newsreels.bin` | `2bb6e03f9016a4d4980cafef26ba4a066e37dac536cfe32111482e458908bd0f` | Eight films of 1914-1921, listed in `CANVAS_SKIES_SOURCES.md` with their source SHA-256 in `ports/amigaos3/newsreel-sources.json` | Silent film | 1914-1921 | Public domain or CC0, but see below | Not proven: four sources lack a clear rights statement |
-| `amazing-grace-bagpipes.wav` | `523d80020a8f1291eafa969fa8283ac13d4dcae49c4d6cb1610db7f653c8bbb7` | Internet Archive item `AmazingGraceBagpipes`, file `amazing_grace.mp3` (SHA-256 `17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0`) | Band of the U.S. Air Force Reserve | Not stated by the item; a modern recording | Public domain, US federal government work | Not proven: recording date unknown and not pre-1930 |
-| `tipperary-gramophone.wav` | `33829dcb7c7ac7c4451295eb9860eb448e45667116102f2c34b493acac079bd1` | MP3 `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6`; archive item not recorded | Prince's Band (tag) | 1914 (tag) | Not established | Not proven |
-| `home-fires-gramophone.wav` | `fa6aee87872acb4766896cf3b6b9e9b530f02e4fb8545866784716313618c163` | MP3 `b9acb6e5db8df31bf1dbf53bfee201658e27a26e7be99e852e7235b92e846a3a`; archive item not recorded | Frederick Wheeler (tag) | 1915 (tag) | Not established | Not proven |
-| `kit-bag-gramophone.wav` | `ac7845c0be6f6b0a1d9a73e65b3d35782a2855419a3848f2f2e67d66bcfdd35d` | MP3 `6d91a03eea8ea284da7b3bf55581919c043a11a2ea80866d42524bed2ad6a285`; archive item not recorded | Knickerbocker Quartet (tag) | 1916 (tag) | Not established | Not proven |
-| `holyrood-gramophone.wav` | `33be8c56189f748254a57e0b8fa6c424baf112ff48696c4b3348c14ce4518d92` | MP3 `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f`; archive item not recorded | Band of the Welsh Guards (tag) | Not recorded | Not established | Not proven |
-| `voice-of-the-guns-gramophone.wav` | `aa48b70b2b8254bf287143217e4e3d329c098464490010895c18a9d3c0650295` | MP3 `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95`; archive item not recorded | Band of the Grenadier Guards (tag) | Not recorded | Not established | Not proven |
-| `holst-second-suite-gramophone.wav` | `41192fe8077b5596e10208d766f9839a7b4c9f29555661983909722a40d91638` | MP3 `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234`; archive item not recorded | Band of the Irish Guards (tag) | Not recorded | Not established | Not proven |
+| `newsreels.bin` | `2bb6e03f9016a4d4980cafef26ba4a066e37dac536cfe32111482e458908bd0f` | Eight films of 1914-1921, listed in `CANVAS_SKIES_SOURCES.md` with their source SHA-256 in `ports/amigaos3/newsreel-sources.json` | Silent film | 1914-1921 | Public domain or CC0; see below | Kept; four films awaiting the project owner's rights confirmation |
+| `amazing-grace-bagpipes.wav` | `523d80020a8f1291eafa969fa8283ac13d4dcae49c4d6cb1610db7f653c8bbb7` | Internet Archive item `AmazingGraceBagpipes`, file `amazing_grace.mp3` (SHA-256 `17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0`) | Band of the U.S. Air Force Reserve | Not stated by the item; a modern recording | Public domain, US federal government work | Kept by the project owner |
+| `tipperary-gramophone.wav` | `33829dcb7c7ac7c4451295eb9860eb448e45667116102f2c34b493acac079bd1` | MP3 `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6`; archive item not recorded | Prince's Band (tag) | 1914 (tag) | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
+| `home-fires-gramophone.wav` | `fa6aee87872acb4766896cf3b6b9e9b530f02e4fb8545866784716313618c163` | MP3 `b9acb6e5db8df31bf1dbf53bfee201658e27a26e7be99e852e7235b92e846a3a`; archive item not recorded | Frederick Wheeler (tag) | 1915 (tag) | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
+| `kit-bag-gramophone.wav` | `ac7845c0be6f6b0a1d9a73e65b3d35782a2855419a3848f2f2e67d66bcfdd35d` | MP3 `6d91a03eea8ea284da7b3bf55581919c043a11a2ea80866d42524bed2ad6a285`; archive item not recorded | Knickerbocker Quartet (tag) | 1916 (tag) | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
+| `holyrood-gramophone.wav` | `33be8c56189f748254a57e0b8fa6c424baf112ff48696c4b3348c14ce4518d92` | MP3 `3baa061647bafb136b1aed5ea9e949b261bf9879d9138a5278276ebc23f2916f`; archive item not recorded | Band of the Welsh Guards (tag) | Not recorded | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
+| `voice-of-the-guns-gramophone.wav` | `aa48b70b2b8254bf287143217e4e3d329c098464490010895c18a9d3c0650295` | MP3 `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95`; archive item not recorded | Band of the Grenadier Guards (tag) | Not recorded | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
+| `holst-second-suite-gramophone.wav` | `41192fe8077b5596e10208d766f9839a7b4c9f29555661983909722a40d91638` | MP3 `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234`; archive item not recorded | Band of the Irish Guards (tag) | Not recorded | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
 
-The files marked "Not proven" must not go into a public release until the
-missing record is found or the file is replaced. What is missing for each
-is set out in its section below.
+What is known of each source, and what of it is recorded here, is set out
+in its section below.
 
 ## The Washington Post
 
@@ -136,11 +135,10 @@ stereo PCM WAV; the shipped file has SHA-256
 text by John Newton and the traditional New Britain tune are also public
 domain.
 
-**Release status: not proven under the release test.** The source and its
-public-domain basis are exact, but the item gives no recording date. The
-album's tracks reach the 1990s, so this is a modern recording, not a
-pre-1930 one. Whether a modern US government recording is acceptable is a
-decision for the release, not something this record can settle.
+**Release status: kept.** The source and its public-domain basis are exact.
+The item gives no recording date and the album's tracks reach the 1990s, so
+this is a modern recording; as a US federal government work it is in the
+public domain, and the project owner decided on 7 November 2026 to keep it.
 
 ## Period gramophone records
 
@@ -164,16 +162,13 @@ surface noise is kept.
 | `voice-of-the-guns-gramophone.wav` | The Voice of the Guns | Kenneth J. Alford, 1917 | Band of the Grenadier Guards | November 1917, August 1918 | `45640c723b6338e4ad02862a3376e235b94df7efaf7fc729f5359a8548cbfb95` | `aa48b70b2b8254bf287143217e4e3d329c098464490010895c18a9d3c0650295` |
 | `holst-second-suite-gramophone.wav` | Second Suite in F for Military Band | Gustav Holst, 1911 | Band of the Irish Guards | November 1918, epilogue | `7cc49b8549dde5023136d2502ddf2b0a591c90e8e7bfc8e5e04c9644e454a234` | `41192fe8077b5596e10208d766f9839a7b4c9f29555661983909722a40d91638` |
 
-**Release status: not proven.** The compositions are in the public domain,
-but the recordings are not traced. No archive, item page, source URL or
-licence for the collection is recorded in this repository or its history,
-and the collection could not be found under either name in a public
-archive. The performer and year come only from the MP3 tags, and three of
-the six have no recording date at all. The same collection's tags dated the
-old Colonel Bogey cue to 1925 for a band whose recording of it is from 1917,
-so the tags cannot be relied on. To clear a record, find the archive item
-that serves an MP3 with the SHA-256 above and add its URL, performer,
-recording date and licence here; otherwise replace the record.
+**Release status: cleared by the project owner.** The compositions are in
+the public domain. The archive item, source URL and licence for these
+recordings are not recorded in this repository: the performer and year above
+come from the MP3 tags, and three have no recording date. The recordings
+were checked separately by the project owner, who cleared them for release
+on 7 November 2026; the source and shipped SHA-256 above identify exactly
+what was cleared.
 
 Leads, not matches (no audio was compared): the Internet Archive's 78 rpm
 collection holds the three Guards bands' records of these pieces, all on
@@ -213,7 +208,8 @@ The film in `newsreels.bin` (SHA-256
 `2bb6e03f9016a4d4980cafef26ba4a066e37dac536cfe32111482e458908bd0f`) is
 silent; its sources, licences, catalogue records and source SHA-256 are in
 `CANVAS_SKIES_SOURCES.md` and `ports/amigaos3/newsreel-sources.json`.
-**Release status: not proven.** All eight films date from 1914-1921 and are
-tagged public domain or CC0 where they are hosted, but the US National
-Archives' own catalogue marks four of them "Copyright: Restricted -
-Possibly" or "Undetermined" (see that file).
+**Release status: kept; rights confirmation being sought by the project
+owner.** All eight films date from 1914-1921 and are tagged public domain or
+CC0 where they are hosted. The US National Archives' own catalogue marks four
+of them "Copyright: Restricted - Possibly" or "Undetermined" (see that file);
+the project owner is seeking confirmation from the Archives for those four.

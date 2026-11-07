@@ -184,7 +184,7 @@ surface noise is kept.
 | `washington-post-gramophone.wav` | Sousa's *The Washington Post* (1889), our FluidR3_GM render of the Mutopia Project's MIDI (piece 1321, CC BY-SA 3.0, MIDI SHA-256 `d5b3295e89cea010736b57e8b11962d87ed1bfdb553a841acf84e28fc4552dfa`) | <https://www.mutopiaproject.org/cgibin/piece-info.cgi?id=1321> | `ef6ec4b0b7571fc6bbea3c7e92a4c929ba3303a3edc1b6851d987d1d7fb354f8` |
 | `amazing-grace-bagpipes.wav` | Band of the U.S. Air Force Reserve, public domain (US government work); recording date not given, a modern recording | <https://archive.org/details/AmazingGraceBagpipes>, `amazing_grace.mp3`, SHA-256 `17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0` | `523d80020a8f1291eafa969fa8283ac13d4dcae49c4d6cb1610db7f653c8bbb7` |
 
-The full record for each, and which of them meet the release test, is in
+The full record for each, and how each is cleared, is in
 `assets/canvas-skies/MUSIC_LICENSE.md`.
 
 ## Period newspaper copy
@@ -348,7 +348,8 @@ The sha256 of each source file is recorded with the cuts in
 | Paris manifeste sa joie le jour de l'Armistice | Lucien Le Saint, 11 November 1918, inventory AI90875 | <https://collections.albert-kahn.hauts-de-seine.fr/document/paris-manifeste-sa-joie-le-jour-de-l-armistice/617aa7e0cf8b8968b338c393> | CC0 1.0 |
 | The First Air Depot (France, 1918) | War Department, Office of the Chief Signal Officer; footage 1918, compiled 1936 | NARA 24981, 111-H-1480 <https://catalog.archives.gov/id/24981> | NARA: "Copyright: Restricted - Possibly" |
 
-**Release status of `newsreels.bin`: not proven.** Four films are clear: the
+**Release status of `newsreels.bin`: kept; rights confirmation for four
+films being sought by the project owner.** Four films are clear: the
 two Malins films, the howitzer and the Albert-Kahn film. The other four are
 US Army Signal Corps films, which would be US government works, and their
 footage was shot before 1931. But the National Archives' own catalogue does

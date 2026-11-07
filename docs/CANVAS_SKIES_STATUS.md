@@ -326,11 +326,12 @@ These are not optional polish if the game is to become an RC.
   gramophone (`ports/amigaos3/make_colonel_bogey.py`); the untraceable
   recording it replaced is described in `MUSIC_LICENSE.md`. Give the new cue
   a listening test on the real instance, including its loop.
-- Release blockers recorded in `assets/canvas-skies/MUSIC_LICENSE.md`: the six
-  period gramophone records have no traceable source or licence, the
-  Amazing Grace recording is modern and undated, and four of the eight
+- Provenance (`assets/canvas-skies/MUSIC_LICENSE.md`): the six period
+  gramophone records were cleared by the project owner, and the modern
+  Amazing Grace recording (US government work) is kept. Four of the eight
   newsreel films carry a "Restricted - Possibly" or "Undetermined" rights
-  status in the National Archives' catalogue.
+  status in the National Archives' catalogue; the project owner is seeking
+  the Archives' confirmation.
 - Joystick/pad behaviour and actual speaker output need qualification on the
   intended Amiga instance.
 
