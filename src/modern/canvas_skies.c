@@ -6891,7 +6891,7 @@ static void update_perspective_sortie(Game *g, float dt,
         if (enemy->fled) {
             /* Hurt, he has had enough: opens the range and goes home
              * trailing smoke, jinking as he goes. */
-            enemy->x += (personal ? 950.0f : 560.0f) * dt;
+            enemy->x += (personal || g->kills >= 4 ? 950.0f : 560.0f) * dt;
             enemy->phase += dt * 1.6f;
         }
         ++active_enemies;
@@ -6903,8 +6903,13 @@ static void update_perspective_sortie(Game *g, float dt,
             if (abs(aim_x - sx) < size / 2 + 10 &&
                 abs(aim_y - sy) < size / 3 + 9) {
                 --enemy->hp;
+                /* They grow wary as their losses mount: with none of
+                 * them down yet an attacker presses on until he is badly
+                 * hurt; once several have fallen the next turns away at
+                 * the first serious hits, and goes faster. */
                 if (gunner && enemy->hp > 0 && !enemy->fled &&
-                    enemy->hp * 5 <= enemy->max_hp * 3) {
+                    enemy->hp * 10 <= enemy->max_hp *
+                    (g->kills < 2 ? 4 : g->kills < 4 ? 6 : 9)) {
                     enemy->fled = 1;
                     g->score += 50;
                 }
@@ -7973,7 +7978,7 @@ static void gunner_place_enemy(Game *g, int i, float depth)
     e->phase = random_unit(g) * 6.0f;
     /* Built to take punishment: it takes a long burst to bring one down,
      * and half of one sends him home. */
-    e->hp = mission_armed(g) ? 12 + g->chapter / 2 : 3;
+    e->hp = mission_armed(g) ? 10 + g->chapter / 2 : 3;
     e->max_hp = e->hp;
     e->x = 0.0f;
     e->x = depth - enemy_depth_3d(g, e, i);
