@@ -1,0 +1,58 @@
+# Checks for every pull request, on our own build machine only.
+# There are no GitHub-hosted runners here, by rule: runs-on names the
+# self-hosted runner registered for this repository on amigachromebuild.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: [self-hosted, amigachromebuild, canvasskies]
+    timeout-minutes: 30
+    env:
+      AMIGA_STOVE: ${{ vars.AMIGA_STOVE || '/home/da1ek/CradleLab/stoves/os32-gcc16-canvas' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Campaign mix (4 side-on, 4 top-down, 2 dogfight, 2 rear-seat)
+        run: |
+          if [ -f ports/amigaos3/check_campaign.py ]; then
+            python3 ports/amigaos3/check_campaign.py
+          else
+            echo "check_campaign.py not on this branch yet"
+          fi
+
+      - name: Host tests
+        run: |
+          if [ -f tests/host/Makefile ]; then
+            make -C tests/host check
+          else
+            echo "no host tests on this branch yet"
+          fi
+
+      - name: Amiga cross-build and package
+        run: |
+          test -x "$AMIGA_STOVE/prefix/bin/m68k-amigaos-gcc" || {
+            echo "The os32-gcc16 stove is not at $AMIGA_STOVE"; exit 1; }
+          make -f ports/amigaos3/Makefile.canvas AMIGA_STOVE="$AMIGA_STOVE" clean
+          set -o pipefail
+          make -f ports/amigaos3/Makefile.canvas AMIGA_STOVE="$AMIGA_STOVE" \
+               package 2>&1 | tee build.log
+          # The build is kept free of warnings; one fails the check.
+          ! grep -E 'warning:' build.log
+
+      - name: Package links
+        run: |
+          if [ -f ports/amigaos3/check_package_links.py ]; then
+            python3 ports/amigaos3/check_package_links.py build-canvas-skies/package
+          else
+            echo "check_package_links.py not on this branch yet"
+          fi
