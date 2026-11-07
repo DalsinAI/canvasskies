@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "canvas_campaign.h"
+#include "canvas_career.h"
 #include "canvas_news.h"
 #include "canvas_fonts.h"
 #include "canvas_topdown_sprites.h"
@@ -871,6 +872,7 @@ typedef struct {
     int saved_chapter;
     int saved_mission;
     int saved_wingman_health[3];
+    int saved_grounded;
     /* Pilot's record: victories, decorations, rank and growing skills. */
     int victories, sorties, rank;
     /* Conduct, kept with the career: the squadron's morale, offences
@@ -1084,29 +1086,31 @@ static int enemies_hostile(const Game *g)
     return mission_armed(g) && !armistice_quiet(g);
 }
 
-/* Wingmen follow the written story rather than a damage simulation.
- * Gridpipe Thyne turns east and is lost in "Thyne's Last Turn" (Chapter 5,
- * Mission 9); from the next sortie onward his place stays empty. */
 /* QA entry points (DOGFIGHT, DEATH, CHAPTER_SUCCESS...) write their own
  * save file so testing on a player's install never replaces the campaign. */
 static const char *save_path = CANVAS_SAVE_PATH;
 static const char *save_new_path = CANVAS_SAVE_NEW_PATH;
 static const char *save_backup_path = CANVAS_SAVE_BACKUP_PATH;
 
+static int qa_save_in_use;
+
 static void use_qa_save_paths(void)
 {
+    qa_save_in_use = 1;
     save_path = "PROGDIR:CanvasSkies-QA.save";
     save_new_path = "PROGDIR:CanvasSkies-QA.save.new";
     save_backup_path = "PROGDIR:CanvasSkies-QA.save.bak";
 }
 
+/* The wingmen carry their wounds from one sortie to the next
+ * (canvas_career.h has the arithmetic); the story only adds what it has
+ * written.  Gridpipe Thyne turns east and is lost in "Thyne's Last Turn"
+ * (Chapter 5, Mission 9); from the next sortie onward his place stays
+ * empty.  Whatever else the war has done to the flight is left alone. */
 static void apply_story_wingmen(Game *g)
 {
-    int pilot;
-    for (pilot = 0; pilot < 3; ++pilot)
-        g->wingman_health[pilot] = 100;
-    if (g->chapter > 4 || (g->chapter == 4 && g->mission > 8))
-        g->wingman_health[1] = 0;
+    career_story_wingmen(g->wingman_health,
+                         g->chapter > 4 || (g->chapter == 4 && g->mission > 8));
 }
 
 /* The Royal Air Force was formed on 1 April 1918; before that the pilot
@@ -1130,6 +1134,32 @@ static const char *corps_short(const Game *g)
 static int wingman_sick(const Game *g, int pilot)
 {
     return pilot == 2 && g->chapter == 5 && g->mission >= 8;
+}
+
+/* Whether he is in the flight this morning: not lost, not down with the
+ * influenza, and not still mending from an earlier sortie. */
+static int wingman_fit(const Game *g, int pilot)
+{
+    return career_wingman_fit(g->wingman_health[pilot]) &&
+           !wingman_sick(g, pilot);
+}
+
+/* QA: the flight and the continuation point as the save now has them,
+ * printed to the shell for the lab's notes.  Only the test entries,
+ * which keep their own save, say anything. */
+static void qa_report_flight(const Game *g, const char *when)
+{
+    int i;
+    if (!qa_save_in_use) return;
+    printf("QA %s: CHAPTER %d MISSION %d GROUNDED %d", when,
+           g->chapter + 1, g->mission + 1, g->grounded_next);
+    for (i = 0; i < 3; ++i)
+        printf("  %s %d %s", allied_pilot_names[i], g->wingman_health[i],
+               g->wingman_health[i] <= 0 ? "LOST" :
+               wingman_sick(g, i) ? "SICK" :
+               career_wingman_fit(g->wingman_health[i]) ? "FIT" : "SICK BAY");
+    printf("\n");
+    fflush(stdout);
 }
 
 /* The day of this sortie: the diary date carried by the latest newspaper
@@ -1162,78 +1192,26 @@ static int news_unlocked(const Game *g, int index)
 static int load_campaign_save_path(Game *g, const char *path)
 {
     FILE *file = fopen(path, "r");
-    char magic[24];
-    int version;
-    int chapter, mission;
-    int wingman0, wingman1, wingman2;
-    int complete = 0;
-    int lives = 3;
-    int victories = 0, sorties = 0, rank = 0;
-    unsigned awards = 0;
-    int skill[3] = {0, 0, 0};
+    CareerRecord r;
+    int ok;
     if (!file) return 0;
-    if (fscanf(file, "%23s %d\n%d %d\n%d %d %d", magic, &version,
-               &chapter, &mission, &wingman0, &wingman1, &wingman2) != 7 ||
-        strcmp(magic, "CANVAS_SKIES_SAVE") != 0 ||
-        (version < 1 || version > 5) ||
-        chapter < 0 || chapter >= CHAPTER_COUNT ||
-        mission < 0 || mission >= MISSIONS_PER_CHAPTER ||
-        wingman0 < 0 || wingman0 > 100 ||
-        wingman1 < 0 || wingman1 > 100 ||
-        wingman2 < 0 || wingman2 > 100) {
-        fclose(file);
-        return 0;
-    }
-    if (version >= 2 &&
-        (fscanf(file, "%d", &complete) != 1 ||
-         (complete != 0 && complete != 1))) {
-        fclose(file);
-        return 0;
-    }
-    if (version >= 3 &&
-        (fscanf(file, "%d", &lives) != 1 || lives < 0 || lives > 3)) {
-        fclose(file);
-        return 0;
-    }
-    /* Version 4 adds the pilot's record.  Older saves start it at zero. */
-    if (version >= 4 &&
-        (fscanf(file, "%d %d %u %d %d %d %d", &victories, &sorties, &awards,
-                &rank, &skill[0], &skill[1], &skill[2]) != 7 ||
-         victories < 0 || sorties < 0 || rank < 0 || rank > 3 ||
-         skill[0] < 0 || skill[0] > 100 || skill[1] < 0 || skill[1] > 100 ||
-         skill[2] < 0 || skill[2] > 100)) {
-        fclose(file);
-        return 0;
-    }
-    /* Version 5 adds conduct.  Older saves start with a cheerful mess. */
-    {
-        int conduct[5] = {70, 0, 0, 0, 0};
-        if (version >= 5 &&
-            (fscanf(file, "%d %d %d %d %d", &conduct[0], &conduct[1],
-                    &conduct[2], &conduct[3], &conduct[4]) != 5 ||
-             conduct[0] < 0 || conduct[0] > 100 || conduct[1] < 0 ||
-             conduct[1] > 3 || conduct[2] < 0 || conduct[3] < 0 ||
-             conduct[3] > 3 || conduct[4] < 0 || conduct[4] > 1)) {
-            fclose(file);
-            return 0;
-        }
-        memcpy(g->saved_conduct, conduct, sizeof(conduct));
-    }
+    ok = career_record_read(file, &r, CHAPTER_COUNT, MISSIONS_PER_CHAPTER);
     fclose(file);
-    g->saved_victories = victories;
-    g->saved_sorties = sorties;
-    g->saved_awards = awards;
-    g->saved_rank = rank;
-    g->saved_skill[0] = (float)skill[0] / 100.0f;
-    g->saved_skill[1] = (float)skill[1] / 100.0f;
-    g->saved_skill[2] = (float)skill[2] / 100.0f;
-    g->saved_chapter = chapter;
-    g->saved_mission = mission;
-    g->saved_wingman_health[0] = wingman0;
-    g->saved_wingman_health[1] = wingman1;
-    g->saved_wingman_health[2] = wingman2;
-    g->saved_campaign_complete = complete;
-    g->saved_lives = lives;
+    if (!ok) return 0;
+    g->saved_victories = r.victories;
+    g->saved_sorties = r.sorties;
+    g->saved_awards = r.awards;
+    g->saved_rank = r.rank;
+    g->saved_skill[0] = (float)r.skill[0] / 100.0f;
+    g->saved_skill[1] = (float)r.skill[1] / 100.0f;
+    g->saved_skill[2] = (float)r.skill[2] / 100.0f;
+    memcpy(g->saved_conduct, r.conduct, sizeof(r.conduct));
+    g->saved_chapter = r.chapter;
+    g->saved_mission = r.mission;
+    memcpy(g->saved_wingman_health, r.wingman, sizeof(r.wingman));
+    g->saved_campaign_complete = r.complete;
+    g->saved_lives = r.lives;
+    g->saved_grounded = r.grounded;
     return 1;
 }
 
@@ -1258,18 +1236,28 @@ static int save_campaign(Game *g)
     FILE *file = fopen(save_new_path, "w");
     int ok;
     int backed_up;
+    CareerRecord r;
     if (!file) return 0;
-    ok = fprintf(file, "CANVAS_SKIES_SAVE 5\n%d %d\n%d %d %d\n%d\n%d\n"
-                 "%d %d %u %d %d %d %d\n%d %d %d %d %d\n",
-                 g->chapter, g->mission,
-                 g->wingman_health[0], g->wingman_health[1],
-                 g->wingman_health[2], g->campaign_complete, g->lives,
-                 g->victories, g->sorties, g->awards, g->rank,
-                 (int)(g->skill_flying * 100.0f + 0.5f),
-                 (int)(g->skill_gunnery * 100.0f + 0.5f),
-                 (int)(g->skill_engine * 100.0f + 0.5f),
-                 g->morale, g->offences, g->award_hold, g->rank_penalty,
-                 g->disgraced) > 0;
+    career_record_defaults(&r);
+    r.chapter = g->chapter;
+    r.mission = g->mission;
+    memcpy(r.wingman, g->wingman_health, sizeof(r.wingman));
+    r.complete = g->campaign_complete;
+    r.lives = g->lives;
+    r.victories = g->victories;
+    r.sorties = g->sorties;
+    r.awards = g->awards;
+    r.rank = g->rank;
+    r.skill[0] = (int)(g->skill_flying * 100.0f + 0.5f);
+    r.skill[1] = (int)(g->skill_gunnery * 100.0f + 0.5f);
+    r.skill[2] = (int)(g->skill_engine * 100.0f + 0.5f);
+    r.conduct[0] = g->morale;
+    r.conduct[1] = g->offences;
+    r.conduct[2] = g->award_hold;
+    r.conduct[3] = g->rank_penalty;
+    r.conduct[4] = g->disgraced;
+    r.grounded = g->grounded_next;
+    ok = career_record_write(file, &r);
     if (fclose(file) != 0) ok = 0;
     if (!ok) {
         remove(save_new_path);
@@ -1297,6 +1285,7 @@ static int save_campaign(Game *g)
     g->saved_lives = g->lives;
     memcpy(g->saved_wingman_health, g->wingman_health,
            sizeof(g->wingman_health));
+    g->saved_grounded = g->grounded_next;
     g->saved_victories = g->victories;
     g->saved_sorties = g->sorties;
     g->saved_awards = g->awards;
@@ -1398,7 +1387,9 @@ static void restore_saved_career(Game *g)
     g->award_hold = g->saved_conduct[2];
     g->rank_penalty = g->saved_conduct[3];
     g->disgraced = g->saved_conduct[4];
-    g->grounded_next = g->conduct_pending = 0;
+    /* A grounding owed when he last left the mess is still owed. */
+    g->grounded_next = g->saved_grounded;
+    g->conduct_pending = 0;
 }
 
 static float grow_skill(float skill, float amount)
@@ -1418,6 +1409,19 @@ static void count_sortie_in_record(Game *g)
     g->skill_flying = grow_skill(g->skill_flying, g->success ? 0.03f : 0.012f);
     g->skill_gunnery = grow_skill(g->skill_gunnery, 0.006f + 0.018f * g->kills);
     g->skill_engine = grow_skill(g->skill_engine, 0.015f);
+    /* The flight's wounds go into the books with the rest of the day.
+     * Only the cockpit patrols put the wingmen in the air; on any other
+     * sortie their machines stay on the field and the men simply rest.
+     * A round that strikes a wingman takes one of his three lives of
+     * fabric and wire (wingmen[].hp), and the third sends him home. */
+    for (i = 0; i < 3; ++i) {
+        const Enemy *w = &g->wingmen[i];
+        int hits = w->max_hp - (w->hp < 0 ? 0 : w->hp);
+        g->wingman_health[i] =
+            career_wingman_after_sortie(g->wingman_health[i],
+                                        w->max_hp > 0 ? hits : 0,
+                                        g->wingman_hit_today[i]);
+    }
     g->pending_award = 0;
     /* A pilot who goes down shows no decoration card that evening, so the
      * decoration waits for the next sortie he comes home from. */
@@ -1473,6 +1477,7 @@ static int save_mission_result(Game *g)
     int active_chapter = g->chapter;
     int active_mission = g->mission;
     int active_complete = g->campaign_complete;
+    int active_grounded = g->grounded_next;
     int ok, game_over;
     if (g->fatal_sortie && !g->life_lost_this_sortie) {
         if (g->lives > 0) --g->lives;
@@ -1481,19 +1486,17 @@ static int save_mission_result(Game *g)
     count_sortie_in_record(g);
     /* The debrief still describes the sortie just flown, but the durable
      * continuation point must already describe what comes next.  A failed
-     * sortie deliberately saves the same mission so Retry remains honest. */
-    if (g->success) {
-        if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
-            ++g->mission;
-        } else if (g->chapter + 1 < CHAPTER_COUNT) {
-            ++g->chapter;
-            g->mission = 0;
-            /* A fresh chapter brings a fresh start: three lives again, so
-             * one bad spell costs a chapter rather than the whole war. */
-            g->lives = 3;
-        } else {
-            g->campaign_complete = 1;
-        }
+     * sortie deliberately saves the same mission so Retry remains honest.
+     * A grounded pilot's next sortie is struck off here too, by the same
+     * rule the evening uses, so quitting after the debrief and continuing
+     * cannot fly the sortie the squadron flew without him. */
+    if (g->success &&
+        career_advance(&g->chapter, &g->mission, &g->campaign_complete,
+                       &g->grounded_next, CHAPTER_COUNT,
+                       MISSIONS_PER_CHAPTER) == CAREER_NEXT_CHAPTER) {
+        /* A fresh chapter brings a fresh start: three lives again, so
+         * one bad spell costs a chapter rather than the whole war. */
+        g->lives = 3;
     }
     game_over = !g->success && g->fatal_sortie && g->lives <= 0;
     if (game_over) {
@@ -1505,10 +1508,15 @@ static int save_mission_result(Game *g)
     }
     apply_story_wingmen(g);
     ok = save_campaign(g);
+    if (ok) qa_report_flight(g, "SAVED");
     if (game_over) g->lives = 0;   /* tonight still ends at the memorial */
+    /* The evening's cards still belong to the sortie just flown: the
+     * memorandum must still know he is grounded, and advance_after_debrief
+     * moves on from here by the same rule as above. */
     g->chapter = active_chapter;
     g->mission = active_mission;
     g->campaign_complete = active_complete;
+    g->grounded_next = active_grounded;
     apply_story_wingmen(g);
     g->mission_save_state = ok ? 1 : -1;
     return ok;
@@ -7401,7 +7409,7 @@ static void reset_wingmen(Game *g)
     for (i = 0; i < 3; ++i) {
         Enemy *w = &g->wingmen[i];
         Vec3 at;
-        if (g->wingman_health[i] <= 0 || wingman_sick(g, i)) continue;
+        if (!wingman_fit(g, i)) continue;   /* lost, ill or mending */
         at = pose_point(&pose, offset[i][0], offset[i][1], offset[i][2]);
         w->world_x = at.x; w->world_y = at.y; w->world_z = at.z;
         w->heading = g->flight_heading;
@@ -9699,7 +9707,7 @@ static void draw_mess(Game *g)
                  "A MACHINE DOWN WITH A CARBINE. NOBODY BELIEVES IT.");
     else if (g->kills > 0)
         snprintf(first, sizeof(first), "%s CHALKS %d MORE ON THE BOARD.",
-                 wingman_sick(g, 2) ? "ECCLES" : "BLUEBOTTLE", g->kills);
+                 wingman_fit(g, 2) ? "BLUEBOTTLE" : "ECCLES", g->kills);
     else if (mission->special == SPECIAL_TRUCE)
         snprintf(first, sizeof(first), "A CHRISTMAS TOAST TO THE MEN ACROSS THE WIRE.");
     else if (!mission_armed(g))
@@ -9713,7 +9721,7 @@ static void draw_mess(Game *g)
         /* Whoever is still at the table gives it, never the man missing. */
         int k;
         for (k = 0; k < 3; ++k)
-            if (k != wingman_hit(g) && !wingman_sick(g, k)) {
+            if (k != wingman_hit(g) && wingman_fit(g, k)) {
                 toaster = allied_pilot_names[k];
                 break;
             }
@@ -9721,10 +9729,11 @@ static void draw_mess(Game *g)
         snprintf(toast, sizeof(toast), wake_toasts[pick & 3u], toaster);
         lines[2] = toast;
     } else {
-        lines[2] = toasts[(pick & 3u) == 1u && wingman_sick(g, 2) ? 0u :
+        lines[2] = toasts[(pick & 3u) == 1u && !wingman_fit(g, 2) ? 0u :
                           (pick & 3u)];
     }
-    lines[3] = wingman_hit(g) >= 0 ? "WE KEEP HIS GLASS FULL FOR THE MORNING." :
+    /* A man sent home wounded today is kept out of tomorrow's show. */
+    lines[3] = wingman_hit(g) >= 0 ? "THE DOCTOR KEEPS HIM OUT OF THE NEXT SHOW." :
                mood == MESS_WAKE ? "NOBODY SITS IN HIS CHAIR." :
                                    close_lines[(pick >> 4) % 3u];
     if (g->sortie_offences > 0) {
@@ -9944,16 +9953,39 @@ static void draw_story(Game *g)
                               0, ink);
     if (!done) return;
     if (mission->mode == MISSION_DOGFIGHT_3D) {
+        /* The whole flight fills the page as it always did.  Short of a
+         * man, the page has room for who is flying on one line and who
+         * is in the sick bay on the next. */
+        static const char *const surname[3] = {"ECCLES", "THYNE", "BLUEBOTTLE"};
+        int k, fit = 0, abed = -1, abed_count = 0;
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "FLYING WITH:", red);
-        if (wingman_sick(g, 2))
-            snprintf(buf, sizeof(buf), "%s", allied_pilot_names[0]);
-        else
+        buf[0] = '\0';
+        for (k = 0; k < 3; ++k) {
+            if (wingman_fit(g, k)) {
+                if (fit++) strcat(buf, " / ");
+                strcat(buf, surname[k]);
+            } else if (g->wingman_health[k] > 0) {
+                if (abed < 0) abed = k;
+                ++abed_count;
+            }
+        }
+        if (fit == 3) {
             snprintf(buf, sizeof(buf), "%s / %s", allied_pilot_names[0],
                      allied_pilot_names[2]);
-        journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
-        if (g->wingman_health[1] > 0)
+            journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16), buf, ink);
             journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
                          allied_pilot_names[1], ink);
+        } else {
+            journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16),
+                         fit ? buf : "NOBODY. I GO ALONE.", ink);
+            if (abed_count > 1)
+                journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18),
+                             "THE REST IN THE SICK BAY", red);
+            else if (abed >= 0) {
+                snprintf(buf, sizeof(buf), "%s IN THE SICK BAY", surname[abed]);
+                journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 18), buf, red);
+            }
+        }
     } else if (mission->mode == MISSION_GUNNER_3D) {
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 14), "REAR COCKPIT:", red);
         journal_text(g, 338, journal_line_y(JOURNAL_RIGHT, 16),
@@ -10054,13 +10086,16 @@ static void draw_squadron_roster(Game *g)
     typewriter_text(g, 410, y, buf, 7, 11, ink);
     snprintf(buf, sizeof(buf), "VICT. %d", g->victories);
     typewriter_text(g, 530, y, buf, 7, 11, ink);
+    /* A man still mending from the last show is WOUNDED and stays on the
+     * ground; one back in the flight but not yet himself is BRUISED. */
     for (i = 0; i < 3; ++i) {
-        uint32_t c = g->wingman_health[i] > 0 && !wingman_sick(g, i) ?
-                     ink : red;
+        uint32_t c = wingman_fit(g, i) ? ink : red;
         y += 15;
         typewriter_text(g, 410, y, allied_pilot_names[i], 7, 11, c);
         typewriter_text(g, 530, y, g->wingman_health[i] <= 0 ? "LOST" :
-                        wingman_sick(g, i) ? "SICK" : "FIT", 7, 11, c);
+                        wingman_sick(g, i) ? "SICK" :
+                        !wingman_fit(g, i) ? "WOUNDED" :
+                        g->wingman_health[i] < 75 ? "BRUISED" : "FIT", 7, 11, c);
     }
     y += 15;
     typewriter_text(g, 410, y, "TOM", 7, 11, ink);
@@ -14633,6 +14668,8 @@ static int game_init(Game *g)
     g->running = 1;
     g->lives = 3;
     g->morale = 70;     /* a cheerful mess until something sours it */
+    /* A fit flight for the test entries; a campaign sets its own. */
+    g->wingman_health[0] = g->wingman_health[1] = g->wingman_health[2] = 100;
     /* With room to spare the art stays once loaded; otherwise each scene
      * holds only its own.  The officer's preferences may say otherwise. */
     g->fast_at_start = exec_avail_mem(MEMF_FAST_BITS);
@@ -15302,21 +15339,13 @@ static void advance_after_debrief(Game *g)
         set_scene(g, SCENE_TITLE);
     }
     else if (!g->success) set_scene(g, SCENE_BRIEFING);
-    else if (g->mission + 1 < MISSIONS_PER_CHAPTER) {
-        ++g->mission;
-        /* Grounded: the squadron flies the next sortie without him. */
-        if (g->grounded_next && g->mission + 1 < MISSIONS_PER_CHAPTER) {
-            ++g->mission;
-            g->grounded_next = 0;
-        }
-        apply_story_wingmen(g);
-        set_scene(g, SCENE_STORY);
-    } else if (g->chapter + 1 >= CHAPTER_COUNT) {
-        g->campaign_complete = 1;
+    /* Grounded: the squadron flies the next sortie without him, and
+     * career_advance strikes it off just as save_mission_result did. */
+    else if (career_advance(&g->chapter, &g->mission, &g->campaign_complete,
+                            &g->grounded_next, CHAPTER_COUNT,
+                            MISSIONS_PER_CHAPTER) == CAREER_WAR_OVER)
         set_scene(g, SCENE_EPILOGUE);
-    } else {
-        ++g->chapter;
-        g->mission = 0;
+    else {
         apply_story_wingmen(g);
         set_scene(g, SCENE_STORY);
     }
@@ -15464,6 +15493,8 @@ static void handle_event(Game *g, SDL_Event *ev)
                 memcpy(g->wingman_health, g->saved_wingman_health,
                        sizeof(g->wingman_health));
                 restore_saved_career(g);
+                apply_story_wingmen(g);
+                qa_report_flight(g, "CONTINUE");
                 if (g->campaign_complete) {
                     set_scene(g, SCENE_EPILOGUE);
                     break;
@@ -15656,7 +15687,9 @@ int main(int argc, char **argv)
             "TRACERS",
             "TRUCE",
             "UNARMED",
-            "UNARMED_GUNNER"
+            "UNARMED_GUNNER",
+            /* The flight's health and a grounding, carried by the save. */
+            "GROUNDED", "QASAVE", "WINGMEN"
         };
         int q;
         for (q = 0; q < (int)(sizeof(qa_modes) / sizeof(qa_modes[0])); ++q)
@@ -15922,7 +15955,42 @@ int main(int argc, char **argv)
         g.kills = current_mission_goal(&g);
         g.score = g.kills * 250;
         set_scene(&g, SCENE_DEBRIEF);
+    } else if (argc > 1 && strcmp(argv[1], "WINGMEN") == 0) {
+        /* WINGMEN e t b: Eccles, Gridpipe Thyne and Bluebottle at the
+         * given health (1..100, 100 if left out) on the morning of
+         * "Eccles' Wing", the 1916 cockpit patrol.  The QA save is written
+         * at once and the briefing's roster shows the flight; Enter flies
+         * the sortie as the campaign would, and the debrief saves what
+         * the fight left them with.  QASAVE then continues from it. */
+        int k;
+        g.chapter = 2;
+        g.mission = 5;
+        for (k = 0; k < 3; ++k) {
+            int hp = argc > 2 + k ? atoi(argv[2 + k]) : 100;
+            g.wingman_health[k] = hp < 1 ? 1 : hp > 100 ? 100 : hp;
+        }
+        apply_story_wingmen(&g);
+        save_campaign(&g);
+        qa_report_flight(&g, "WINGMEN");
+        set_scene(&g, SCENE_BRIEFING);
+    } else if (argc > 1 && strcmp(argv[1], "GROUNDED") == 0) {
+        /* A second offence with no rank to lose, on "Fog on the Somme"
+         * (1918, mission 1): the debrief saves, the memorandum grounds
+         * him, and the war must go on at "Westward" (mission 3) with
+         * "Burn the Stores" flown without him, whether the evening is
+         * seen through or the game is quit and QASAVE continued. */
+        g.chapter = 5;
+        g.mission = 0;
+        reset_sortie(&g);
+        g.offences = 1;
+        g.sortie_offences = 1;
+        g.sortie_offence_kind = CIV_AMBULANCE;
+        g.success = 1;
+        g.kills = 0;
+        set_scene(&g, SCENE_DEBRIEF);
     }
+    /* QASAVE: the ordinary title and officers' menu, on the QA save, so
+     * Continue can be tried on what the entries above wrote. */
     if (g.scene == SCENE_SORTIE && qa_run_arg) {
         g.qa_hold = 0;
         g.qa_run = 1;
