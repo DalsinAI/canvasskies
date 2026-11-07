@@ -9,13 +9,30 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.2.0 RC3**, a release candidate. Download it from
-[the v0.2.0-rc3 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc3).
-New in RC3: the cockpit seen from the pilot's seat, machines that change with
-the war, top-down raids on convoys, railways, aerodromes and trench lines,
-civilians and ambulances to spare on pain of court martial, the morning paper
-set like a real one, and a picture house showing real film of the war. The
-earlier alpha is described in
+Current release: **0.2.0 RC5**, a release candidate. Download it from
+[the v0.2.0-rc5 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc5).
+
+New in RC5:
+
+- **Missions:** something to do all the way:
+  - Archie, ground machine guns, riflemen taking pot shots, kite balloons and
+    squalls;
+  - 1914's work of marking columns, dropping message bags and photographing
+    batteries;
+  - a run home to land at the aerodrome.
+- **Aerodrome films:** take-offs and landings on old film, with their own
+  sound, before and after each sortie.
+- **1914 rear seat:** the observer's carbine swings right round the tail, and
+  attackers come from the flanks and break off when hit.
+- **The mess:** three evenings (quiet, rowdy, and a wake after a loss) with the
+  squadron by lamplight.
+- **The Officer's Preferences:** keep the art in memory, music and effects
+  volume, full screen.
+- **Memory:** about 25 MB of fast memory instead of 63, as each scene loads only
+  its own art.
+- **Workbench:** returned intact after full screen.
+
+The earlier alpha is described in
 [docs/ALPHA_RELEASE_NOTES.md](docs/ALPHA_RELEASE_NOTES.md).
 
 ## Features
@@ -41,6 +58,9 @@ earlier alpha is described in
 - Resumable campaign saves
 - Period typefaces, painted art and period gramophone records
 - F9 toggles aspect-correct fullscreen
+- Take-offs and landings on old film, and the mess in three moods
+- The Officer's Preferences: art kept in memory or loaded as needed, music and
+  effects volume
 
 ## Screenshots
 
