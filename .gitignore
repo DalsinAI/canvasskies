@@ -27,3 +27,5 @@ emscripten_cache
 /build-canvas-skies/
 tests/host/test_*
 !tests/host/test_*.c
+!tests/host/Makefile
+tests/host/build/

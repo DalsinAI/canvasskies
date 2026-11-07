@@ -145,9 +145,16 @@ Controls are in the drawer's `ReadMe` and the README.
    about 48 MB.
 9. **Full screen:** the root cause is in the SDL2 module, which never restores
    the display mode. The game works round it; the module itself is not fixed.
-10. **Mode mix:** the chapters do not all hold the intended 4 side-on, 4
-    top-down, 2 dogfight and 2 rear-gunner sorties (being corrected separately).
-11. **Mess officers:** they read as figures in lamplight rather than portraits.
+10. **Mode mix:** corrected; every chapter now holds 4 side-on, 4 top-down,
+    2 dogfight and 2 rear-gunner sorties, checked before packaging.
+11. **Recordings and film:** every shipped recording and film is listed with
+    its SHA-256 in `assets/canvas-skies/MUSIC_LICENSE.md`. Colonel Bogey is
+    now our own rendition (give it a listening test on the real instance);
+    the six period records were cleared by the project owner and Amazing
+    Grace is kept; four of the eight newsreel source films await the
+    National Archives' rights confirmation, which the project owner is
+    seeking.
+12. **Mess officers:** they read as figures in lamplight rather than portraits.
 
 ## Acceptance before 0.2.0
 
