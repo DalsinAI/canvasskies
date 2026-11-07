@@ -266,6 +266,21 @@
 #ifndef CANVAS_REMEMBER_POPPIES_BMP
 #define CANVAS_REMEMBER_POPPIES_BMP "assets/canvas-skies/remember-poppies.bmp"
 #endif
+#ifndef CANVAS_REMEMBER_SKY_BMP
+#define CANVAS_REMEMBER_SKY_BMP "assets/canvas-skies/remember-sky.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_FAR_BMP
+#define CANVAS_REMEMBER_FAR_BMP "assets/canvas-skies/remember-far.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_MID_BMP
+#define CANVAS_REMEMBER_MID_BMP "assets/canvas-skies/remember-mid.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_NEAR_BMP
+#define CANVAS_REMEMBER_NEAR_BMP "assets/canvas-skies/remember-near.bmp"
+#endif
+#ifndef CANVAS_REMEMBER_LIFE_BMP
+#define CANVAS_REMEMBER_LIFE_BMP "assets/canvas-skies/remember-life.bmp"
+#endif
 #ifndef CANVAS_REMEMBER_WIND_WAV
 #define CANVAS_REMEMBER_WIND_WAV "assets/canvas-skies/remember-wind.wav"
 #endif
@@ -820,6 +835,8 @@ typedef struct {
     Newsreel newsreel;
     AirfieldFilm film;
     SDL_Surface *remember_field;    /* the old front in summer 1919 */
+    SDL_Surface *remember_layer[4]; /* or the same as sky, far, mid, near */
+    SDL_Surface *remember_life;     /* butterflies, a lark, thistledown */
     SDL_Surface *remember_poppies;  /* poppies and grass in the wind */
     char **remember_names;          /* the roll, from WeRemember.txt */
     int remember_count;
@@ -14329,7 +14346,17 @@ static const AssetSpec asset_specs[] = {
     ASSET(office_paper, CANVAS_OFFICE_PAPER_BMP, AG_OFFICE, 1, ASSET_PLAIN),
     ASSET(office_stamp, CANVAS_OFFICE_STAMP_BMP, AG_OFFICE, 1, ASSET_EXACT_KEY),
     ASSET(loss_card, CANVAS_LOSS_CARD_BMP, AG_LOSS, 1, ASSET_PLAIN),
+#ifdef REMEMBER_LAYERS
+    ASSET(remember_layer[0], CANVAS_REMEMBER_SKY_BMP, AG_REMEMBER, 1, ASSET_PLAIN),
+    ASSET(remember_layer[1], CANVAS_REMEMBER_FAR_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+    ASSET(remember_layer[2], CANVAS_REMEMBER_MID_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+    ASSET(remember_layer[3], CANVAS_REMEMBER_NEAR_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+#else
     ASSET(remember_field, CANVAS_REMEMBER_FIELD_BMP, AG_REMEMBER, 1, ASSET_PLAIN),
+#endif
+#ifdef REMEMBER_LIFE_SPRITES
+    ASSET(remember_life, CANVAS_REMEMBER_LIFE_BMP, AG_REMEMBER, 1, ASSET_LOOSE_KEY),
+#endif
     ASSET(remember_poppies, CANVAS_REMEMBER_POPPIES_BMP, AG_REMEMBER, 1,
           ASSET_LOOSE_KEY)
 };
@@ -15344,10 +15371,30 @@ static void draw_film(Game *g)
 #define REMEMBER_NAME_LEN 72
 #define REMEMBER_HEADING_MS 2500u      /* the heading fades in over this */
 #define REMEMBER_SCROLL_AT 7000u       /* and the roll begins to rise */
-#define REMEMBER_LINE 26               /* pixels from one name to the next */
-#define REMEMBER_RISE 16               /* pixels a second */
+#define REMEMBER_LINE 21               /* pixels from one name to the next */
+#define REMEMBER_RISE 13               /* pixels a second */
+#define REMEMBER_BAND_TOP 262          /* the shaded band for the roll */
+#define REMEMBER_REST_Y 352            /* where the closing line rests */
 #define REMEMBER_PAN_MS 150000u        /* to drift from one end to the other */
 #define REMEMBER_POPPY_COUNT 34
+
+#ifdef REMEMBER_LIFE_SPRITES
+/* What moves over the field: each crosses the screen in period_ms, at
+ * depth/32 of the near layer's pace, bobbing 'bobs' times a crossing. */
+typedef struct {
+    int sprite, y, bob, bobs, depth;
+    uint32_t period_ms, frame_ms;
+} RememberLife;
+static const RememberLife remember_life[] = {
+    {0, 286, 9, 5, 26, 38000u, 90u},          /* a butterfly over the poppies */
+    {REMEMBER_LIFE_SPRITES > 1 ? 1 : 0, 304, 7, 7, 30, 47000u, 80u},
+    {REMEMBER_LIFE_SPRITES > 2 ? 2 : 0, 40, 4, 3, 2, 120000u, 220u},  /* the lark */
+    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 220, 18, 2, 16, 26000u, 400u}, /* seeds */
+    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 180, 22, 2, 14, 31000u, 400u},
+    {REMEMBER_LIFE_SPRITES > 3 ? 3 : 0, 250, 14, 3, 18, 22000u, 400u}
+};
+#define REMEMBER_LIFE_COUNT ((int)(sizeof(remember_life) / sizeof(remember_life[0])))
+#endif
 
 static const char *const remember_closing[2] = {
     "PLEASE CONSIDER A GIFT TO THE ROYAL BRITISH LEGION.",
@@ -15460,14 +15507,27 @@ static void remember_line(Game *g, FontId face, int y, const char *text,
     };
     int w = font_width(face, text), x = 320 - w / 2, k;
     if (y < -40 || y > SCREEN_H + 40 || fade <= 0) return;
-    if (fade >= 12)
-        for (k = 0; k < (fade >= 24 ? 8 : 4); ++k)
-            font_text(g, face, x + edge[k][0], y + edge[k][1], text,
-                      PIX_PACK(14, 16, 12));
+    if (face == FONT_TITLE) {
+        if (fade >= 12)
+            for (k = 0; k < (fade >= 24 ? 8 : 4); ++k)
+                font_text(g, face, x + edge[k][0], y + edge[k][1], text,
+                          PIX_PACK(14, 16, 12));
+    } else if (fade >= 16) {
+        /* The names: a gentle shadow only, below and to the right. */
+        font_text(g, face, x + 1, y + 1, text, PIX_PACK(20, 20, 16));
+    }
     font_text(g, face, x, y, text,
-              fade >= 32 ? PIX_PACK(240, 230, 204) :
-              PIX_PACK(90 + 150 * fade / 32, 92 + 138 * fade / 32,
-                       80 + 124 * fade / 32));
+              PIX_PACK(60 + 168 * fade / 32, 58 + 160 * fade / 32,
+                       50 + 140 * fade / 32));
+}
+
+/* Names come up through the foot of the band and go out at its head. */
+static int remember_band_fade(int y)
+{
+    if (y > SCREEN_H - 4 || y < REMEMBER_BAND_TOP - 4) return 0;
+    if (y > SCREEN_H - 30) return (SCREEN_H - 4 - y) * 32 / 26;
+    if (y < REMEMBER_BAND_TOP + 22) return (y - REMEMBER_BAND_TOP + 4) * 32 / 26;
+    return 32;
 }
 
 static void draw_remember(Game *g)
@@ -15479,6 +15539,24 @@ static void draw_remember(Game *g)
     /* The field, drifting slowly to the right and resting at its end. */
     drift = t >= REMEMBER_PAN_MS ? 1.0f : (float)t / (float)REMEMBER_PAN_MS;
     drift = drift * drift * (3.0f - 2.0f * drift);
+#ifdef REMEMBER_LAYERS
+    if (g->remember_layer[0]) {
+        /* Sky, distance, middle ground and foreground, each a strip that
+         * slides at its own pace: the near poppies pass, the far church
+         * hardly moves. */
+        for (i = 0; i < REMEMBER_LAYERS; ++i) {
+            SDL_Surface *layer = g->remember_layer[i];
+            SDL_Rect src, dst;
+            if (!layer) continue;
+            src.x = (int)((float)(layer->w - SCREEN_W) * drift);
+            src.y = 0; src.w = SCREEN_W; src.h = layer->h;
+            dst.x = 0; dst.y = remember_layer_info[i][1];
+            dst.w = SCREEN_W; dst.h = layer->h;
+            SDL_BlitSurface(layer, &src, s, &dst);
+            if (i == REMEMBER_LAYERS - 1) pan = src.x;
+        }
+    } else
+#endif
     if (g->remember_field) {
         SDL_Rect src, dst;
         pan = (int)((float)(g->remember_field->w - SCREEN_W) * drift);
@@ -15497,7 +15575,7 @@ static void draw_remember(Game *g)
             uint32_t h = scene_hash((uint32_t)i * 2654435761u + 77u);
             int variant = (int)(h % REMEMBER_POPPY_VARIANTS);
             int span = SCREEN_W + 120;
-            int x = (int)((h >> 8) % (uint32_t)span) - pan * 13 / 10 % span;
+            int x = (int)((h >> 8) % (uint32_t)span) - pan % span;
             /* The frames lean one way, stand, and lean the other:
              * played 0 1 2 3 2 1 for the to-and-fro. */
             static const unsigned char sway[6] = {0, 1, 2, 3, 2, 1};
@@ -15515,30 +15593,54 @@ static void draw_remember(Game *g)
             SDL_BlitSurface(g->remember_poppies, &src, s, &dst);
         }
     }
+#ifdef REMEMBER_LIFE_SPRITES
+    /* A butterfly or two over the poppies, a lark high up, thistledown
+     * drifting on the wind. */
+    if (g->remember_life)
+        for (i = 0; i < REMEMBER_LIFE_COUNT; ++i) {
+            const RememberLife *l = &remember_life[i];
+            uint32_t h = scene_hash((uint32_t)i * 40503u + 9u);
+            float u = (float)((t + h % 20000u) % l->period_ms) /
+                      (float)l->period_ms;
+            int x = (int)(u * (SCREEN_W + 80)) - 40 - pan * l->depth / 32;
+            int y = l->y + (int)(sinf(u * 6.283f * l->bobs + (float)i) *
+                                 (float)l->bob);
+            const short *f = remember_life_frames[l->sprite]
+                [(now / l->frame_ms + h) %
+                 (uint32_t)remember_life_frame_count[l->sprite]];
+            SDL_Rect src, dst;
+            while (x < -40) x += SCREEN_W + 80;
+            src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
+            dst.x = x; dst.y = y; dst.w = f[2]; dst.h = f[3];
+            SDL_BlitSurface(g->remember_life, &src, s, &dst);
+        }
+#endif
     fade = t >= REMEMBER_HEADING_MS ? 32 :
            (int)(t * 32u / REMEMBER_HEADING_MS);
     remember_line(g, FONT_TITLE, 74, "WE REMEMBER", fade);
     if (t < REMEMBER_SCROLL_AT) return;
-    /* The roll rises from the foot of the screen; when the closing lines
-     * reach the middle it stops, and the field is left to the wind. */
-    last = SCREEN_H + 40 + (g->remember_count + 2) * REMEMBER_LINE;
-    y = SCREEN_H + 30 -
+    /* The roll rises through a gently shaded band low in the picture,
+     * fading in at its foot and out at its head, so the field above
+     * stays open.  When the closing lines reach the band's middle it
+     * stops, and the field is left to the wind. */
+    for (i = 0; i < 8; ++i)
+        blend_rect(s, 0, REMEMBER_BAND_TOP - 24 + i * 3, SCREEN_W, 3,
+                   8, 9, 8, (uint8_t)(6 + i * 7));
+    blend_rect(s, 0, REMEMBER_BAND_TOP, SCREEN_W,
+               SCREEN_H - REMEMBER_BAND_TOP, 8, 9, 8, 62);
+    last = (g->remember_count ? g->remember_count * REMEMBER_LINE + 40 : 0) +
+           REMEMBER_LINE;
+    y = SCREEN_H + 6 -
         (int)((t - REMEMBER_SCROLL_AT) * (uint32_t)REMEMBER_RISE / 1000u);
-    if (y + last - SCREEN_H - 30 < 236) y = 236 - (last - SCREEN_H - 30);
-    for (i = 0; i < g->remember_count; ++i) {
-        int ny = y + i * REMEMBER_LINE;
-        if (ny > 104 && ny < SCREEN_H + 20)
-            remember_line(g, FONT_SUBHEAD, ny, g->remember_names[i],
-                          ny < 130 ? (ny - 104) * 32 / 26 : 32);
-    }
-    y += g->remember_count * REMEMBER_LINE + (g->remember_count ? 60 : 0);
-    for (i = 0; i < 2; ++i) {
-        int ny = y + i * 22;
-        if (ny > 104)
-            remember_line(g, i ? FONT_TYPE_SMALL : FONT_LABEL, ny,
-                          remember_closing[i],
-                          ny < 130 ? (ny - 104) * 32 / 26 : 32);
-    }
+    if (y + last < REMEMBER_REST_Y) y = REMEMBER_REST_Y - last;
+    for (i = 0; i < g->remember_count; ++i)
+        remember_line(g, FONT_LABEL, y + i * REMEMBER_LINE,
+                      g->remember_names[i],
+                      remember_band_fade(y + i * REMEMBER_LINE));
+    y += last - REMEMBER_LINE;
+    for (i = 0; i < 2; ++i)
+        remember_line(g, i ? FONT_TYPE_SMALL : FONT_LABEL, y + i * 20,
+                      remember_closing[i], remember_band_fade(y + i * 20));
 }
 
 static void advance_after_debrief(Game *g)
