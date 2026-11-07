@@ -1,0 +1,142 @@
+Canvas Skies 0.2.0 RC5
+======================
+
+An original First World War flying game for AmigaOS 3. Fly with pilot
+Neddy Seagoon of the Royal Flying Corps through eight chapters, from the
+first observation flights of August 1914 to the eleventh hour of the
+Armistice.
+
+New in RC5
+----------
+- Missions with something to do all the way: Archie bursting where you
+  would have been, ground machine guns, riflemen taking pot shots,
+  kite balloons on their cables, squalls, scouts head-on and on your
+  tail going home; 1914's work of marking columns, dropping message
+  bags on headquarters and photographing batteries; and a run home to
+  land at the aerodrome instead of flying on with nothing to do
+- Take-offs and landings on old film before and after each sortie, with
+  their own sound; Enter or fire cuts them short
+- The 1914 observer's carbine swings right round the tail, up and down,
+  and the rear-seat attackers come from the flanks and break off when
+  hit
+- The mess in three evenings: a quiet one, a rowdy one after a victory,
+  and a wake after a loss, with the squadron round the table by
+  lamplight
+- The Officer's Preferences on the officers' menu: keep the art in
+  memory, music and effects volume, full screen
+- Each scene loads only its own art: the game now runs in about 25 MB
+  of fast memory instead of 63
+- Leaving full screen or quitting from it now gives Workbench back
+  intact
+
+Changes in RC4
+--------------
+- Every picture redrawn as finished art: the cockpit's wings, struts
+  and wires; the medals and the office crest; the squadron mess and the
+  picture house, lit by their lamps, stoves and the screen, with a hall
+  full of men watching the newsreel
+- Real trenches seen from the air and from the ground: fire bays and
+  traverses, sandbags, duckboards, water in the sumps and wire in front
+- The papers: the memorandum and the court martial typed on foolscap
+  with a rubber stamp, the new-machines cards, and the newspaper tied
+  with twine on its bundle
+- Painted machines for every year, top-down targets that stand off the
+  ground, soft smoke, sharper explosions, and the village and the
+  refugee cart rebuilt
+- The empty chair in the mess the night a pilot is lost
+
+New in 0.2.0
+------------
+- Cinematic cockpit view: painted sky, textured ground, shaded aircraft
+  with struts and markings, a living cockpit with working dials
+- Open-sky dogfights with thinking enemy pilots and your own flight
+- A pilot's career: victories, promotion and medals
+- The story told as a war diary, written on the notebook's own lines
+- The morning paper, quoting real cable news of 1914-1918, a
+  late-edition clipping after each debrief, and the Book of Press
+  Cuttings on the officers' menu
+- The Christmas truce of 1914, a night patrol against an airship over
+  Essex, and the Gotha bombers over the Thames
+- Dawn at the hangars before every sortie, and the mess that evening
+  after a mission won
+- Period gramophone records for each year of the war
+- 1914 is flown with a rifle and a revolver, as it was
+
+Changes since RC2
+-----------------
+- The cockpit seen from the pilot's seat: the top wing overhead, struts
+  close beside the gun, wires in the bays; the guns follow the year
+- The planes change as the war goes on, ours and theirs
+- Top-down raids on convoys, railways, stations, aerodromes and trench
+  lines; spare the ambulances, the villages and our own line, or answer
+  for it, up to a court martial
+- A side-on bomb that bursts too close hurts your own machine
+- The morning paper set like a real one, on its tied bundle
+- The picture house behind the lines, showing real film of the war
+- Period typefaces, a diary on level lines, tracer streaks that follow
+  their flight
+
+Changes since RC1
+-----------------
+- Only armed sorties carry guns; the 1914 cockpit has no guns
+- The cockpit sky no longer shows a flat slab in a bank
+- Every sortie ends cleanly, with the wreck shown before the hospital,
+  and is saved honestly; losing the last life costs a chapter, not the
+  whole career
+- Every mission now asks something of you; the Armistice patrols are
+  quiet, the raiders can get through, and the truce needs its pudding
+- Many story details now follow what happened that day
+- Faster drawing on a 68040
+
+Requirements
+------------
+- 68040 with FPU
+- RTG graphics: the game opens a 640x400 window on a 16-bit (or deeper)
+  Workbench screen
+- GFOpenUp with the OpenGPU SDL2 runtime (LIBS:OpenGPU/SDL2.module and
+  LIBS:opengpu.library)
+- AHI for sound
+- 32 MB of fast memory; with 96 MB or more free the art is kept in
+  memory once loaded (the Officer's Preferences can change this)
+
+Installing
+----------
+Drag the CanvasSkies drawer anywhere, for example to Work:Games. Start
+the game with the "Start Canvas Skies" icon, or from a Shell:
+
+  CD Work:Games/CanvasSkies
+  Stack 262144
+  CanvasSkies
+
+Keep the "assets" drawer beside the program. The film, fonts and music
+are credited in CANVAS_SKIES_SOURCES.md, assets/canvas-skies/MUSIC_LICENSE.md
+and the Fonts-Licences drawer.
+
+Controls
+--------
+Menus            Up/Down select, Enter accepts, Escape returns
+Press cuttings   Left/Right turn the page, Enter returns
+Side/top-down    Arrow keys move, X/Z speed, Space fires, B bombs
+Cockpit          Left/Right bank, Down pulls up, Up pushes down,
+                 X/Z throttle, Space fires, H turns for home
+Rear gunner      Arrow keys traverse and elevate, Space fires
+1914 tasks       B drops the message bag; fly steady over the battery
+                 to photograph it
+Films            Enter, Space or Escape skips
+Display          F9 fullscreen, F7 half detail, F8 full flight model
+                 (and the Officer's Preferences on the officers' menu)
+A joystick in port 2 flies the aircraft and fires.
+
+Licence
+-------
+Canvas Skies is free software under the GNU General Public License,
+version 3 (see LICENSE). The source and licence of every recording, film
+and picture are in assets/canvas-skies/MUSIC_LICENSE.md and
+assets/canvas-skies/ART_PROVENANCE.md; the font licences are in the
+Fonts-Licences drawer. Every film and every newspaper quotation is listed
+with its source in CANVAS_SKIES_SOURCES.md. README.md and the docs drawer
+hold the full guide and screenshots.
+
+Source: https://github.com/DalsinAI/canvasskies
+
+Canvas Skies is made by The AmiCradle Team.
