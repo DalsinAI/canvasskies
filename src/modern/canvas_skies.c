@@ -4766,6 +4766,9 @@ static MissionMode sortie_mode(const Game *g)
 
 /* QA runs keep the pilot alive, as the held QA views always have, but a
  * QA run still flies its sortie to the end. */
+/* QA: TIME on the command line; see main(). */
+static int qa_frame_time;
+
 static int qa_spared(const Game *g)
 {
     return g->qa_hold || g->qa_run;
@@ -5979,6 +5982,12 @@ static void sortie_director_2d(Game *g, float dt)
     float pace = 1.0f - (float)g->chapter * 0.035f;
     int ahead_enemy = enemy_ground(g, ahead);
     if (g->special == SPECIAL_TRUCE || g->landed) return;
+    /* QA: a timed run meets a squall at 40 seconds and every minute after,
+     * so its drawing cost can be read off the frame-time sign. */
+    if (qa_frame_time && g->qa_run && !g->squall.active &&
+        g->sortie_clock >= 40.0f &&
+        fmodf(g->sortie_clock - 40.0f, 60.0f) < dt)
+        spawn_squall_2d(g);
     /* Archie ranges on any machine over their lines, and from a long way
      * back on one that is high. */
     g->archie_clock -= dt;
@@ -7895,6 +7904,8 @@ static int update_df_legs(Game *g, float dt)
                           (alive ? 1.6f : 1.0f);
     }
     g->hazard_clock -= dt;
+    if (qa_frame_time && g->qa_run && g->sortie_clock < dt * 1.5f)
+        g->hazard_clock = 40.0f;   /* QA: a timed run meets one at 40 s */
     if (g->hazard_clock <= 0.0f) {
         if (!g->squall.active) spawn_squall_3d(g);
         g->hazard_clock = 70.0f + random_unit(g) * 40.0f;
@@ -10310,21 +10321,45 @@ static void draw_sky_detail(Game *g)
     }
 }
 
+/* Low cloud seen from above: a few wisps of grey-white, each drawn in the
+ * same cheap ordered dither as the squalls so the fields show through,
+ * drifting a little faster than the ground beneath because they are
+ * nearer, and each with its soft shadow cast down and to the left by a
+ * sun in the upper right. */
 static void draw_top_down_clouds(Game *g)
 {
-    int i;
-    for (i = 0; i < 8; ++i) {
+    SDL_Surface *s = g->screen;
+    int pass, i, k;
+    for (pass = 0; pass < 2; ++pass)
+    for (i = 0; i < 6; ++i) {
         uint32_t seed = scene_hash((uint32_t)(i + 1) * 2654435761u ^
                                    (uint32_t)(g->chapter + 1) * 2246822519u ^
                                    (uint32_t)(g->mission + 7) * 3266489917u);
-        float travel = (float)(seed % 620u) + g->scroll *
-                       (0.105f + (float)((seed >> 10) & 31u) * 0.0018f);
-        int y = (int)fmodf(travel, 570.0f) - 92;
-        int x = (int)((seed >> 12) % 690u) - 72 +
-                (int)(sinf(g->scroll * 0.0012f + i * 1.37f) * 19.0f);
-        int width = 72 + (int)((seed >> 21) % 105u);
-        uint8_t alpha = (uint8_t)(39 + ((seed >> 27) & 23u));
-        draw_cloud_cluster(g->screen, x, y, width, alpha, seed, 1);
+        float travel = (float)(seed % 900u) + g->scroll *
+                       (1.08f + (float)((seed >> 10) & 15u) * 0.006f);
+        int y = (int)fmodf(travel, 900.0f) - 220;
+        int x = (int)((seed >> 12) % 640u) +
+                (int)(g->scroll * (float)((int)((seed >> 3) & 7u) - 3) * 0.004f);
+        int width = 60 + (int)((seed >> 21) % 70u);
+        int lobes = 2 + (int)((seed >> 27) & 1u);
+        x = ((x % 760) + 760) % 760 - 60;
+        if (y < -120 || y > SCREEN_H + 120) continue;
+        for (k = 0; k < lobes; ++k) {
+            uint32_t h = scene_hash(seed + (uint32_t)k * 7919u);
+            int lx = x + (k - lobes / 2) * width * 2 / 3 + (int)(h % 21u) - 10;
+            int ly = y + (int)((h >> 8) % 25u) - 12;
+            int rx = width * (3 + (int)((h >> 16) % 3u)) / 6;
+            int ry = rx * 2 / 5 + (int)((h >> 20) % 9u);
+            if (pass == 0)
+                /* The shadow on the fields. */
+                draw_cloud_blob(s, lx - 34, ly + 40, rx, ry, (int)seed & 63,
+                                (int)travel, 8, PIX_PACK(36, 38, 32),
+                                PIX_PACK(36, 38, 32));
+            else
+                draw_cloud_blob(s, lx, ly, rx, ry, (int)seed & 63,
+                                (int)travel, 9 + (int)((h >> 24) % 3u),
+                                PIX_PACK(236, 236, 232), PIX_PACK(188, 190, 192));
+        }
     }
 }
 
@@ -12370,8 +12405,8 @@ static const AircraftMesh *aircraft_mesh(int kind)
     return &meshes[kind];
 }
 
-/* QA: "DOGFIGHT n TIME" shows the average drawing time of a frame. */
-static int qa_frame_time;
+/* QA: TIME after any sortie entry shows the average drawing time of a
+ * frame (declared with the QA arguments above). */
 
 static int enemy_mesh_kind(const Game *g)
 {
@@ -15534,6 +15569,7 @@ int main(int argc, char **argv)
         for (k = 1; k < argc; ++k) {
             if (k > 1 && strcmp(argv[k], "RUN") == 0) qa_run_arg = 1;
             else if (k > 1 && strcmp(argv[k], "FLY") == 0) qa_fly_arg = 1;
+            else if (k > 1 && strcmp(argv[k], "TIME") == 0) qa_frame_time = 1;
             else argv[n++] = argv[k];
         }
         argc = n;
@@ -15715,7 +15751,7 @@ int main(int argc, char **argv)
         g.qa_hold = 1;
         set_scene(&g, SCENE_SORTIE);
     } else if (argc > 1 && strcmp(argv[1], "DOGFIGHT") == 0) {
-        qa_frame_time = argc > 3 && strcmp(argv[3], "TIME") == 0;
+        /* DOGFIGHT n TIME: TIME is taken with RUN and FLY above. */
         /* Use a durable late-war squadron for visual QA so the direct test
          * remains playable instead of completing before the window appears. */
         g.chapter = 6;
