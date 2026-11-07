@@ -15449,16 +15449,25 @@ static void remember_free(Game *g)
     g->remember_count = 0;
 }
 
-/* Lettering centred over the field, darkened behind so it reads. */
+/* Lettering centred over the field, cream with a soft dark edge all
+ * round so it reads over sky and poppies alike.  Fading, it thins into
+ * the field rather than darkening. */
 static void remember_line(Game *g, FontId face, int y, const char *text,
                           int fade)
 {
-    int w = font_width(face, text);
-    int v = 236 * fade / 32;
-    if (y < -40 || y > SCREEN_H + 40) return;
-    font_text(g, face, 320 - w / 2 + 1, y + 1, text, PIX_PACK(0, 0, 0));
-    font_text(g, face, 320 - w / 2, y, text,
-              PIX_PACK(v, v * 226 / 236, v * 198 / 236));
+    static const signed char edge[8][2] = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {1, 1}, {-1, 1}, {1, -1}, {2, 2}
+    };
+    int w = font_width(face, text), x = 320 - w / 2, k;
+    if (y < -40 || y > SCREEN_H + 40 || fade <= 0) return;
+    if (fade >= 12)
+        for (k = 0; k < (fade >= 24 ? 8 : 4); ++k)
+            font_text(g, face, x + edge[k][0], y + edge[k][1], text,
+                      PIX_PACK(14, 16, 12));
+    font_text(g, face, x, y, text,
+              fade >= 32 ? PIX_PACK(240, 230, 204) :
+              PIX_PACK(90 + 150 * fade / 32, 92 + 138 * fade / 32,
+                       80 + 124 * fade / 32));
 }
 
 static void draw_remember(Game *g)
@@ -15489,12 +15498,15 @@ static void draw_remember(Game *g)
             int variant = (int)(h % REMEMBER_POPPY_VARIANTS);
             int span = SCREEN_W + 120;
             int x = (int)((h >> 8) % (uint32_t)span) - pan * 13 / 10 % span;
-            int phase = (int)((now / (170u + (h >> 20) % 90u) +
-                               (h >> 12)) & 3u);
+            /* The frames lean one way, stand, and lean the other:
+             * played 0 1 2 3 2 1 for the to-and-fro. */
+            static const unsigned char sway[6] = {0, 1, 2, 3, 2, 1};
+            int phase = sway[(now / (170u + (h >> 20) % 90u) + (h >> 12)) %
+                             6u];
             const short *f;
             SDL_Rect src, dst;
             while (x < -60) x += span;
-            if (gust < 0.35f) phase = phase & 1;   /* barely stirring */
+            if (gust < 0.35f) phase = 1 + (phase & 1);   /* barely stirring */
             f = remember_poppy_frames[variant][phase % REMEMBER_SWAY_FRAMES];
             src.x = f[0]; src.y = f[1]; src.w = f[2]; src.h = f[3];
             dst.x = x;
@@ -15503,10 +15515,6 @@ static void draw_remember(Game *g)
             SDL_BlitSurface(g->remember_poppies, &src, s, &dst);
         }
     }
-    /* A soft shade down the middle for the lettering. */
-    for (i = 0; i < 6; ++i)
-        blend_rect(s, 150 + i * 12, 0, 340 - i * 24, SCREEN_H, 6, 8, 10,
-                   (uint8_t)(16 + i * 6));
     fade = t >= REMEMBER_HEADING_MS ? 32 :
            (int)(t * 32u / REMEMBER_HEADING_MS);
     remember_line(g, FONT_TITLE, 74, "WE REMEMBER", fade);
