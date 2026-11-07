@@ -96,6 +96,21 @@ path without playing the whole campaign. `CHAPTER_SUCCESS` similarly opens the
 successful Chapter 1 / Mission 12 debrief to qualify the ordinary chapter
 rollover and its saved continuation point.
 
+```text
+CanvasSkies WINGMEN e t b
+CanvasSkies GROUNDED
+CanvasSkies QASAVE
+```
+
+`WINGMEN e t b` sets Eccles, Gridpipe Thyne and Bluebottle to the given
+health (1 to 100) on the morning of 1916's "Eccles' Wing", writes the QA save
+and opens the briefing, whose roster reads FIT, BRUISED (under 75) or WOUNDED
+(under 35: he sits the sortie out). `GROUNDED` opens a debrief whose second
+offence grounds the pilot, so the saved continuation point must already be
+past the sortie flown without him. `QASAVE` is the ordinary title and menu on
+the QA save, to try Continue on what the other two wrote. The test entries
+print the flight and the continuation point to the shell whenever they save.
+
 Current controls:
 
 | Context | Controls |
@@ -138,6 +153,13 @@ Current controls:
   known Chapter 3 / Mission 5 save. It reached the title and displayed
   `CONTINUE CAMPAIGN - CHAPTER 3 / MISSION 5`, proving the persisted values
   survive process and emulator restart and are presented correctly.
+- Save version 6 adds a grounding still owed, as the last line. The wingmen's
+  health, in every version, now carries their wounds between sorties: each
+  sortie gives a man 25 back (to 100 at most) and then takes 20 for every
+  round that struck him, and one sent home wounded goes to the sick bay at 10.
+  Under 35 he sits the next sortie out. Older saves load with nobody grounded,
+  and their wingmen as they were saved (fit, or Thyne lost). The pure parts
+  live in `src/modern/canvas_career.h`, checked by `make -C tests/host check`.
 - Debrief and epilogue scene paths exist.
 - Fonts are provided as separately rendered sizes; field-sign text is centred.
 - Amiga drawer icon and obvious start icon are present in the package folder.
