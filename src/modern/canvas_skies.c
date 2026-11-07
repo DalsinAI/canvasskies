@@ -3460,7 +3460,9 @@ static void reset_sortie(Game *g)
     }
     memset(g->rounds, 0, sizeof(g->rounds));
     memset(g->sparks, 0, sizeof(g->sparks));
-    g->combat_seed ^= sim_now(g) * 2654435761u + 12345u;
+    /* The dice are shaken by the wall clock, so no two sorties fall
+     * out alike; only the sortie's timing runs on its own clock. */
+    g->combat_seed ^= SDL_GetTicks() * 2654435761u + 12345u;
     g->home_heading = (float)M_PI;
     g->guns_jammed = 0;
     g->jam_clear_until = 0;
