@@ -121,3 +121,15 @@ scout sprites), the ground crew, the weather and the light. No photograph,
 film still, outside texture or reference image was used or is kept in the
 repository.
 
+## We Remember
+
+`remember-field.bmp` (the old front in the summer of 1919, grassed-over
+trenches, rusted pickets and wire, flooded shell holes with reeds, broken
+trees and wild poppies under a high summer sky) and `remember-poppies.bmp`
+(poppies and grass tufts swaying in four frames) are original art for this
+game, painted on the host by `ports/amigaos3/make_remember.py`: the ground
+is a height field seen in perspective and lit by the sun, and everything
+standing on it is drawn from the distance forward from procedural noise
+and simple shapes. The poppies are drawn as wild flowers growing, not as
+any emblem. No photograph, outside texture or reference image was used.
+

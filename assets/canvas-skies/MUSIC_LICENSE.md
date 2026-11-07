@@ -88,3 +88,9 @@ game's own engine sound, the airscrew, wheels, thumps, the tail skid, wind,
 the wires, rain and birdsong, finished as an optical track. No recording,
 sample or outside sound of any kind is used.
 
+## We Remember: the wind
+
+`remember-wind.wav` (a minute of gentle wind and dry grass, looping without
+a seam) is synthesised for this game by `ports/amigaos3/make_remember_wind.py`
+from shaped noise. No recording or sample of any kind is used.
+
