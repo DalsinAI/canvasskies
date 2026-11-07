@@ -123,6 +123,38 @@ the assets the game loads, without the source PNGs.
 - [Delivery vision](CANVAS_SKIES_DELIVERY_VISION.md)
 - [Historical sources](CANVAS_SKIES_SOURCES.md)
 
+## We Remember
+
+At the very end of the game, after the Armistice, the camera drifts across
+the old front in the summer of 1919, the trenches grassed over and the
+poppies grown up through the wire, with nothing but the wind. Over it, under
+the words **WE REMEMBER**, a roll of names is shown.
+
+Those names are given by people who have given to the
+[Royal British Legion](https://www.britishlegion.org.uk/get-involved/donate),
+in memory of someone of theirs who served.
+
+**To give:** please give directly on the Legion's own site,
+<https://www.britishlegion.org.uk/get-involved/donate>. The game is free;
+we never see or handle any money, and we do not ask how much you gave.
+
+**To add a name:** after giving, either
+[open a We Remember request](https://github.com/DalsinAI/canvasskies/issues/new?template=we-remember.yml)
+or, without a GitHub account, email
+[amigachrome@gmail.com](mailto:amigachrome@gmail.com?subject=We%20Remember)
+with the rank, name, unit and years of the person to be remembered (rank,
+unit and years are optional), saying that you have given to the Legion and
+that you consent to the name being shown in the game and this repository.
+Names are shown as `Rank. Name, Unit, Year`. Names are added in the next release, in `WeRemember.txt` in the
+`CanvasSkies` drawer, which the game reads (in this repository it is
+`ports/amigaos3/package/WeRemember.txt`). Only the name to be
+remembered is shown, never yours, and no email addresses or amounts are kept
+in the game or this repository.
+
+**To remove a name:** open an issue or email amigachrome@gmail.com asking
+for it to be taken off,
+and it will be removed in the next release.
+
 ## Licence
 
 Canvas Skies is free software under the

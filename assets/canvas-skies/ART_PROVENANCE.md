@@ -131,3 +131,19 @@ rebuilt, from `ports/amigaos3`, with:
     python3 films/sound.py out/sound
     python3 make_airfield_films.py out/master/frames out/sound
 
+
+## We Remember
+
+The roll call's picture of the old front in the summer of 1919 is original
+art for this game, painted on the host by `ports/amigaos3/make_remember.py`.
+It comes in four layers that the game slides at different speeds
+(`remember-sky.bmp`, `remember-far.bmp`, `remember-mid.bmp`,
+`remember-near.bmp`),
+with swaying plants (`remember-poppies.bmp`) and butterflies, a lark and
+thistledown (`remember-life.bmp`). The land is a height field lit by a low
+evening sun with its shadows traced across it; the clouds are built from
+lit puffs; the flowers, grasses, wire, pickets, trees, ruins and the things
+left in the grass are painted as shaded shapes from the distance forward.
+All of it is made from procedural noise and simple shapes. The poppies
+are drawn as wild flowers growing, not as any emblem. No photograph,
+outside texture or reference image was used.

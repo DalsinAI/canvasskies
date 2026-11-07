@@ -17,6 +17,7 @@ project owner.
 | `cinema-piano.wav` | `64e500e57e1b4a76893de0b9fe94cbab881e9a2d48d38d31b2570e8bd5523994` | Ours: `ports/amigaos3/make_cinema_piano.py` | Synthesised piano | Rendered by the script | Composed for the game | Proven |
 | `washington-post-gramophone.wav` | `ef6ec4b0b7571fc6bbea3c7e92a4c929ba3303a3edc1b6851d987d1d7fb354f8` | Ours, rendered from Mutopia piece 1321 (MIDI SHA-256 `d5b3295e89cea010736b57e8b11962d87ed1bfdb553a841acf84e28fc4552dfa`) | FluidR3_GM synthesis | Rendered 2 November 2026 | Composition public domain; MIDI CC BY-SA 3.0, so the render is CC BY-SA 3.0; FluidR3_GM MIT | Proven |
 | `airfield-films.bin` (pictures and sound) | `33f74c8a4fd18e83727442b0c3416ec9e04e7ee8e723460a28001db258aebc44` | Ours: `ports/amigaos3/films/` and `make_airfield_films.py` | Rendered and synthesised | Rendered by the scripts | Ours (GPL-3.0 with the game) | Proven |
+| `remember-wind.wav` | `137141fa74d3671ad6510e1e06c30336fc4ca7495d05e8d95b612c116c38f5ed` | Ours: `ports/amigaos3/make_remember_wind.py` | Synthesised wind and lark | Rendered by the script | Ours (GPL-3.0 with the game) | Proven |
 | `newsreels.bin` | `2bb6e03f9016a4d4980cafef26ba4a066e37dac536cfe32111482e458908bd0f` | Eight films of 1914-1921, listed in `CANVAS_SKIES_SOURCES.md` with their source SHA-256 in `ports/amigaos3/newsreel-sources.json` | Silent film | 1914-1921 | Public domain or CC0; see below | Kept; four films awaiting the project owner's rights confirmation |
 | `amazing-grace-bagpipes.wav` | `523d80020a8f1291eafa969fa8283ac13d4dcae49c4d6cb1610db7f653c8bbb7` | Internet Archive item `AmazingGraceBagpipes`, file `amazing_grace.mp3` (SHA-256 `17c7ea3fa595ee8bf7b8eabaa225b32359ff910948af3ef51ce222619d2932e0`) | Band of the U.S. Air Force Reserve | Not stated by the item; a modern recording | Public domain, US federal government work | Kept by the project owner |
 | `tipperary-gramophone.wav` | `33829dcb7c7ac7c4451295eb9860eb448e45667116102f2c34b493acac079bd1` | MP3 `2bab57142be64640a20f4c6a302d284a14fd6a9699b35eab25a1aa5234cf00f6`; archive item not recorded | Prince's Band (tag) | 1914 (tag) | Cleared by the project owner | Cleared by the project owner, 7 November 2026 |
@@ -213,3 +214,10 @@ owner.** All eight films date from 1914-1921 and are tagged public domain or
 CC0 where they are hosted. The US National Archives' own catalogue marks four
 of them "Copyright: Restricted - Possibly" or "Undetermined" (see that file);
 the project owner is seeking confirmation from the Archives for those four.
+
+## We Remember: the wind
+
+`remember-wind.wav` (a minute of gentle wind and dry grass, looping without
+a seam, with a skylark very faint and far off twice in it) is synthesised
+for this game by `ports/amigaos3/make_remember_wind.py`
+from shaped noise. No recording or sample of any kind is used.

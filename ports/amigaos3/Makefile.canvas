@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_career.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_career.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h src/modern/canvas_remember.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -62,6 +62,13 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_LOSS_CARD_BMP=\"PROGDIR:assets/canvas-skies/loss-card.bmp\" \
 	-DCANVAS_NEWSREELS_BIN=\"PROGDIR:assets/canvas-skies/newsreels.bin\" \
 	-DCANVAS_AIRFIELD_FILMS_BIN=\"PROGDIR:assets/canvas-skies/airfield-films.bin\" \
+	-DCANVAS_REMEMBER_POPPIES_BMP=\"PROGDIR:assets/canvas-skies/remember-poppies.bmp\" \
+	-DCANVAS_REMEMBER_WIND_WAV=\"PROGDIR:assets/canvas-skies/remember-wind.wav\" \
+	-DCANVAS_REMEMBER_SKY_BMP=\"PROGDIR:assets/canvas-skies/remember-sky.bmp\" \
+	-DCANVAS_REMEMBER_FAR_BMP=\"PROGDIR:assets/canvas-skies/remember-far.bmp\" \
+	-DCANVAS_REMEMBER_MID_BMP=\"PROGDIR:assets/canvas-skies/remember-mid.bmp\" \
+	-DCANVAS_REMEMBER_NEAR_BMP=\"PROGDIR:assets/canvas-skies/remember-near.bmp\" \
+	-DCANVAS_REMEMBER_LIFE_BMP=\"PROGDIR:assets/canvas-skies/remember-life.bmp\" \
 	-DCANVAS_PIANO_WAV=\"PROGDIR:assets/canvas-skies/cinema-piano.wav\" \
 	-DCANVAS_FONTS_BMP=\"PROGDIR:assets/canvas-skies/fonts.bmp\" \
 	-DCANVAS_PLAYER_SPRITES_BMP=\"PROGDIR:assets/canvas-skies/aircraft-player.bmp\" \
@@ -116,7 +123,7 @@ package: $(OUT)
 	mkdir -p $(PACKAGE)/assets/canvas-skies
 	cp $(OUT) $(PACKAGE)/CanvasSkies
 	cp "ports/amigaos3/package/Start Canvas Skies" "ports/amigaos3/package/Start Canvas Skies.info" \
-	   ports/amigaos3/package/ReadMe $(PACKAGE)/
+	   ports/amigaos3/package/ReadMe ports/amigaos3/package/WeRemember.txt $(PACKAGE)/
 	cp ports/amigaos3/package/Drawer.info build-canvas-skies/package/CanvasSkies.info
 	cp $(RUNTIME_ASSETS) $(PACKAGE)/assets/canvas-skies/
 	for f in $(PACKAGE_DOCS); do \
