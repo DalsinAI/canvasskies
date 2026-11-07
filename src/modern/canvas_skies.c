@@ -10321,17 +10321,90 @@ static void draw_sky_detail(Game *g)
     }
 }
 
-/* Low cloud seen from above: a few wisps of grey-white, each drawn in the
- * same cheap ordered dither as the squalls so the fields show through,
- * drifting a little faster than the ground beneath because they are
- * nearer, and each with its soft shadow cast down and to the left by a
- * sun in the upper right. */
+/* ---- Soft cloud puffs ----------------------------------------------------
+ *
+ * A handful of alpha masks, made once at start-up: soft puffs of cloud at
+ * three sizes and two shapes each, from the cloud noise table with a
+ * radial fall-off, so the outline is rounded and ragged and the edge
+ * feathers away to nothing.  Drawing one is a look-up and a blend per
+ * pixel over the puff's own small area, skipping the clear corners. */
+
+enum { PUFF_SIZES = 3, PUFF_SHAPES = 2 };
+static const unsigned char puff_dims[PUFF_SIZES][2] = {{36, 22}, {56, 34}, {84, 50}};
+static uint8_t *puff_mask[PUFF_SIZES][PUFF_SHAPES];
+
+static void make_puff_masks(void)
+{
+    static int ready;
+    int size, shape, x, y;
+    if (ready) return;
+    ready = 1;
+    make_cloud_noise();
+    for (size = 0; size < PUFF_SIZES; ++size)
+        for (shape = 0; shape < PUFF_SHAPES; ++shape) {
+            int w = puff_dims[size][0], h = puff_dims[size][1];
+            uint8_t *m = (uint8_t *)malloc((size_t)(w * h));
+            puff_mask[size][shape] = m;
+            if (!m) continue;
+            for (y = 0; y < h; ++y)
+                for (x = 0; x < w; ++x) {
+                    float dx = ((float)x + 0.5f - (float)w * 0.5f) / ((float)w * 0.5f);
+                    float dy = ((float)y + 0.5f - (float)h * 0.5f) / ((float)h * 0.5f);
+                    /* The noise, sampled at a scale to suit the puff and at
+                     * a different place for each shape, pushes the edge in
+                     * and out and thins the middle in places. */
+                    int nx = (x * 24 / w + shape * 11 + size * 5) & 31;
+                    int ny = (y * 16 / h + shape * 7 + size * 3) & 31;
+                    float n = (float)cloud_noise[ny][nx] / 255.0f;
+                    float r = sqrtf(dx * dx + dy * dy) * (0.72f + n * 0.5f);
+                    float a = (1.0f - r) * 2.2f;
+                    if (a < 0.0f) a = 0.0f;
+                    if (a > 1.0f) a = 1.0f;
+                    a = a * a * (3.0f - 2.0f * a) * (0.75f + n * 0.25f);
+                    m[y * w + x] = (uint8_t)(a * 32.0f + 0.5f);
+                }
+        }
+}
+
+/* Blends a puff over the screen at (x, y), its top left, toward the
+ * colour 'top' at its upper edge and 'bottom' at its lower; opacity is
+ * out of 32. */
+static void draw_puff(SDL_Surface *s, int size, int shape, int x, int y,
+                      pix_t top, pix_t bottom, int opacity)
+{
+    const uint8_t *m = puff_mask[size][shape];
+    int w = puff_dims[size][0], h = puff_dims[size][1];
+    int row, col, c0 = x < 0 ? -x : 0, c1 = x + w > s->w ? s->w - x : w;
+    if (!m || c0 >= c1) return;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (row = 0; row < h; ++row) {
+        const uint8_t *mr;
+        pix_t *out, colour;
+        if (y + row < 0 || y + row >= s->h) continue;
+        mr = m + row * w;
+        out = PIX_ROW(s, y + row) + x;
+        colour = pix_mix(top, bottom, row * 32 / h);
+        for (col = c0; col < c1; ++col) {
+            int t = mr[col];
+            if (!t) continue;
+            t = (t * opacity) >> 5;
+            if (t) out[col] = pix_mix(out[col], colour, t);
+        }
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
+/* Low cloud seen from above: a few puffs of grey-white each, of varied
+ * size and shape, lit from a sun in the upper right, drifting a little
+ * faster than the ground beneath because they are nearer to us, and each
+ * casting its soft shadow down and to the left. */
 static void draw_top_down_clouds(Game *g)
 {
     SDL_Surface *s = g->screen;
     int pass, i, k;
+    make_puff_masks();
     for (pass = 0; pass < 2; ++pass)
-    for (i = 0; i < 6; ++i) {
+    for (i = 0; i < 5; ++i) {
         uint32_t seed = scene_hash((uint32_t)(i + 1) * 2654435761u ^
                                    (uint32_t)(g->chapter + 1) * 2246822519u ^
                                    (uint32_t)(g->mission + 7) * 3266489917u);
@@ -10340,25 +10413,22 @@ static void draw_top_down_clouds(Game *g)
         int y = (int)fmodf(travel, 900.0f) - 220;
         int x = (int)((seed >> 12) % 640u) +
                 (int)(g->scroll * (float)((int)((seed >> 3) & 7u) - 3) * 0.004f);
-        int width = 60 + (int)((seed >> 21) % 70u);
-        int lobes = 2 + (int)((seed >> 27) & 1u);
+        int puffs = 3 + (int)((seed >> 27) % 3u);
         x = ((x % 760) + 760) % 760 - 60;
         if (y < -120 || y > SCREEN_H + 120) continue;
-        for (k = 0; k < lobes; ++k) {
+        for (k = 0; k < puffs; ++k) {
             uint32_t h = scene_hash(seed + (uint32_t)k * 7919u);
-            int lx = x + (k - lobes / 2) * width * 2 / 3 + (int)(h % 21u) - 10;
-            int ly = y + (int)((h >> 8) % 25u) - 12;
-            int rx = width * (3 + (int)((h >> 16) % 3u)) / 6;
-            int ry = rx * 2 / 5 + (int)((h >> 20) % 9u);
+            int size = k == 0 ? 2 : (int)(h % 3u);
+            int shape = (int)((h >> 4) & 1u);
+            int px = x + (k - puffs / 2) * 34 + (int)((h >> 8) % 31u) - 15 -
+                     puff_dims[size][0] / 2;
+            int py = y + (int)((h >> 16) % 40u) - 20 - puff_dims[size][1] / 2;
             if (pass == 0)
-                /* The shadow on the fields. */
-                draw_cloud_blob(s, lx - 34, ly + 40, rx, ry, (int)seed & 63,
-                                (int)travel, 8, PIX_PACK(36, 38, 32),
-                                PIX_PACK(36, 38, 32));
+                draw_puff(s, size, shape, px - 30, py + 36,
+                          PIX_PACK(28, 30, 24), PIX_PACK(28, 30, 24), 11);
             else
-                draw_cloud_blob(s, lx, ly, rx, ry, (int)seed & 63,
-                                (int)travel, 9 + (int)((h >> 24) % 3u),
-                                PIX_PACK(236, 236, 232), PIX_PACK(188, 190, 192));
+                draw_puff(s, size, shape, px, py, PIX_PACK(244, 244, 240),
+                          PIX_PACK(172, 176, 184), 18 + (int)((h >> 24) % 6u));
         }
     }
 }
