@@ -10553,7 +10553,7 @@ static void draw_mess(Game *g)
      * soberly, and to him.  One toast a night, from these. */
     static const char *const wake_toasts[4] = {
         "%s STANDS AND RAISES HIS GLASS: TO ABSENT FRIENDS.",
-        "%s FILLS HIS GLASS AND SETS IT AT THE EMPTY PLACE.",
+        "%s TURNS HIS GLASS DOWN AT THE EMPTY PLACE.",
         "THE COLONEL RAISES HIS GLASS TO THE BOARD. WE STAND WITH HIM.",
         "%s SINGS ONE VERSE, QUIETLY. NOBODY JOINS IN, AND NOBODY STOPS HIM."
     };
