@@ -1,4 +1,4 @@
-Canvas Skies 0.2.0 RC5
+Canvas Skies 0.2.0 RC6
 ======================
 
 An original First World War flying game for AmigaOS 3. Fly with pilot
@@ -6,8 +6,30 @@ Neddy Seagoon of the Royal Flying Corps through eight chapters, from the
 first observation flights of August 1914 to the eleventh hour of the
 Armistice.
 
-New in RC5
+New in RC6
 ----------
+- The Christmas truce of 1914 flown in full: out over men of both
+  armies meeting round braziers in no man's land, the pudding dropped
+  on their aerodrome, and home to land, with nobody firing
+- The 1914 cockpit patrols give Tom an observer's work: mark a column,
+  drop a message bag on headquarters (B), photograph a battery, and
+  signal the fall of our guns' shells (S)
+- Tom's Lewis gun depresses to thirty degrees below level over the
+  sides, and some attackers come up from below
+- Squalls in the cockpit and the rear seat too, and a rain haze when
+  you fly into one
+- The officers in the mess painted as men by lamplight, and each
+  evening's story told by what they are doing
+- Wingmen carry their wounds from one sortie to the next, and a
+  grounding is kept if you quit
+- We Remember: a roll call over the old front at the end of the game
+- Every chapter has four side-on, four top-down, two dogfight and two
+  rear-seat sorties, and every order can be met by a careful pilot
+- The aerodrome films mended: the 1914 machine climbs away, the flight
+  of three stays in the picture, and the muddy field is mud
+
+Changes in RC5
+--------------
 - Missions with something to do all the way: Archie bursting where you
   would have been, ground machine guns, riflemen taking pot shots,
   kite balloons on their cables, squalls, scouts head-on and on your
@@ -121,7 +143,8 @@ Cockpit          Left/Right bank, Down pulls up, Up pushes down,
                  X/Z throttle, Space fires, H turns for home
 Rear gunner      Arrow keys traverse and elevate, Space fires
 1914 tasks       B drops the message bag; fly steady over the battery
-                 to photograph it
+                 to photograph it; in the cockpit, S signals the fall
+                 of our guns' shells
 Films            Enter, Space or Escape skips
 Display          F9 fullscreen, F7 half detail, F8 full flight model
                  (and the Officer's Preferences on the officers' menu)
