@@ -124,7 +124,7 @@ repository.
 Their soundtracks are synthesised by `ports/amigaos3/films/sound.py` from
 the same account of each film (see `MUSIC_LICENSE.md`); no recording or
 sample is used. The shipped file has SHA-256
-`33f74c8a4fd18e83727442b0c3416ec9e04e7ee8e723460a28001db258aebc44`. It is
+`a894e1c36e4e00a96c85ae8345e2000e8fbe3ac2a50d402e80961323c14179a2`. It is
 rebuilt, from `ports/amigaos3`, with:
 
     python3 films/airfield.py out/master

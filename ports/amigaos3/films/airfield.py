@@ -134,22 +134,34 @@ def field(mud=0.0, wet=0.0, rain=0.0, tracks=(0.0, -9.0, 7.0), dark=1.0):
         res = {}
         wet_w = np.zeros_like(px)
         if mud:
+            # Churned earth: dark and wet where the wheels and boots have
+            # been, lumpy with clods, the grass worn through in patches.
             m = bilinear(MUD, px * 1.2, pz * 1.2)
-            muddy = np.clip((m - 0.33) * 3.5 + wear * 1.2, 0, 1) * mud
-            brown = SOIL * 0.75 * (0.45 + 1.1 * fine * (0.6 + 0.8 * g1))[:, None]
+            clods = bilinear(FINE, px * 55, pz * 55)
+            muddy = np.clip((m - 0.30) * 3.5 + wear * 1.4, 0, 1) * mud
+            brown = SOIL * 0.55 * (0.40 + 1.2 * clods * (0.6 + 0.8 * g1))[:, None]
             col = col * (1 - muddy[:, None]) + brown * muddy[:, None]
-            # Deep ruts full of water along the tyre lines.
-            churn = np.zeros_like(px)
+            # Ruts along the tyre lines: a dark trough with water standing
+            # in its bottom, glinting.
+            trough = np.zeros_like(px)
+            water = np.zeros_like(px)
             for i, x0 in enumerate(tracks):
                 wob = 1.6 * np.sin(pz * 0.031 + i * 2.1) + 0.8 * np.sin(pz * 0.11 + i)
                 dx = px - x0 - wob
-                for s in (-0.86, 0.86):
-                    churn += np.exp(-((dx - s) / 0.35) ** 2)
-            deep = np.clip(churn, 0, 1) * mud
-            puddle = np.clip((m - 0.60) * 6, 0, 1) * mud + \
-                deep * 0.35 * np.clip((g1 - 0.45) * 4, 0, 1)
-            col = col * (1 - 0.45 * deep * (0.6 + 0.6 * fine))[:, None]
-            wet_w = np.maximum(wet_w, np.clip(puddle, 0, 1) * 0.5)
+                for sd in (-0.86, 0.86):
+                    trough += np.exp(-((dx - sd) / 0.30) ** 2)
+                    water += np.exp(-((dx - sd) / 0.12) ** 2)
+            trough = np.clip(trough, 0, 1) * mud
+            broken = np.clip((bilinear(MUD, px * 4 + 9, pz * 2.5) - 0.50) * 4, 0, 1)
+            water = np.clip(water, 0, 1) * mud * broken
+            col = col * (1 - 0.55 * trough)[:, None]
+            # Standing puddles in the hollows, holding the sky.
+            pm = bilinear(MUD, px * 6.0 + 40, pz * 6.0)
+            puddle = np.clip((pm - 0.66) * 14, 0, 1) * mud * np.clip((m - 0.25) * 4, 0, 1) * (1 - out)
+            col = col * (1 - 0.5 * np.clip((pm - 0.60) * 9, 0, 1) * mud)[:, None]   # dark wet rims
+            wet_w = np.maximum(wet_w, np.maximum(puddle * 0.8, water * 0.55))
+            # Everything else has the sheen of wet earth.
+            wet_w = np.maximum(wet_w, muddy * 0.12 * (1 - out))
         if wet:
             m = bilinear(MUD, px * 0.8 + 50, pz * 0.8)
             puddle = np.clip((m - 0.60) * 7 + wear * 0.6 - 0.2, 0, 1) * wet
@@ -528,8 +540,12 @@ def film_takeoff_three(t):
         planes.append(Plane("late", pos, R, prop=t * 3.0 + k, spin=1.0, rpm=rpm,
                             power=0.85 + 0.15 * smooth((t - lag) / 0.6), running=True,
                             machine=MACHINES[names[k]], speed=v))
-    lead = planes[0].pos
-    cam = ((27.0, 1.8, 12.0), (0.0, 1.6 + max(0.0, lead[1] - 1.3) * 0.75, lead[2] - 3.0), 0.0)
+    # The camera keeps the whole vee in the frame: it looks at the middle
+    # of the three, from far enough out that the nearer wingman passes
+    # well inside the edge.
+    ctr = sum(p.pos for p in planes) / 3
+    top = max(p.pos[1] for p in planes)
+    cam = ((44.0, 2.0, 4.0), (ctr[0] - 2.0, 1.4 + max(0.0, top - 1.3) * 0.7, ctr[2]), 0.0)
 
     def fx(f):
         for p in planes:
@@ -562,7 +578,7 @@ def film_takeoff_mud(t):
     plane = Plane(kind, pos, R, prop=t, spin=1.0, rpm=1.0, power=1.0, running=True,
                   machine=MACHINES["scout_mud"], speed=v)
     plane.bump_t = 2.0
-    cam = ((-12.0, 1.35, 10.0), (0.0, 1.4 + max(0.0, pos[1] - 1.4) * 0.8, pos[2] + 1.5), 0.0)
+    cam = ((-11.0, 2.6, 8.0), (0.0, 0.9 + max(0.0, pos[1] - 1.4) * 0.8, pos[2] + 1.5), 0.0)
 
     def fx(f):
         rng = np.random.default_rng(int(t * FPS))
@@ -581,6 +597,14 @@ def film_takeoff_mud(t):
                     age = rng.random()
                     p = w + np.array([side * 0.4, 0.2 + age * 0.8, -age * 3.5])
                     f.puff(p, 0.4 + age, np.array([0.40, 0.34, 0.27]), 0.18 * (1 - age))
+                # Water thrown up white from the ruts and the puddles in a
+                # sheet off each wheel, falling back.
+                for i in range(18):
+                    age = rng.random()
+                    p = w + np.array([side * (0.2 + age * 1.4) + rng.normal(0, 0.1),
+                                      age * 1.5 - age * age * 1.3, -age * (1.5 + v * 0.18)])
+                    f.puff(p, 0.10 + 0.30 * age, np.array([0.78, 0.78, 0.76]),
+                           0.55 * (1 - age) * min(1.0, v / 6))
 
     shot = Shot(cam, "overcast", [plane], fx=fx, wind=(0.9, 0.85),
                 ground=field(mud=1.0, wet=0.3, tracks=(0.0, -3.5, 4.0, -9.0)))
@@ -602,8 +626,8 @@ def film_takeoff_1914(t):
     story = t if t < t_cut else t + gap
     t_open = 4.0 + gap
     rpm_fn = rpm_curve([(0.0, 0.40), (t_open, 0.40), (t_open + 1.0, 1.0)])
-    pos, pitch, roll, v, air = takeoff(kind, story, t_open + 0.35, 5.2, v_lift=13.0,
-                                       climb=math.radians(8))
+    pos, pitch, roll, v, air = takeoff(kind, story, t_open + 0.35, 5.4, v_lift=13.0,
+                                       climb=math.radians(10))
     R = M.attitude(0.0, pitch, roll)
     power = 0.3 if story < t_open else 0.3 + 0.7 * smooth((story - t_open) / 0.9)
     seated = story > 3.15
@@ -879,7 +903,7 @@ FILMS = {
     "takeoff-1-dawn-prop-swing": (film_takeoff_dawn, 8.0, "leader"),
     "takeoff-2-flight-of-three": (film_takeoff_three, 6.0, "cut"),
     "takeoff-3-muddy-field": (film_takeoff_mud, 5.5, "cut"),
-    "takeoff-4-1914-observer-climbs-in": (film_takeoff_1914, 7.5, "cut"),
+    "takeoff-4-1914-observer-climbs-in": (film_takeoff_1914, 8.2, "cut"),
     "landing-1-dusk-three-point": (film_land_dusk, 6.5, "leader"),
     "landing-2-shot-up": (film_land_shot_up, 6.5, "cut"),
     "landing-3-dead-stick": (film_land_dead_stick, 5.5, "cut"),
