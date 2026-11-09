@@ -1081,6 +1081,9 @@ static void carbine_muzzle_position(const Game *g, float *x, float *y);
 static void td_build_mission(Game *g);
 static void qa_log_sortie(Game *g);
 static int observer_next(const Game *g);
+static void draw_puff_scaled(SDL_Surface *s, int size, int shape, int cx,
+                             int cy, int w, int h, pix_t top, pix_t bottom,
+                             int opacity);
 static int update_gunner_legs(Game *g, float dt);
 static void shift_frame(SDL_Surface *s, int ox, int oy);
 static void cinema_start(Game *g);
@@ -8117,7 +8120,7 @@ static void draw_squall_3d(Game *g)
         if (!p.visible || p.depth < 30.0f) continue;
         r = (int)((150.0f + (float)((h >> 14) % 80u)) * WORLD_FOCAL / p.depth);
         if (r < 4) r = 4;
-        if (r > 220) r = 220;
+        if (r > 150) r = 150;
         if (p.x < -r || p.x > SCREEN_W + r || p.y < -r || p.y > SCREEN_H + r)
             continue;
         if (k < 3) {
@@ -8127,9 +8130,11 @@ static void draw_squall_3d(Game *g)
                 draw_rain(s, p.x - r / 2, p.x + r / 2, p.y, foot.y < SCREEN_H ?
                           foot.y : SCREEN_H - 1, 2, h, PIX_PACK(126, 134, 146));
         }
-        draw_cloud_blob(s, p.x, p.y, r, r * 2 / 3, (int)h & 127, k * 23,
-                        12 + (int)((h >> 20) % 4u),
-                        PIX_PACK(140, 144, 152), PIX_PACK(70, 74, 84));
+        /* Soft billows blended over the sky, as the low cloud from above,
+         * darker towards the rain. */
+        draw_puff_scaled(s, (int)((h >> 3) % 3u), (int)((h >> 5) & 1u), p.x, p.y,
+                         r * 2, r * 4 / 3, PIX_PACK(150, 152, 160),
+                         PIX_PACK(74, 78, 88), 22 + (int)((h >> 20) % 6u));
     }
     if (in_squall_3d(g)) draw_blinding_cloud(g);
 }
@@ -11090,6 +11095,43 @@ static void draw_puff(SDL_Surface *s, int size, int shape, int x, int y,
             if (!t) continue;
             t = (t * opacity) >> 5;
             if (t) out[col] = pix_mix(out[col], colour, t);
+        }
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
+/* A puff drawn at any size, centred on (cx, cy), w by h: the mask is
+ * stepped through to fit.  Large puffs are blended in 2x2 blocks, which
+ * the eye does not see in soft cloud and which quarters the cost. */
+static void draw_puff_scaled(SDL_Surface *s, int size, int shape, int cx,
+                             int cy, int w, int h, pix_t top, pix_t bottom,
+                             int opacity)
+{
+    const uint8_t *m;
+    int mw = puff_dims[size][0], mh = puff_dims[size][1];
+    int step = w > 70 ? 2 : 1, x0 = cx - w / 2, y0 = cy - h / 2, x, y;
+    make_puff_masks();
+    m = puff_mask[size][shape];
+    if (!m || w < 2 || h < 2) return;
+    if (x0 + w < 0 || x0 >= s->w || y0 + h < 0 || y0 >= s->h) return;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (y = 0; y < h; y += step) {
+        int sy = y0 + y, my = y * mh / h, k;
+        const uint8_t *mr = m + my * mw;
+        pix_t colour = pix_mix(top, bottom, y * 32 / h);
+        if (sy < 0 || sy >= s->h) continue;
+        for (x = 0; x < w; x += step) {
+            int sx = x0 + x, t = mr[x * mw / w];
+            if (!t || sx < 0 || sx >= s->w) continue;
+            t = (t * opacity) >> 5;
+            if (!t) continue;
+            for (k = 0; k < step * step; ++k) {
+                int px = sx + (k & 1), py = sy + (k >> 1);
+                pix_t *row;
+                if (px >= s->w || py >= s->h) continue;
+                row = PIX_ROW(s, py);
+                row[px] = pix_mix(row[px], colour, t);
+            }
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
