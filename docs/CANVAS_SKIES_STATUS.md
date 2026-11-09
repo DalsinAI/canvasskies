@@ -154,10 +154,10 @@ Controls are in the drawer's `ReadMe` and the README.
 2. **Timing:** frame times were measured only on the lab, which is faster than
    a real 68040. Squalls, clouds, the films and the Lewis gun's low arc need
    timing on real hardware or PiStorm.
-3. **Autopilot results in RC6:** the 1918 spring side-on sortie met 3 of its 5
-   orders; the 1918 cockpit dogfight downed none (the cockpit autopilot rarely
-   does); the slow-frames dogfight was still flying after 600 seconds. These
-   are the autopilot's results, not a person's.
+3. **Slow machines:** each frame advances the sortie clock by at most 50 ms,
+   so a machine drawing under 20 frames a second plays in slow motion (the
+   lab's simulated slow 68040 took about three times as long). Whether a real
+   040 falls below that has not been measured.
 4. **Cache on:** with "keep the art in memory" on, a long campaign grows to
    about 48 MB.
 5. **Recordings and film:** every shipped recording and film is listed with
