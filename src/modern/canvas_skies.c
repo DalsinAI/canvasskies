@@ -8926,7 +8926,14 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
     for (i = 0; i < MAX_TARGETS; ++i) {
         const Target *t = &g->targets[i];
         float dx = t->world_x - g->scroll - g->player_x;
-        if (!t->active || t->civilian || t->done || t->wrecked) continue;
+        /* A machine-gun post met on the way is no part of the order: a
+         * careful pilot keeps his bombs for the targets he was sent for,
+         * as the order is reckoned (check_campaign.py) on those and the
+         * bombs alone.  The old QA pilot bombed every post he met and on
+         * a 1918 sortie came home with the bombs spent and the order
+         * short. */
+        if (!t->active || t->civilian || t->done || t->wrecked ||
+            (t->hazard && !t->task)) continue;
         if (dx < -30.0f || dx > 360.0f || dx > best) continue;
         best = dx;
         if (t->task && dx < 260.0f) task_close = 1;
@@ -8947,8 +8954,11 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
             }
         } else if (mission_armed(g)) {
             /* A bomb leaves at 55 down and falls at 105: when will it
-             * reach the gun's height? */
-            float h = fmaxf(ground + 19.0f - 12.0f - 32.0f - g->player_y, 1.0f);
+             * reach the gun's height?  The gun's own ground, not the
+             * ground under the machine: on a slope the two differ by
+             * enough to throw the bomb a gun's length long or short. */
+            float h = fmaxf((float)terrain_y(t->world_x) - 12.0f - 16.0f -
+                            (g->player_y + 16.0f), 1.0f);
             float fall = (-55.0f + sqrtf(55.0f * 55.0f + 210.0f * h)) / 105.0f;
             /* Let go on the mark, not at the edge of the window, or the
              * bomb falls a gun's length short. */
