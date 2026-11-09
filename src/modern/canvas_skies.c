@@ -132,9 +132,6 @@
 #ifndef CANVAS_GUNNER_COCKPIT_BMP
 #define CANVAS_GUNNER_COCKPIT_BMP "assets/canvas-skies/gunner-cockpit.bmp"
 #endif
-#ifndef CANVAS_GUNNER_RING_BMP
-#define CANVAS_GUNNER_RING_BMP "assets/canvas-skies/gunner-ring-empty-v2.bmp"
-#endif
 #ifndef CANVAS_GUNNER_AIRFRAME_BMP
 #define CANVAS_GUNNER_AIRFRAME_BMP "assets/canvas-skies/gunner-airframe-tail.bmp"
 #endif
@@ -819,7 +816,6 @@ typedef struct {
     SDL_Surface *cockpit_revolver;      /* 1914: two frames, rest and kick */
     SDL_Surface *rear_carbine;          /* 1914: the carbine at every aim */
     SDL_Surface *gunner_cockpit;
-    SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
     SDL_Surface *rear_lewis;            /* 1915-18: the ring and the Lewis */
     SDL_Surface *explosion_atlas;
@@ -14708,7 +14704,6 @@ static const AssetSpec asset_specs[] = {
     ASSET(pilot_cockpit_single, CANVAS_PILOT_COCKPIT_SINGLE_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
     ASSET(cockpit_revolver, CANVAS_COCKPIT_REVOLVER_BMP, AG_COCKPIT, 1, ASSET_LOOSE_KEY),
     ASSET(gunner_cockpit, CANVAS_GUNNER_COCKPIT_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
-    ASSET(gunner_ring, CANVAS_GUNNER_RING_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
     ASSET(gunner_airframe, CANVAS_GUNNER_AIRFRAME_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
     /* The Lewis gun and the carbine stay in their 256 colours, keyed by
      * the last entry: a byte a pixel, half what the screen's format would
