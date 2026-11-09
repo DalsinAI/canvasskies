@@ -3583,9 +3583,19 @@ static void reset_sortie(Game *g)
     g->raider_through = 0;
     g->wreck_started = 0;
     if (g->special == SPECIAL_TRUCE) {
-        /* Two gatherings in no man's land, then their aerodrome. */
-        for (i = 0; i < MAX_TARGETS; ++i)
-            g->targets[i].type = i < 2 ? 3 : 4;
+        /* Christmas Day along the line: a gathering of both armies in no
+         * man's land every quarter of a minute or so, the footballers
+         * among them, then their aerodrome for the pudding.  More of them
+         * wave the machine home. */
+        for (i = 0; i < MAX_TARGETS; ++i) {
+            memset(&g->targets[i], 0, sizeof(g->targets[i]));
+            if (i < 8) {
+                g->targets[i].active = 1;
+                g->targets[i].type = i < 7 ? 3 : 4;
+                g->targets[i].world_x = 2200.0f + (float)i * 1450.0f;
+            }
+        }
+        g->task_end = g->targets[7].world_x + 300.0f;
         g->bombs_remaining = 1;
         g->ammunition = 0;
     } else if (g->special == SPECIAL_AIRSHIP ||
@@ -6144,8 +6154,22 @@ static void start_run_home(Game *g)
     g->leg_time = 0.0f;
     g->home_line_at = view_end + 2400.0f;
     g->field_at = view_end + 4300.0f;
-    show_notice(g, g->objectives >= current_mission_goal(g) ?
+    show_notice(g, g->special == SPECIAL_TRUCE ? "HAPPY CHRISTMAS: HOME" :
+                g->objectives >= current_mission_goal(g) ?
                 "TASK DONE: HOME" : "TURN FOR HOME");
+    if (g->special == SPECIAL_TRUCE) {
+        /* The way home runs along the line again, past more of them. */
+        int placed = 0;
+        g->field_at = view_end + 5600.0f;
+        for (i = 0; i < MAX_TARGETS && placed < 3; ++i)
+            if (!g->targets[i].active) {
+                memset(&g->targets[i], 0, sizeof(g->targets[i]));
+                g->targets[i].active = 1;
+                g->targets[i].type = 3;
+                g->targets[i].world_x = view_end + 700.0f + (float)placed * 1450.0f;
+                ++placed;
+            }
+    }
     /* What lay further on is left to another day. */
     if (side) {
         for (i = 0; i < MAX_TARGETS; ++i)
@@ -6187,7 +6211,8 @@ static int update_legs_2d(Game *g, float dt)
          * group even when the order is met in the first: the order is
          * the least the squadron will accept, and what is left on the
          * ground is there for the taking. */
-        int done = g->task_total > 0 && g->objectives >= g->task_total;
+        int done = g->special == SPECIAL_TRUCE ? g->pudding_delivered :
+                   g->task_total > 0 && g->objectives >= g->task_total;
         if (g->task_total == 0 && goal > 0 && g->objectives == goal &&
             !g->order_met_told) {
             g->order_met_told = 1;
@@ -6683,6 +6708,26 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                 if (!near_civ) fake[SDL_SCANCODE_B] = 1;
             }
         }
+        if (g->special == SPECIAL_TRUCE) {
+            /* Over the next gathering to wave, then the pudding on their
+             * field, let go a second's run short. */
+            best = 1e9f;
+            for (k = 0; k < MAX_TARGETS; ++k) {
+                float sx, sy, ahead;
+                if (!g->targets[k].active || g->targets[k].done) continue;
+                top_down_target_position(g, k, &sx, &sy);
+                ahead = g->player_y - sy;
+                if (ahead < -30.0f || ahead > 420.0f || ahead >= best) continue;
+                best = ahead;
+                aim_x = sx;
+                bomb = 0;
+                if (g->targets[k].type == 4 && !g->pudding_delivered &&
+                    fabsf(ahead - ((g->airspeed - 42.0f) * 0.97f + 4.0f)) < 10.0f &&
+                    fabsf(sx - g->player_x) < 16.0f)
+                    fake[SDL_SCANCODE_B] = 1;
+            }
+            if (best > 1e8f) aim_x = 320.0f;
+        }
         if (aim_x < g->player_x - 4.0f) fake[SDL_SCANCODE_LEFT] = 1;
         if (aim_x > g->player_x + 4.0f) fake[SDL_SCANCODE_RIGHT] = 1;
         if (best < 1e8f && !bomb && fabsf(aim_x - g->player_x) < 14.0f)
@@ -6786,6 +6831,18 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
         Target *target = &g->targets[i];
         float sx, sy;
         top_down_target_position(g, i, &sx, &sy);
+        if (target->type == 3 && !target->done &&
+            fabsf(sx - g->player_x) < 80.0f && fabsf(sy - g->player_y) < 50.0f) {
+            /* Low over the men in no man's land: caps in the air on both
+             * sides, and Tom waves back. */
+            static const char *const waves[4] = {
+                "THEY WAVE BACK", "TOM WAVES HIS CAP", "A CHEER FROM BELOW",
+                "HAPPY CHRISTMAS, FRITZ"
+            };
+            target->done = 1;
+            g->score += 100;
+            show_notice(g, waves[i & 3]);
+        }
         if (sy > 18.0f && sy < SCREEN_H - 12.0f) {
             if (target->type < 2 && g->special != SPECIAL_TRUCE &&
                 now - target->last_shot > 1600u + (uint32_t)(i * 97 % 620)) {
@@ -6805,6 +6862,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
                             g->pudding_delivered = 1;
                             g->score += 1000;
                             b->active = 0;
+                            show_notice(g, "PUDDING DELIVERED");
                         }
                         continue;
                     }
@@ -6836,8 +6894,7 @@ static void update_top_down_sortie(Game *g, float dt, const uint8_t *keys)
     sortie_director_2d(g, dt);
     g->shake -= dt * 2.2f;
     if (g->shake < 0.0f) g->shake = 0.0f;
-    if ((g->td_mix == MIX_NONE ? g->scroll > chapters[g->chapter].distance :
-         update_legs_2d(g, dt)) ||
+    if (update_legs_2d(g, dt) ||
         g->fuel <= 0.0f || g->health <= 0) {
         if (g->health <= 0 && hold_for_wreck(g, g->player_x, g->player_y))
             return;
@@ -11095,6 +11152,17 @@ static void draw_top_down_sortie(Game *g)
             draw_top_target(g, tx, ty, &g->targets[i]);
     }
     draw_top_down_clouds(g);
+    if (g->special == SPECIAL_TRUCE) {
+        /* A few flakes of Christmas snow drifting across, below us. */
+        uint32_t t = sim_now(g);
+        int k;
+        for (k = 0; k < 48; ++k) {
+            uint32_t h = scene_hash((uint32_t)k * 2654435761u + 0x534e4fu);
+            int fx = (int)((h % 680u) + t / (40u + (h >> 28)) % 680u) % 680 - 20;
+            int fy = (int)(((h >> 10) % 420u) + t / 25u) % 420 - 10;
+            rect(s, fx, fy, 2, 2, PIX_PACK(240, 242, 246));
+        }
+    }
     draw_balloon(g);
     for (i = 0; i < MAX_BULLETS; ++i) if (g->bullets[i].active) {
         Bullet *b = &g->bullets[i];
