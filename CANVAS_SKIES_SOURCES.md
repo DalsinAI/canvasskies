@@ -55,7 +55,7 @@ be mined for dramatic plots.
   as a moving observer viewpoint rather than a sight sliding over one fixed
   cockpit picture: a 90-degree rear arc pans the landscape and incoming
   aircraft, keeps the tailplane and rear fuselage visible, and carries one
-  Scarff-ring Lewis gun through roughly 75 degrees of elevation.
+  Scarff-ring Lewis gun from 30 degrees below level to roughly 75 above.
 
 ## Journal grammar
 

@@ -69,10 +69,9 @@ The first vertical slice contains:
 - original painted top-down Western Front terrain, RFC overhead aircraft,
   dawn battlefield perspective and separate pilot/gunner cockpit overlays;
 - a rear-gunner Scarff-ring presenter built from a clean cockpit rail, a
-  visible DH.4-style rear fuselage and tailplane, and a separate 25-pose
-  single-Lewis-gun carriage. The gun stays anchored to the rail while rising
-  from near-horizontal to roughly 75 degrees; exact chroma-key cleanup prevents
-  magenta edge contamination;
+  visible DH.4-style rear fuselage and tailplane, and a single Lewis gun on
+  its ring rendered for 88 aims (`make_rear_lewis.py`), from 30 degrees below
+  level to roughly 75 above;
 - the rear observer's whole viewpoint pans across a 90-degree arc. The wide
   battlefield panorama, incoming aircraft and visible tail geometry move in
   opposition to the view with damped follow, while Tom's independent bank and

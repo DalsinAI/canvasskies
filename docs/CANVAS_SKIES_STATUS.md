@@ -115,11 +115,16 @@ Controls are in the drawer's `ReadMe` and the README.
   chasing home.
 - **1914:** marking columns, message bags to headquarters and photographing
   batteries (side-on and top-down).
-- **Rear seat:** the 1914 carbine swings through the full rear arc. Attackers
-  come as a steady stream, from the flanks too, and break off smoking when hit.
+- **Rear seat:** the 1914 carbine swings through the full rear arc. The Lewis
+  gun (1915 to 1918) also depresses to 30 degrees below level; the view dips
+  with it, and the fuselage and lower wing stop rounds. Attackers come as a
+  steady stream, from the flanks and from below too, and break off smoking
+  when hit.
   The autopilot downs 2 to 4 each sortie.
 - **Memory:** each scene loads only its own art and records. Every scene is
-  under 32 MB with the cache off; the worst is the Lewis rear seat at 23 MB.
+  under 32 MB with the cache off; the worst is the Lewis rear seat, 23 MB in
+  round 5 and about 2 MB less since its gun became a 256-colour sheet and the
+  unused ring overlay stopped loading (not yet re-measured on the lab).
 - **Display:** F9 full screen leaves Workbench intact on leaving and on quitting
   (Lab-50 and Lab-51).
 
@@ -127,7 +132,8 @@ Controls are in the drawer's `ReadMe` and the README.
 
 1. **Christmas truce:** the truce sortie (1914, mission 12) still ends after
    about 30 seconds; it missed the round-5 lengthening.
-2. **Lewis gun:** the Lewis-gun rear seat cannot aim below level.
+2. **Lewis gun:** the below-level arc and the rendered gun are checked on the
+   host only, not yet on the lab.
 3. **Difficulty:** untested by a person. All tuning used the autopilot.
 4. **Timing:** frame times were measured only on the lab, which is faster than
    a real 68040. Squalls, clouds and the films need timing on real hardware or
@@ -170,7 +176,7 @@ Controls are in the drawer's `ReadMe` and the README.
 - [ ] No recurring audio tick or stutter. Not re-checked by ear since round 5.
 - [x] Dogfight banks, turns, climbs, stalls, dives, crashes and completes.
 - [ ] Rear gun muzzle, crosshair, rail, tail obstruction and approaches agree.
-      They do for the carbine; the Lewis gun cannot aim below level.
+      They do for the carbine; for the Lewis gun's low arc, on the host only.
 - [ ] 1914 approachable and 1918 materially harder. True on the autopilot; not
       yet confirmed by a person.
 - [x] The drawer and start icons are obvious and the game runs from a clean
