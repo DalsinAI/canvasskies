@@ -9,8 +9,26 @@ It grew out of the Sopwith porting work in
 [amigasdlsopwith](https://github.com/DalsinAI/amigasdlsopwith), but it is a new
 game: no SDL Sopwith code is used.
 
-Current release: **0.2.0 RC5**, a release candidate. Download it from
-[the v0.2.0-rc5 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc5).
+Current release: **0.2.0 RC6**, a release candidate. Download it from
+[the v0.2.0-rc6 release](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc6).
+
+New in RC6:
+
+- **Christmas truce:** flown in full, out over men of both armies meeting in no
+  man's land, the pudding dropped, and home to land.
+- **1914 cockpit:** Tom's observer's work: mark a column, drop a message bag (B),
+  photograph a battery and signal the fall of our guns' shells (S).
+- **Lewis gun:** depresses to 30 degrees below level, with attackers from below.
+- **Squalls:** in the cockpit and the rear seat too, with a rain haze inside.
+- **The mess:** the officers painted as men by lamplight, each evening told by
+  what they are doing.
+- **Wingmen and grounding:** wingmen carry their wounds; a grounding survives a
+  quit.
+- **We Remember:** a roll call over the old front at the end of the game.
+- **Campaign:** four side-on, four top-down, two dogfight and two rear-seat
+  sorties a chapter, with orders a careful pilot can meet.
+- **Aerodrome films:** the 1914 climb, the flight of three in frame, and a muddy
+  field that reads as mud.
 
 New in RC5:
 
@@ -85,8 +103,9 @@ game's own 640x400.
 - AmigaOS 3.x on a 68040 with FPU (or an AmiCradle instance)
 - RTG graphics: the game opens a 640x400 window on a 16-bit (or deeper)
   Workbench screen
-- GFOpenUp with the OpenGPU SDL2 runtime (`LIBS:OpenGPU/SDL2.module` and
-  `LIBS:opengpu.library`)
+- GFOpenUp's GFOpenGPU part, with its SDL 2 runtime
+  (`LIBS:GFOpenGPU/SDL2.module` and `LIBS:gfopengpu.library`), tested with
+  GFOpenUp 0.8.26. Without it the game stops at once and says so.
 - AHI for sound
 
 ## Building
@@ -113,6 +132,7 @@ the assets the game loads, without the source PNGs.
 | Side/top-down | Arrow keys move, X/Z adjust speed, Space fires (a rifle in 1914), B bombs |
 | Pilot dogfight | Left/Right bank, Down pulls up, Up pushes down, X/Z throttle, Space fires (a revolver in 1914), R clears a jam, H turns for home |
 | Rear gunner | Arrow keys traverse/elevate, Space fires |
+| 1914 observer's work | B drops the message bag, S signals the fall of our guns' shells (cockpit), hold steady over a battery to photograph it |
 | Display | F9 toggles fullscreen |
 
 ## Documentation
