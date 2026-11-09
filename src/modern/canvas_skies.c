@@ -11021,35 +11021,14 @@ static void draw_scenery(Game *g)
     }
 }
 
-static void draw_cloud_cluster(SDL_Surface *s, int x, int y, int width,
-                               uint8_t alpha, uint32_t seed, int shadow)
-{
-    int count = 5 + (int)(seed % 4u);
-    int i;
-    for (i = 0; i < count; ++i) {
-        uint32_t lobe = scene_hash(seed + (uint32_t)i * 2246822519u);
-        int px = x + (int)(lobe % (uint32_t)width);
-        int py = y + (int)((lobe >> 9) % 19u) - 9;
-        int radius = width / 10 +
-                     (int)((lobe >> 17) % (uint32_t)(width / 12 + 2));
-        if (shadow)
-            blend_circle(s, px + 13, py + 19, radius + 2,
-                         35, 42, 43, (uint8_t)(alpha / 3));
-        blend_circle(s, px, py, radius, 222, 224, 217, alpha);
-        blend_circle(s, px - radius / 4, py - radius / 3,
-                     radius * 2 / 3, 246, 245, 234,
-                     (uint8_t)(alpha * 2 / 3));
-    }
-    blend_rect(s, x + width / 9, y + 2, width * 7 / 9, width / 9,
-               202, 205, 200, (uint8_t)(alpha / 2));
-}
-
+/* Small clouds over the side-on sky: a few soft puffs each, lit from
+ * above and blue-grey underneath like the painted ones round them. */
 static void draw_sky_detail(Game *g)
 {
     SDL_Surface *s = g->screen;
     int camera = (int)(g->scroll * 0.075f);
     int first = camera / 190 - 2;
-    int i;
+    int i, k;
     for (i = 0; i < 7; ++i) {
         int segment = first + i;
         uint32_t seed = scene_hash((uint32_t)segment * 2654435761u ^
@@ -11057,8 +11036,15 @@ static void draw_sky_detail(Game *g)
         int x = segment * 190 - camera + (int)(seed % 105u) - 46;
         int y = 34 + (int)((seed >> 8) % 112u);
         int width = 64 + (int)((seed >> 17) % 88u);
-        uint8_t alpha = (uint8_t)(54 + ((seed >> 25) & 35u));
-        draw_cloud_cluster(s, x, y, width, alpha, seed, 0);
+        for (k = 0; k < 3; ++k) {
+            uint32_t h = scene_hash(seed + (uint32_t)k * 7919u);
+            int w = width / 2 + (int)(h % (uint32_t)(width / 2 + 1));
+            draw_puff_scaled(s, (int)((h >> 6) % 3u), (int)((h >> 9) & 1u),
+                             x + k * width / 3 + (int)((h >> 12) % 17u) - 8,
+                             y + (int)((h >> 18) % 9u) - 4, w, w * 2 / 5,
+                             PIX_PACK(232, 224, 220), PIX_PACK(126, 118, 140),
+                             12 + (int)((h >> 24) % 6u));
+        }
     }
 }
 
