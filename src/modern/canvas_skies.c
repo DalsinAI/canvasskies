@@ -5534,29 +5534,39 @@ static const uint8_t dither_rows[17][4] = {
     {0xf, 0xf, 0xf, 0xb}, {0xf, 0xf, 0xf, 0xf}
 };
 
-static void dither_block(SDL_Surface *s, int x, int y, int level, pix_t c)
+/* The density, 0 to 'strength', at the middle of the 4-pixel block whose
+ * left edge is bx, on row yy, and whether that place is on the lit side.
+ * The noise is read in the blob's own coordinates, offset by (ox, oy), so
+ * the cloud keeps its shape wherever it is drawn. */
+static int cloud_level(int bx, int yy, int cx, int cy, int rx, int ry,
+                       int ox, int oy, int strength, int *lit)
 {
-    int r, k;
-    if (level <= 0) return;
-    if (level > 16) level = 16;
-    if (x < 0 || x + 4 > s->w) return;
-    for (r = 0; r < 4; ++r) {
-        uint8_t m = dither_rows[level][(y + r) & 3];
-        pix_t *row;
-        if (!m || y + r < 0 || y + r >= s->h) continue;
-        row = PIX_ROW(s, y + r) + x;
-        for (k = 0; k < 4; ++k) if (m & (1u << k)) row[k] = c;
-    }
+    int dx = (bx + 2 - cx) * 256 / rx, dy = (yy - cy) * 256 / ry;
+    int e = 65536 - dx * dx - dy * dy, n, level;
+    if (e <= 0) { *lit = 0; return 0; }
+    n = cloud_noise[((dy * 12 >> 8) + 16 + oy) & 31][((dx * 12 >> 8) + 16 + ox) & 31];
+    /* Fall-off shaped so the middle is thick and the edge frays into the
+     * noise; lit above, shadowed below, the line between them broken by
+     * the noise so it never runs straight. */
+    level = (e >> 8) * (n + 40) / 300;                  /* 0 to about 256 */
+    level = level * strength * 3 / 512 - 1;
+    if (level > strength) level = strength;
+    *lit = n;                       /* the caller decides light or dark */
+    return level > 0 ? level : 0;
 }
 
-/* One soft blob of cloud centred on (cx, cy).  (ox, oy) moves the noise
- * with the world so the cloud keeps its shape as it scrolls; strength is
- * the densest level, 0 to 16.  The upper part is lit, the lower dark. */
+/* One soft blob of cloud centred on (cx, cy); strength is the densest
+ * level, 0 to 16; the upper part is lit, the lower dark.  The density is
+ * worked out on a grid every four pixels and eased row by row between
+ * the grid lines, so the edges fray smoothly instead of in steps. */
 static void draw_cloud_blob(SDL_Surface *s, int cx, int cy, int rx, int ry,
                             int ox, int oy, int strength, pix_t light,
                             pix_t dark)
 {
-    int bx, by, x0, x1, y0, y1;
+    enum { MAX_BLOCKS = SCREEN_W / 4 + 2 };
+    int top[MAX_BLOCKS], bottom[MAX_BLOCKS];
+    unsigned char lit_top[MAX_BLOCKS], lit_bottom[MAX_BLOCKS];
+    int bx, by, x0, x1, y0, y1, n, k, r;
     if (rx < 4 || ry < 4 || strength <= 0) return;
     make_cloud_noise();
     x0 = (cx - rx) & ~3; x1 = cx + rx;
@@ -5565,27 +5575,51 @@ static void draw_cloud_blob(SDL_Surface *s, int cx, int cy, int rx, int ry,
     if (y0 < 0) y0 = 0;
     if (x1 > s->w - 4) x1 = s->w - 4;
     if (y1 > s->h - 4) y1 = s->h - 4;
+    if (x1 < x0 || y1 < y0) return;
+    n = (x1 - x0) / 4 + 1;
+    if (n > MAX_BLOCKS) n = MAX_BLOCKS;
+    for (k = 0; k < n; ++k) {
+        int lit;
+        bottom[k] = cloud_level(x0 + k * 4, y0, cx, cy, rx, ry, ox, oy,
+                                strength, &lit);
+        lit_bottom[k] = (unsigned char)lit;
+    }
     if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
     for (by = y0; by <= y1; by += 4) {
-        int dy = (by + 2 - cy) * 256 / ry;
-        int dy2 = dy * dy;
-        if (dy2 >= 65536) continue;
-        for (bx = x0; bx <= x1; bx += 4) {
-            int dx = (bx + 2 - cx) * 256 / rx;
-            int e = 65536 - dx * dx - dy2;     /* 0 at the edge */
-            int n, level;
-            if (e <= 0) continue;
-            n = cloud_noise[((by + oy) >> 2) & 31][((bx + ox) >> 2) & 31];
-            /* Fall-off shaped so the middle is thick and the edge frays
-             * into the noise. */
-            level = (e >> 8) * (n + 40) / 300;          /* 0 to about 256 */
-            level = level * strength * 3 / 512 - 1;
-            if (level > strength) level = strength;
-            if (level <= 0) continue;
-            /* Lit above, shadowed below, the line between them broken by
-             * the noise so it never runs straight. */
-            dither_block(s, bx, by, level,
-                         dy + (n - 128) / 2 < -50 ? light : dark);
+        int any = 0;
+        for (k = 0; k < n; ++k) {
+            int lit;
+            top[k] = bottom[k];
+            lit_top[k] = lit_bottom[k];
+            bottom[k] = cloud_level(x0 + k * 4, by + 4, cx, cy, rx, ry, ox, oy,
+                                    strength, &lit);
+            lit_bottom[k] = (unsigned char)lit;
+            any |= top[k] | bottom[k];
+        }
+        if (!any) continue;
+        for (r = 0; r < 4; ++r) {
+            int yy = by + r, rowdy;
+            pix_t *row;
+            if (yy >= s->h) break;
+            row = PIX_ROW(s, yy);
+            rowdy = (yy - cy) * 256 / ry;
+            for (k = 0, bx = x0; k < n; ++k, bx += 4) {
+                int level = (top[k] * (4 - r) + bottom[k] * r + 2) >> 2;
+                uint8_t m;
+                pix_t c;
+                if (level <= 0) continue;
+                m = dither_rows[level > 16 ? 16 : level][yy & 3];
+                if (!m) continue;
+                /* Lit above, shadowed below; the line between them is
+                 * pushed about by the noise, row by row, so it never
+                 * runs straight. */
+                c = rowdy + ((int)lit_top[k] - 128) / 2 +
+                    ((bx + yy * 3) & 15) - 8 < -50 ? light : dark;
+                if (m & 1u) row[bx] = c;
+                if (m & 2u) row[bx + 1] = c;
+                if (m & 4u) row[bx + 2] = c;
+                if (m & 8u) row[bx + 3] = c;
+            }
         }
     }
     if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
@@ -5619,7 +5653,7 @@ static void draw_blinding_cloud(Game *g)
 {
     SDL_Surface *s = g->screen;
     int k;
-    draw_cloud_blob(s, 320, 200, 520, 420, (int)g->scroll, 0, 11,
+    draw_cloud_blob(s, 320, 200, 520, 420, (int)(sim_now(g) / 250u), 0, 11,
                     PIX_PACK(150, 154, 160), PIX_PACK(104, 108, 116));
     draw_rain(s, 0, SCREEN_W - 1, 0, SCREEN_H - 1, 3,
               SDL_GetTicks() / 160u, PIX_PACK(176, 184, 194));
@@ -5656,22 +5690,25 @@ static void draw_squall_2d(Game *g)
             int by = lo + h / 3 + (int)((r >> 8) % (uint32_t)(h / 3 + 1));
             int rx = 60 + (int)((r >> 4) % 90u);
             int ry = h / 3 + (int)((r >> 12) % (uint32_t)(h / 4 + 1));
-            draw_cloud_blob(s, bx, by, rx, ry, ox - x0, 0,
+            draw_cloud_blob(s, bx, by, rx, ry, (int)(r & 31u), k * 7,
                             11 + (int)((r >> 20) % 3u),
                             PIX_PACK(156, 158, 166), PIX_PACK(74, 78, 88));
         }
-        /* Heavy, dark under-belly where the rain comes out. */
-        draw_cloud_blob(s, (x0 + x1) / 2, hi - h / 5, w / 2 + 30, h / 4,
-                        ox, 17, 12, PIX_PACK(96, 100, 110), PIX_PACK(50, 54, 62));
+        /* Heavy, dark under-belly where the rain comes out, in a few
+         * billows of their own rather than one long slab. */
+        for (k = 0; k < 3; ++k)
+            draw_cloud_blob(s, x0 + w / 6 + k * w / 3 + (int)((seed >> (k * 5)) % 40u) - 20,
+                            hi - h / 5 - (int)((seed >> (k * 3 + 2)) % 12u),
+                            w / 5 + 24, h / 4, ox + k * 9, 17 + k * 5, 12,
+                            PIX_PACK(96, 100, 110), PIX_PACK(50, 54, 62));
     } else {
         int y1 = SCREEN_H - (int)(q->a - g->scroll);
         int y0 = SCREEN_H - (int)(q->b - g->scroll);
         int lo = (int)q->lo, hi = (int)q->hi, w = hi - lo, h = y1 - y0;
-        int oy = -(int)g->scroll;
         if (y1 < -160 || y0 > SCREEN_H + 160) return;
         /* Its shadow on the ground, offset down-sun, then the cloud. */
         draw_cloud_blob(s, (lo + hi) / 2 + 26, (y0 + y1) / 2 + 30, w / 2,
-                        h / 2, 0, oy, 7, PIX_PACK(30, 32, 28), PIX_PACK(30, 32, 28));
+                        h / 2, 5, 9, 7, PIX_PACK(30, 32, 28), PIX_PACK(30, 32, 28));
         blobs = 5 + (w * h) / 26000;
         for (k = 0; k < blobs; ++k) {
             uint32_t r = scene_hash(seed + (uint32_t)k * 7919u);
@@ -5679,7 +5716,7 @@ static void draw_squall_2d(Game *g)
             int by = y0 + h / 6 + (int)((r >> 8) % (uint32_t)(h * 2 / 3 + 1));
             int rad = 50 + (int)((r >> 4) % 70u);
             draw_cloud_blob(s, bx, by, rad, rad * 4 / 5 + (int)((r >> 14) % 20u),
-                            0, oy, 10 + (int)((r >> 20) % 5u),
+                            (int)(r & 31u), k * 7, 10 + (int)((r >> 20) % 5u),
                             PIX_PACK(176, 178, 182), PIX_PACK(98, 102, 112));
         }
         draw_rain(s, lo + 10, hi - 10, y0 > 0 ? y0 : 0, y1 < SCREEN_H ? y1 : SCREEN_H - 1,
@@ -8195,6 +8232,58 @@ static void df_home_text(const Game *g, char *buf, size_t size)
 
 /* ---- The rear seat ---- */
 
+/* Now and then Tom flies through a squall.  For a few seconds the rear
+ * seat sees nothing but cloud and driving rain and the machine is thrown
+ * about; then the storm draws away astern, shrinking towards the horizon
+ * the gunner is looking at. */
+#define GUNNER_SQUALL_INSIDE 5.0f
+#define GUNNER_SQUALL_END 17.0f
+
+static void update_squall_gunner(Game *g, float dt)
+{
+    static float battering;
+    if (!g->squall.active) return;
+    g->squall.a += dt;
+    if (g->squall.a < GUNNER_SQUALL_INSIDE) {
+        battering += dt;
+        if (battering > 1.1f) {
+            battering = 0.0f;
+            small_hit(g, 1);
+        }
+    } else if (g->squall.a > GUNNER_SQUALL_END) {
+        g->squall.active = 0;
+    }
+}
+
+static void draw_squall_gunner(Game *g)
+{
+    SDL_Surface *s = g->screen;
+    float t = g->squall.a, f, big;
+    int vx = 320 - (int)(gunner_traverse(g) * 306.0f);
+    int vy = 150 + (int)(gunner_elevation(g) * 118.0f);
+    int k;
+    if (!g->squall.active) return;
+    if (t < GUNNER_SQUALL_INSIDE) {
+        draw_blinding_cloud(g);
+        return;
+    }
+    f = (t - GUNNER_SQUALL_INSIDE) / (GUNNER_SQUALL_END - GUNNER_SQUALL_INSIDE);
+    big = 1.0f - f;
+    draw_rain(s, vx - (int)(60.0f + 260.0f * big), vx + (int)(60.0f + 260.0f * big),
+              vy, vy + 40 + (int)(200.0f * big), 3, 0x5351u,
+              PIX_PACK(150, 158, 170));
+    for (k = 0; k < 7; ++k) {
+        uint32_t h = scene_hash((uint32_t)k * 2654435761u + 0x47u);
+        float spread = 0.25f + big;
+        int bx = vx + (int)((float)((int)(h % 400u) - 200) * spread);
+        int by = vy - 20 + (int)((float)((int)((h >> 9) % 120u) - 60) * spread * 0.6f);
+        int r = (int)((float)(40 + (int)((h >> 18) % 40u)) * (0.35f + big * 1.9f));
+        draw_cloud_blob(s, bx, by, r, r * 2 / 3, (int)(h & 31u), k * 5,
+                        14 - (int)(f * 9.0f), PIX_PACK(156, 160, 168),
+                        PIX_PACK(76, 80, 90));
+    }
+}
+
 static void gunner_place_enemy(Game *g, int i, float depth)
 {
     Enemy *e = &g->enemies[i];
@@ -8241,6 +8330,7 @@ static int update_gunner_legs(Game *g, float dt)
         int i;
         for (i = 0; i < MAX_ENEMIES; ++i) g->enemies[i].active = 0;
         g->archie_clock = 3.0f;
+        g->hazard_clock = 45.0f + random_unit(g) * 20.0f;
     }
     g->sortie_clock += dt;
     g->leg_time += dt;
@@ -8253,6 +8343,16 @@ static int update_gunner_legs(Game *g, float dt)
             if (g->enemies[i].active && !g->enemies[i].crashing &&
                 !g->enemies[i].fled) ++alive;
     }
+    g->hazard_clock -= dt;
+    if (qa_frame_time && g->qa_run && g->sortie_clock - dt < 40.0f &&
+        g->sortie_clock >= 40.0f) g->hazard_clock = 0.0f;
+    if (g->hazard_clock <= 0.0f && !g->squall.active && g->leg == LEG_OUT) {
+        memset(&g->squall, 0, sizeof(g->squall));
+        g->squall.active = 1;
+        show_notice(g, "TOM FLIES INTO RAIN");
+        g->hazard_clock = 60.0f + random_unit(g) * 30.0f;
+    }
+    update_squall_gunner(g, dt);
     g->archie_clock -= dt;
     if (g->qa_idle_run > 6.0f && g->archie_clock > 0.5f) g->archie_clock = 0.5f;
     if (g->archie_clock <= 0.0f) {
@@ -13742,6 +13842,7 @@ static void draw_dogfight_3d_sortie(Game *g)
             line(s, (int)b->x, (int)b->y + 1, tail_x, tail_y + 1, tracer);
     }
     draw_explosions(g);
+    if (gunner) draw_squall_gunner(g);
     if (gunner) {
         draw_gunner_airframe(g);
         draw_gunner_bullet_holes(g);
