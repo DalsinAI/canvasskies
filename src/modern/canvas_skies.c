@@ -5669,20 +5669,53 @@ static void draw_rain(SDL_Surface *s, int x0, int x1, int top, int bottom,
 }
 
 /* Inside the cloud: grey everywhere, thickening and thinning. */
+/* A quarter of the screen's own colour and three quarters of a grey that
+ * changes from row to row: a rain haze, blended rather than dithered.  On
+ * a 16-bit screen it is a shift and a mask per pixel, two pixels to a
+ * 32-bit word, and one add of the row's grey taken to three quarters. */
+static void haze_screen(SDL_Surface *s, const pix_t *row_tint)
+{
+    int y;
+    if (SDL_MUSTLOCK(s)) SDL_LockSurface(s);
+    for (y = 0; y < s->h; ++y) {
+#if CANVAS_SCREEN_BITS == 16
+        uint32_t *w = (uint32_t *)PIX_ROW(s, y);
+        uint32_t t = row_tint[y];
+        uint32_t three = ((t >> 1) & 0x7BEFu) + ((t >> 2) & 0x39E7u);
+        uint32_t add = three | (three << 16);
+        int n = s->w / 2, x;
+        for (x = 0; x < n; ++x)
+            w[x] = ((w[x] >> 2) & 0x39E739E7u) + add;
+#else
+        pix_t *row = PIX_ROW(s, y);
+        uint32_t t = row_tint[y];
+        uint32_t add = ((t >> 1) & 0x7F7F7Fu) + ((t >> 2) & 0x3F3F3Fu);
+        int x;
+        for (x = 0; x < s->w; ++x)
+            row[x] = (pix_t)(0xff000000u | (((row[x] >> 2) & 0x3F3F3Fu) + add));
+#endif
+    }
+    if (SDL_MUSTLOCK(s)) SDL_UnlockSurface(s);
+}
+
+/* Inside the cloud: everything half lost in grey rain haze, lighter
+ * above and darker below, thickening and thinning in slow bands as the
+ * cloud drives past, with the rain streaks over it. */
 static void draw_blinding_cloud(Game *g)
 {
     SDL_Surface *s = g->screen;
-    int k;
-    draw_cloud_blob(s, 320, 200, 520, 420, (int)(sim_now(g) / 250u), 0, 11,
-                    PIX_PACK(150, 154, 160), PIX_PACK(104, 108, 116));
-    draw_rain(s, 0, SCREEN_W - 1, 0, SCREEN_H - 1, 3,
-              SDL_GetTicks() / 160u, PIX_PACK(176, 184, 194));
-    for (k = 0; k < 2; ++k) {
-        uint32_t h = scene_hash(SDL_GetTicks() / 300u + (uint32_t)k);
-        draw_cloud_blob(s, (int)(h % SCREEN_W), (int)((h >> 10) % SCREEN_H),
-                        140, 90, k * 37, 0, 14, PIX_PACK(160, 164, 170),
-                        PIX_PACK(120, 124, 132));
+    static pix_t tint[SCREEN_H];
+    float drift = (float)sim_now(g) * 0.0021f;
+    int y;
+    for (y = 0; y < SCREEN_H && y < s->h; ++y) {
+        int v = 150 - y * 50 / SCREEN_H +
+                (int)(sinf((float)y * 0.027f + drift) * 14.0f +
+                      sinf((float)y * 0.071f - drift * 1.7f) * 7.0f);
+        tint[y] = PIX_PACK(v, v + 3, v + 9);
     }
+    haze_screen(s, tint);
+    draw_rain(s, 0, SCREEN_W - 1, 0, SCREEN_H - 1, 3,
+              sim_now(g) / 160u, PIX_PACK(186, 192, 202));
 }
 
 static void draw_squall_2d(Game *g)
@@ -8591,9 +8624,11 @@ static void draw_squall_gunner(Game *g)
         int bx = vx + (int)((float)((int)(h % 400u) - 200) * spread);
         int by = vy - 20 + (int)((float)((int)((h >> 9) % 120u) - 60) * spread * 0.6f);
         int r = (int)((float)(40 + (int)((h >> 18) % 40u)) * (0.35f + big * 1.9f));
-        draw_cloud_blob(s, bx, by, r, r * 2 / 3, (int)(h & 31u), k * 5,
-                        14 - (int)(f * 9.0f), PIX_PACK(156, 160, 168),
-                        PIX_PACK(76, 80, 90));
+        if (r > 120) r = 120;
+        /* Soft billows blended over the view, as the cockpit's storm. */
+        draw_puff_scaled(s, (int)((h >> 3) % 3u), (int)((h >> 5) & 1u), bx, by,
+                         r * 2, r * 4 / 3, PIX_PACK(156, 160, 168),
+                         PIX_PACK(76, 80, 90), 26 - (int)(f * 18.0f));
     }
 }
 
