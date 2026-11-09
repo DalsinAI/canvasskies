@@ -1050,6 +1050,8 @@ typedef struct {
     float sim_carry;
     /* QA: rounds fired each way, and damage taken, for the sortie log. */
     int qa_shots, qa_enemy_shots, qa_damage, qa_last_health;
+    /* QA: our rounds that struck an enemy machine, in the cockpit. */
+    int qa_hits;
     /* QA: the targets on offer, those left unreached when the run home
      * began, and the bombs carried. */
     int qa_offered, qa_unreached, qa_bombs_carried;
@@ -3485,7 +3487,7 @@ static void reset_sortie_legs(Game *g)
     g->fabric_hole_count = 0;
     g->qa_time = g->qa_idle = g->qa_idle_run = g->qa_idle_longest = 0.0f;
     g->qa_logged = 0;
-    g->qa_shots = g->qa_enemy_shots = g->qa_damage = 0;
+    g->qa_shots = g->qa_enemy_shots = g->qa_damage = g->qa_hits = 0;
     g->qa_last_health = 100;
     g->qa_unreached = 0;
     g->front_at = mode == MISSION_SIDE ? 1500.0f : 1400.0f;
@@ -6859,7 +6861,11 @@ static void sortie_tally(Game *g, float dt)
 }
 
 /* One line in RAM: for each sortie flown: the mission, how long it took,
- * how much of it was idle and the longest idle stretch, in tenths. */
+ * how much of it was idle and the longest idle stretch, in tenths.  sim is
+ * the sortie's own seconds and wall the seconds on the wall clock since it
+ * began: on a machine that draws fewer than twenty frames a second the
+ * sortie clock runs slow (each frame moves the world at most SIM_MAX_STEP),
+ * so wall is the longer, and the two together say by how much. */
 static void qa_log_sortie(Game *g)
 {
     static const char *const modes[4] = {"SIDE", "TOPDOWN", "DOGFIGHT", "GUNNER"};
@@ -6872,14 +6878,15 @@ static void qa_log_sortie(Game *g)
     if (!f) return;
     fprintf(f, "C%d M%02d %s MIX%d %s total=%d.%d idle=%d.%d longest=%d.%d "
             "success=%d objectives=%d/%d kills=%d health=%d fuel=%d "
-            "shots=%d enemy_shots=%d damage=%d sim=%u offered=%d "
+            "shots=%d hits=%d enemy_shots=%d damage=%d sim=%u wall=%u offered=%d "
             "unreached=%d bombs=%d/%d\n",
             g->chapter + 1, g->mission + 1, modes[sortie_mode(g)], g->td_mix,
             personal_arms(g) ? "UNARMED" : mission_armed(g) ? "ARMED" : "QUIET",
             t / 10, t % 10, idle / 10, idle % 10, longest / 10, longest % 10,
             g->success, g->objectives, current_mission_goal(g), g->kills,
-            g->health, (int)g->fuel, g->qa_shots, g->qa_enemy_shots,
+            g->health, (int)g->fuel, g->qa_shots, g->qa_hits, g->qa_enemy_shots,
             g->qa_damage, (unsigned)((g->sim_ms - SIM_EPOCH) / 1000u),
+            (unsigned)((SDL_GetTicks() - g->scene_started) / 1000u),
             g->qa_offered, g->qa_unreached,
             g->qa_bombs_carried - g->bombs_remaining, g->qa_bombs_carried);
     fclose(f);
@@ -7633,8 +7640,9 @@ static void damage_enemy(Game *g, Enemy *enemy, Vec3 at, int by_player)
     if (!by_player && enemy->hp <= 1) return;
     --enemy->hp;
     burst_of_debris(g, at, carry, 1);
-    if (by_player) enemy->player_hit = 1;
     if (by_player) {
+        enemy->player_hit = 1;
+        ++g->qa_hits;
         g->audio.hit_player = 0;
         g->audio.hit = 950;
     }
@@ -8926,7 +8934,14 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
     for (i = 0; i < MAX_TARGETS; ++i) {
         const Target *t = &g->targets[i];
         float dx = t->world_x - g->scroll - g->player_x;
-        if (!t->active || t->civilian || t->done || t->wrecked) continue;
+        /* A machine-gun post met on the way is no part of the order: a
+         * careful pilot keeps his bombs for the targets he was sent for,
+         * as the order is reckoned (check_campaign.py) on those and the
+         * bombs alone.  The old QA pilot bombed every post he met and on
+         * a 1918 sortie came home with the bombs spent and the order
+         * short. */
+        if (!t->active || t->civilian || t->done || t->wrecked ||
+            (t->hazard && !t->task)) continue;
         if (dx < -30.0f || dx > 360.0f || dx > best) continue;
         best = dx;
         if (t->task && dx < 260.0f) task_close = 1;
@@ -8947,8 +8962,11 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
             }
         } else if (mission_armed(g)) {
             /* A bomb leaves at 55 down and falls at 105: when will it
-             * reach the gun's height? */
-            float h = fmaxf(ground + 19.0f - 12.0f - 32.0f - g->player_y, 1.0f);
+             * reach the gun's height?  The gun's own ground, not the
+             * ground under the machine: on a slope the two differ by
+             * enough to throw the bomb a gun's length long or short. */
+            float h = fmaxf((float)terrain_y(t->world_x) - 12.0f - 16.0f -
+                            (g->player_y + 16.0f), 1.0f);
             float fall = (-55.0f + sqrtf(55.0f * 55.0f + 210.0f * h)) / 105.0f;
             /* Let go on the mark, not at the edge of the window, or the
              * bomb falls a gun's length short. */
@@ -9001,16 +9019,192 @@ static const uint8_t *qa_side_keys(Game *g, const uint8_t *keys)
     return fake;
 }
 
+/* The cockpit in a fight.  A pilot who turns for where the enemy is and
+ * fires when he is on the nose hits almost nothing: a scout 300 m off,
+ * crossing at 40 m a second, has moved 30 m by the time the rounds get
+ * there, five times the width the rounds must pass within.  That was the
+ * old QA pilot, and with a jam he never cleared it is why he so seldom
+ * brought anything down.  This one works out where his rounds and the
+ * enemy will meet (the rounds carry his own speed, and fall a little on
+ * the way), puts that point on the gun line, which lies a few degrees
+ * under the nose as the ring sight does, and fires only while the rounds
+ * would pass close enough to strike.  Well off the nose he lays the
+ * machine over and pulls round hard; nearer, he banks so that the lift
+ * points at the meeting point and lays the gun line on it with the stick.
+ * Overshot and on top of the enemy, he runs out straight for a few
+ * seconds and comes round again.  He keeps to one enemy until another is
+ * plainly the better shot, opens the throttle to close and eases it to
+ * keep from overshooting, and clears a jam when the guns stop.  Too low,
+ * or nose-down near the ground, he leaves the stick to the plain pilot
+ * below, who levels out and climbs.  Returns 1 when he has the stick.  His
+ * shooting is steadier than most players' will be at first: he shows that
+ * the orders can be met with the machine, the guns and the rounds the
+ * sortie gives, not that they are easy. */
+#define QA_GUN_DIP 0.059f   /* the gun line under the nose: 9 m in 150 m */
+
+static Vec3 qa_enemy_velocity(const Game *g, const Enemy *e)
+{
+    if (g->special == SPECIAL_AIRSHIP || g->special == SPECIAL_GOTHA) {
+        float v = e->speed * 0.44704f;
+        return (Vec3){sinf(e->heading) * v, 0.0f, cosf(e->heading) * v};
+    }
+    return aircraft_velocity(&e->flight);
+}
+
+/* Where to point the guns, from 'me', to meet the enemy: the way the
+ * rounds must leave, and the distance to the meeting point. */
+static Vec3 qa_lead_point(const Game *g, const Enemy *e, Vec3 me, Vec3 mine,
+                          float *range)
+{
+    Vec3 rel = {e->world_x - me.x, e->world_y - me.y, e->world_z - me.z};
+    Vec3 ev = qa_enemy_velocity(g, e);
+    Vec3 dv = vec3_sub(ev, mine), p = rel;
+    float t = vec3_length(rel) / ROUND_SPEED;
+    int k;
+    for (k = 0; k < 3; ++k) {
+        p = (Vec3){rel.x + dv.x * t, rel.y + dv.y * t, rel.z + dv.z * t};
+        t = vec3_length(p) / ROUND_SPEED;
+    }
+    p.y += 4.9f * t * t;
+    *range = vec3_length(p);
+    return p;
+}
+
+static int qa_cockpit_attack(Game *g, float dt, float *aileron,
+                             float *elevator, int *fire, uint8_t *fake)
+{
+    static int target = -1;
+    static uint32_t extend_until;
+    static float pull_trim, bank_trim;
+    Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
+    Vec3 mine = aircraft_velocity(&g->flight);
+    AircraftPose pose = pose_from_flight(&g->flight, me);
+    Vec3 aim = {0.0f, 0.0f, 1.0f}, body, ev;
+    uint32_t now = sim_now(g);
+    float best = 1e9f, range = 0.0f, el, az, off, ang, closing, reach;
+    float want_heading, want_pitch, herr, bank_want;
+    int i, pick = -1;
+    if (!enemies_hostile(g) || !pilot_gun_count(g)) return 0;
+    if (g->guns_jammed && !g->jam_clear_until) fake[SDL_SCANCODE_R] = 1;
+    for (i = 0; i < MAX_ENEMIES; ++i) {
+        const Enemy *e = &g->enemies[i];
+        Vec3 p;
+        float d, nose, score;
+        if (!e->active || e->crashing) continue;
+        p = qa_lead_point(g, e, me, mine, &d);
+        nose = acosf(flight_clamp((p.x * pose.forward.x + p.y * pose.forward.y +
+                                   p.z * pose.forward.z) / (d > 1.0f ? d : 1.0f),
+                                  -1.0f, 1.0f));
+        /* Near and ahead is the better shot; the one already chased
+         * counts as nearly half as far again closer. */
+        score = d * (1.0f + nose * 1.5f) * (i == target ? 0.6f : 1.0f);
+        if (score < best) { best = score; pick = i; aim = p; range = d; }
+    }
+    target = pick;
+    if (pick < 0) return 0;
+    if (g->flight_y < 300.0f || (g->flight_y < 520.0f && pose.forward.y < -0.25f))
+        return 0;
+    if (range < 1.0f) range = 1.0f;
+    /* The meeting point as the pilot sees it, through the windscreen:
+     * ahead, to the right and below, as the picture is drawn. */
+    body = flight_rotate_from_ned(&g->flight, aim.z, aim.x, -aim.y);
+    el = atan2f(-body.z, body.x) + QA_GUN_DIP;
+    az = atan2f(body.y, body.x);
+    ang = acosf(flight_clamp(body.x / range, -1.0f, 1.0f));
+    off = sqrtf(el * el + az * az);
+    ev = qa_enemy_velocity(g, &g->enemies[pick]);
+    closing = ((mine.x - ev.x) * aim.x + (mine.y - ev.y) * aim.y +
+               (mine.z - ev.z) * aim.z) / range;
+    /* Fire while the rounds would pass within the machine's reach. */
+    reach = ENEMY_HIT_RADIUS * (g->special == SPECIAL_NONE ? 1.2f : 1.8f);
+    *fire = ang < 0.45f && range < 430.0f && off * range < reach;
+    /* Overshot, and on top of him with the enemy off the nose: run out
+     * straight for a few seconds and come round again, rather than chase
+     * his tail in a circle he can turn inside. */
+    if ((int32_t)(extend_until - now) > 5000)
+        extend_until = 0;   /* left over from an earlier sortie's clock */
+    if (!extend_until && range < 70.0f && ang > 0.6f)
+        extend_until = now + 5000u;
+    if (extend_until && (ticks_past(now, extend_until, 0u) || range > 320.0f))
+        extend_until = 0;
+    /* He flies by heading and pitch, as the plain pilot below does, but
+     * after the meeting point, harder in the turn and finer near the
+     * ring.  The gun line lies a little under the nose, so the nose is
+     * held that much above the point. */
+    want_heading = atan2f(aim.x, aim.z);
+    want_pitch = atan2f(aim.y, sqrtf(aim.x * aim.x + aim.z * aim.z)) +
+                 QA_GUN_DIP * cosf(g->view_bank);
+    if (extend_until) {
+        want_heading = atan2f(-aim.x, -aim.z);
+        want_pitch = 0.05f;
+    }
+    want_pitch = flight_clamp(want_pitch, -0.5f, 0.55f);
+    herr = wrap_angle(want_heading - g->flight_heading);
+    if (extend_until) {
+        /* Running out: the plain pilot's gentle turn and level flight. */
+        bank_want = flight_clamp(herr * 1.6f, -1.0f, 1.0f);
+        *elevator = flight_clamp((want_pitch - g->view_pitch) * 3.0f -
+                                 g->flight.q * 0.28f +
+                                 fabsf(g->view_bank) * 0.6f, -1.0f, 1.0f);
+        pull_trim = bank_trim = 0.0f;
+    } else if (fabsf(herr) > 0.5f) {
+        /* Well round: lay the machine over and pull hard, banking past
+         * the vertical to come down on him, less steeply to climb. */
+        float over = flight_clamp((g->view_pitch - want_pitch) * 1.5f,
+                                  -0.5f, 0.35f);
+        if (g->flight_y < 600.0f && over > 0.0f) over = 0.0f;
+        bank_want = (herr > 0.0f ? 1.0f : -1.0f) * (1.3f + over);
+        *elevator = fabsf(bank_want - g->view_bank) < 0.5f ? 1.0f : 0.25f;
+        pull_trim = bank_trim = 0.0f;
+    } else {
+        /* Nearer the nose: bank so that the lift points at the point, a
+         * bank reckoned against the horizon, not against the windscreen,
+         * so that it does not chase itself round while the machine rolls
+         * (rolling and pulling at once only cones the nose round the
+         * enemy).  When the point is mostly below, bank the other way and
+         * push.  Once it is in the ring, only a touch of bank.  The stick
+         * lays the gun line on the point as the windscreen shows it,
+         * holding what pull the turn needs. */
+        float hx = herr * cosf(g->view_pitch);
+        float vy = want_pitch - g->view_pitch;
+        float mag = sqrtf(hx * hx + vy * vy);
+        float w = flight_clamp((mag - 0.02f) / 0.08f, 0.0f, 1.0f);
+        bank_trim = flight_clamp(bank_trim + az * dt * 2.0f, -0.4f, 0.4f);
+        if (vy < 0.0f && fabsf(hx) < -vy * 0.7f)
+            bank_want = flight_clamp(atan2f(-hx, -vy), -0.8f, 0.8f);
+        else
+            bank_want = w * flight_clamp(atan2f(hx, vy + 0.03f), -1.45f, 1.45f) +
+                        (1.0f - w) * flight_clamp(herr * 8.0f + bank_trim,
+                                                  -0.8f, 0.8f);
+        pull_trim = flight_clamp(pull_trim + el * dt * 1.5f, -0.4f, 0.4f);
+        *elevator = flight_clamp(el * 5.0f - g->flight.q * 0.25f + pull_trim,
+                                 -1.0f, 1.0f);
+    }
+    if (g->flight_y < 600.0f) bank_want = flight_clamp(bank_want, -1.3f, 1.3f);
+    *aileron = flight_clamp((bank_want - g->view_bank) * 2.2f -
+                            g->flight.p * 0.32f, -1.0f, 1.0f);
+    /* Open up to close the range or to come round; ease off rather than
+     * overshoot; otherwise leave the throttle where it is. */
+    if (extend_until || range > 260.0f || ang > 0.6f) {
+        if (g->flight_throttle < 0.95f) fake[SDL_SCANCODE_X] = 1;
+    } else if (range < 170.0f && closing > 5.0f) {
+        fake[SDL_SCANCODE_Z] = 1;
+    } else if (g->flight_throttle < 0.7f) {
+        fake[SDL_SCANCODE_X] = 1;
+    }
+    return 1;
+}
+
 /* The cockpit: turn after the nearest enemy, or for home, and fire when
- * he is on the nose. */
-static void qa_fly_cockpit(Game *g, float *aileron, float *elevator, int *fire,
-                           uint8_t *fake)
+ * he is on the nose; in a fight, qa_cockpit_attack above. */
+static void qa_fly_cockpit(Game *g, float dt, float *aileron, float *elevator,
+                           int *fire, uint8_t *fake)
 {
     Vec3 me = {g->flight_x, g->flight_y, g->flight_z};
     Vec3 fwd = aircraft_velocity(&g->flight);
     float want_heading = g->flight_heading, want_pitch = 0.0f, best = 1e9f;
     float err, bank_want, fl = sqrtf(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z);
-    int i;
+    int i, squall_ahead = 0;
     *fire = 0;
     if (g->leg == LEG_HOME) {
         want_heading = g->home_heading;
@@ -9026,7 +9220,9 @@ static void qa_fly_cockpit(Game *g, float *aileron, float *elevator, int *fire,
             h = sqrtf(dx * dx + dz * dz);
             want_heading = atan2f(dx, dz);
             want_pitch = flight_clamp(atan2f(dy, h > 1.0f ? h : 1.0f), -0.35f, 0.35f);
-            if (fl > 1.0f && d < 450.0f &&
+            /* Never at a machine that is not fighting: the last days'
+             * orders are not to fire unless fired upon. */
+            if (fl > 1.0f && d < 450.0f && enemies_hostile(g) &&
                 (fwd.x * dx + fwd.y * dy + fwd.z * dz) / (fl * d) > 0.995f)
                 *fire = 1;
         }
@@ -9057,9 +9253,16 @@ static void qa_fly_cockpit(Game *g, float *aileron, float *elevator, int *fire,
     if (g->squall.active) {
         float dx = g->squall.centre.x - me.x, dz = g->squall.centre.z - me.z;
         if (dx * dx + dz * dz < 600.0f * 600.0f &&
-            fabsf(wrap_angle(atan2f(dx, dz) - g->flight_heading)) < 0.5f)
+            fabsf(wrap_angle(atan2f(dx, dz) - g->flight_heading)) < 0.5f) {
             want_heading = g->flight_heading + 0.8f;
+            squall_ahead = 1;
+        }
     }
+    /* Out over the lines with the enemy about, the fighting pilot has the
+     * stick, unless a squall is dead ahead. */
+    if (g->leg == LEG_OUT && !squall_ahead &&
+        qa_cockpit_attack(g, dt, aileron, elevator, fire, fake))
+        return;
     if (g->flight_y < 320.0f) want_pitch = 0.3f;
     if (g->flight_y > 1500.0f) want_pitch = -0.15f;
     err = wrap_angle(want_heading - g->flight_heading);
@@ -9152,17 +9355,21 @@ static void update_dogfight_3d_sortie(Game *g, float dt,
         if (keys[SDL_SCANCODE_RIGHT]) aileron_command = 1.0f;
         if (keys[SDL_SCANCODE_DOWN]) elevator_command = 1.0f;
         if (keys[SDL_SCANCODE_UP]) elevator_command = -1.0f;
-        if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
-        if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
         if (g->qa_autopilot) {
             static uint8_t fake[SDL_NUM_SCANCODES];
             int fire;
             memcpy(fake, keys, sizeof(fake));
             fake[SDL_SCANCODE_B] = fake[SDL_SCANCODE_S] = 0;
-            qa_fly_cockpit(g, &aileron_command, &elevator_command, &fire, fake);
+            fake[SDL_SCANCODE_X] = fake[SDL_SCANCODE_Z] = 0;
+            fake[SDL_SCANCODE_R] = 0;
+            qa_fly_cockpit(g, dt, &aileron_command, &elevator_command, &fire,
+                           fake);
             fake[SDL_SCANCODE_SPACE] = (uint8_t)fire;
             keys = fake;
         }
+        /* The throttle after the QA pilot, so that his hand on it counts. */
+        if (keys[SDL_SCANCODE_X]) g->flight_throttle += 0.42f * dt;
+        if (keys[SDL_SCANCODE_Z]) g->flight_throttle -= 0.42f * dt;
     }
     if (g->flight_throttle < 0.12f) g->flight_throttle = 0.12f;
     if (g->flight_throttle > 1.0f) g->flight_throttle = 1.0f;
