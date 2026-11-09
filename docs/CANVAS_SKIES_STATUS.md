@@ -1,13 +1,14 @@
 # Canvas Skies: implementation status and handoff
 
-Status date: 7 November 2026
+Status date: 9 November 2026
 
-Branch: `main`, at `ca4e16c` (round 5, released as 0.2.0 RC5)
+Branch: `main` (round 6), built as 0.2.0 RC6 from `release/rc6`
 
-Code state: **0.2.0 RC5**, a published release candidate:
-[v0.2.0-rc5](https://github.com/DalsinAI/canvasskies/releases/tag/v0.2.0-rc5),
-`CanvasSkies-0.2.0-rc5.lha`, SHA-256
-`eb8f2c2cfac593cff21754f2760988371ea451e87a6be4a758dc410fba1d5a70`.
+Code state: **0.2.0 RC6**, a release candidate prepared as a draft
+pre-release, `CanvasSkies-0.2.0-rc6.lha`. The archive's SHA-256, the exact
+commit and what was and was not tested are in the repository's
+`docs/CANVAS_SKIES_RC6_VALIDATION.md` (kept out of the archive, since it
+records the archive's own checksum).
 
 Repository: `DalsinAI/canvasskies`
 
@@ -18,16 +19,17 @@ on chat history as the only record of a decision.
 ## Current result
 
 Canvas Skies is a complete eight-chapter, 96-mission campaign for AmigaOS 3 on a
-68040, built on SDL2 and the OpenGPU SDL2 runtime. Every scene has finished art,
+68040, built on SDL2 and GFOpenUp's GFOpenGPU SDL2 runtime. Every scene has finished art,
 the four mission views (side-on, top-down, cockpit dogfight and rear gunner)
 all play through to a debrief, and the campaign saves, continues and ends at the
 Armistice.
 
-RC5 was smoke-tested from its release archive on two lab copies of the live
-instances: Lab-50 (AmigaOS 3.2.3) and Lab-51 (GFOS). Both booted to the title,
-opened the officers' menu and the preferences, quit back to a clean Workbench,
-showed the dawn, the take-off film and the sortie, the landing film and the
-debrief, and the mess. The live Instances 50 and 51 on daletop run RC5.
+RC6 was built with the Open6 stove and installed fresh from its release
+archive on two lab copies of the live instances, Lab-50 (AmigaOS 3.2.3) and
+Lab-51 (GFOS), each with GFOpenUp 0.8.26's GFOpenGPU part. Every mission view,
+the new round-6 work, the scenes, full screen, saves and grounding were run
+there; the receipt lists each result. The live Instances 50 and 51 on daletop
+run RC6 with the GFOpenGPU part.
 
 A complete play-through by a person has not been done since round 5; the
 mission tuning below was done with the game's own autopilot.
@@ -114,7 +116,12 @@ Controls are in the drawer's `ReadMe` and the README.
   enemy ground, kite balloons on cables, squalls, and scouts head-on and
   chasing home.
 - **1914:** marking columns, message bags to headquarters and photographing
-  batteries (side-on and top-down).
+  batteries (side-on and top-down); in the cockpit patrols Tom also spots for
+  the guns (S signals each fall of shot), and the debrief and late edition
+  count the observer's tasks.
+- **Christmas truce:** flown out over men of both armies meeting in no man's
+  land, the pudding dropped, and home to land, with nobody firing.
+- **Squalls:** in every view, with a blended rain haze when flying into one.
 - **Rear seat:** the 1914 carbine swings through the full rear arc. The Lewis
   gun (1915 to 1918) also depresses to 30 degrees below level; the view dips
   with it, and the fuselage and lower wing stop rounds. Attackers come as a
@@ -126,41 +133,37 @@ Controls are in the drawer's `ReadMe` and the README.
   round 5 and about 2 MB less since its gun became a 256-colour sheet and the
   unused ring overlay stopped loading (not yet re-measured on the lab).
 - **Display:** F9 full screen leaves Workbench intact on leaving and on quitting
-  (Lab-50 and Lab-51).
+  (Lab-50 and Lab-51). The SDL2 module's own fault, behind the garbled
+  Workbench seen with modules from before GFOpenUp 0.8.18, is hardened in
+  GFOpenUp 0.8.26; the game's own workaround stays and does no harm.
+- **Requirement:** the Open6 build loads `LIBS:GFOpenGPU/SDL2.module` and
+  `gfopengpu.library`. Without GFOpenUp's GFOpenGPU part the game stops at
+  once and says what is missing.
 
 ## Known problems and incomplete work
 
-1. **Christmas truce:** the truce sortie (1914, mission 12) still ends after
-   about 30 seconds; it missed the round-5 lengthening.
-2. **Lewis gun:** the below-level arc and the rendered gun are checked on the
-   host only, not yet on the lab.
-3. **Difficulty:** untested by a person. All tuning used the autopilot.
-4. **Timing:** frame times were measured only on the lab, which is faster than
-   a real 68040. Squalls, clouds and the films need timing on real hardware or
-   PiStorm.
-5. **1914 cockpit:** the cockpit sorties' task is only to stay with the other
-   machine. The 1914 observer tasks exist only in the flat views.
-6. **Squalls:** not drawn in the cockpit and rear-gunner views; faint 4-pixel
-   steps along their side-on edges.
-7. **Film nits:**
-   - the 1914 two-seater barely leaves the ground before its take-off ends;
-   - one wingman of the flight of three clips the frame edge;
-   - the muddy field reads mostly from the thrown clods.
-   Nobody has listened to the film soundtracks yet.
-8. **Cache on:** with "keep the art in memory" on, a long campaign grows to
+1. **Difficulty:** untested by a person. All tuning used the autopilot.
+2. **Timing:** frame times were measured only on the lab, which is faster than
+   a real 68040. Squalls, clouds, the films and the Lewis gun's low arc need
+   timing on real hardware or PiStorm.
+3. **Autopilot results in RC6:** the 1918 spring side-on sortie met 3 of its 5
+   orders; the 1918 cockpit dogfight downed none (the cockpit autopilot rarely
+   does); the slow-frames dogfight was still flying after 600 seconds. These
+   are the autopilot's results, not a person's.
+4. **Cache on:** with "keep the art in memory" on, a long campaign grows to
    about 48 MB.
-9. **Full screen:** the root cause is in the SDL2 module, which never restores
-   the display mode. The game works round it; the module itself is not fixed.
-10. **Mode mix:** corrected; every chapter now holds 4 side-on, 4 top-down,
-    2 dogfight and 2 rear-gunner sorties, checked before packaging.
-11. **Recordings and film:** every shipped recording and film is listed with
-    its SHA-256 in `assets/canvas-skies/MUSIC_LICENSE.md`. Colonel Bogey is
-    now our own rendition (give it a listening test on the real instance);
-    the six period records were cleared by the project owner and Amazing
-    Grace is kept; four of the eight newsreel source films await the
-    National Archives' rights confirmation, which the project owner is
-    seeking.
-12. **Mess officers:** they read as figures in lamplight rather than portraits.
+5. **Recordings and film:** every shipped recording and film is listed with
+   its SHA-256 in `assets/canvas-skies/MUSIC_LICENSE.md`. Colonel Bogey is
+   our own rendition; the six period records were cleared by the project
+   owner and Amazing Grace is kept; four of the eight newsreel source films
+   await the National Archives' rights confirmation, which the project owner
+   is seeking.
+6. **Listening:** nobody has listened to the aerodrome films' soundtracks,
+   including the three re-rendered in round 6, or re-checked the game by ear
+   for ticks.
+7. **Mess officers:** they now read as men, but close up the standing men's
+   legs are stiff.
+8. **Lewis gun memory:** the 2 MB saving is calculated, not measured.
 
 ## Acceptance before 0.2.0
 
@@ -175,8 +178,8 @@ Controls are in the drawer's `ReadMe` and the README.
       round-5 captures.
 - [ ] No recurring audio tick or stutter. Not re-checked by ear since round 5.
 - [x] Dogfight banks, turns, climbs, stalls, dives, crashes and completes.
-- [ ] Rear gun muzzle, crosshair, rail, tail obstruction and approaches agree.
-      They do for the carbine; for the Lewis gun's low arc, on the host only.
+- [x] Rear gun muzzle, crosshair, rail, tail obstruction and approaches agree,
+      for the carbine and the Lewis gun's full arc (lab autopilot).
 - [ ] 1914 approachable and 1918 materially harder. True on the autopilot; not
       yet confirmed by a person.
 - [x] The drawer and start icons are obvious and the game runs from a clean
@@ -187,8 +190,7 @@ Controls are in the drawer's `ReadMe` and the README.
 
 ## Safe resume point
 
-`main` at `ca4e16c` builds with no warnings and is the published RC5. Open
-work: `feature/we-remember` (the end roll call, not merged) and the mode-mix
-correction. Start with `git status`, read this file and the story document,
-build the package, and run `CanvasSkies MISSION 1 1 RUN FLY` on a lab to see a
-sortie end to end.
+`main` after the RC6 merge builds with no warnings with the Open6 stove and is
+RC6. Start with `git status`, read this file, the RC6 receipt and the story
+document, build the package, and run `CanvasSkies MISSION 1 1 RUN FLY` on a lab
+with the GFOpenGPU part installed to see a sortie end to end.
