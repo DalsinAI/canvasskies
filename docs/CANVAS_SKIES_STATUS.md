@@ -71,6 +71,7 @@ Direct test entries (`CanvasSkies <ENTRY>`):
 | `... RUN` | flies the sortie to its real end, keeping the airframe above 30 |
 | `... FLY` | hands the controls to the autopilot |
 | `... TIME` | shows the frame's drawing time |
+| `... SLOWFRAMES` | holds each sortie frame to about eight a second, as a slow 68040 might |
 | `TRUCE`, `AIRSHIP`, `GOTHA` | the three special sorties |
 | `DAWN`, `MESS [QUIET\|WAKE]`, `CINEMA n`, `NEWS`, `DIARY`, `MACHINES n`, `AWARD n`, `LOSS` | the presentation scenes |
 | `DEBRIEF`, `DEBRIEF_SUCCESS`, `CHAPTER_SUCCESS`, `FINAL_SUCCESS`, `HOSPITAL`, `DEATH`, `REPRIMAND`, `COURTMARTIAL` | the outcomes |
@@ -79,7 +80,14 @@ Direct test entries (`CanvasSkies <ENTRY>`):
 
 A `RUN` sortie appends one line to `RAM:canvas-sortie.log`: chapter, mission,
 mode, length, idle seconds, the longest idle stretch, success, objectives,
-kills, airframe and fuel.
+kills, airframe and fuel; rounds fired, our rounds that struck in the cockpit
+(`hits`), the enemy's rounds and the damage taken; the sortie's own seconds
+(`sim`) and the wall-clock seconds it took (`wall`); and the side-on and
+top-down targets on offer, those left unreached and the bombs dropped. Below
+twenty frames a second the sortie clock runs slow by design, so with
+`SLOWFRAMES` (about eight frames a second) `wall` is about two and a half to
+three and a half times `sim`: a cockpit sortie of 200 s takes ten to twelve
+minutes.
 
 Controls are in the drawer's `ReadMe` and the README.
 
