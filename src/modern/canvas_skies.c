@@ -1752,14 +1752,6 @@ static float airframe_wing_edge(float sx)
     return 398.0f - out * 0.04f + fabsf(sinf(out * 0.087f)) * 3.0f;
 }
 
-static int airframe_below_painting(float sx, float sy, int height)
-{
-    if (sy >= (float)height &&
-        fabsf(sx - AIRFRAME_KEEL_X) < airframe_fuselage_half(sy))
-        return 1;
-    return sy > airframe_wing_edge(sx);
-}
-
 static int gunner_tail_blocks_shot(const Game *g, int aim_x, int aim_y)
 {
     float look = gunner_traverse(g);
@@ -11602,34 +11594,63 @@ static void draw_flight_background(Game *g)
     if (locked) SDL_UnlockSurface(bg);
 }
 
-/* What lies beyond the foot of the painting, at painting point (sx, sy),
- * for airframe_below_painting: the fuselage is its last row stretched out
- * to the widening longerons (the dark rim of the rear cockpit between
- * them), and the lower wing is the painted tailplane's fabric, ribs and
- * all, laid out from its trailing edge.  Returns the key where neither. */
-static uint32_t airframe_beyond_painting(SDL_Surface *source, float sx,
-                                         float sy, uint32_t key)
+/* Tables for what lies beyond the foot of the painting, so the dipped
+ * view costs table look-ups, not a square root of work per pixel.  Below
+ * the foot (by painting row, from the foot down) the fuselage's half
+ * width and the squeeze that maps it back onto the painting's last row,
+ * whose pixels are stretched out to the widening longerons (the dark rim
+ * of the rear cockpit between them).  Outboard of the wing root (by
+ * pixels outboard) the lower wing's trailing edge, and the column of the
+ * painted tailplane whose fabric, ribs and all, stands in for the wing's,
+ * laid out from its trailing edge. */
+#define BEYOND_ROWS 512
+#define WING_SPAN_PIXELS 2048
+static short beyond_half[BEYOND_ROWS];
+static int beyond_squeeze[BEYOND_ROWS];        /* 16.16 */
+static short wing_edge_row[WING_SPAN_PIXELS];
+static short wing_fabric_x[WING_SPAN_PIXELS];
+
+static void build_beyond_tables(int height)
 {
-    int h = source->h;
-    float edge;
-    if (sy >= (float)h &&
-        fabsf(sx - AIRFRAME_KEEL_X) < airframe_fuselage_half(sy)) {
-        float squeeze = airframe_fuselage_half((float)(h - 1)) /
-                        airframe_fuselage_half(sy);
-        int x = (int)(AIRFRAME_KEEL_X + (sx - AIRFRAME_KEEL_X) * squeeze);
-        if (x < 0 || x >= source->w) return key;
-        return surface_pixel(source, x, h - 1);
+    static int built_for;
+    int i;
+    if (built_for == height) return;
+    built_for = height;
+    for (i = 0; i < BEYOND_ROWS; ++i) {
+        float half = airframe_fuselage_half((float)(height + i));
+        beyond_half[i] = (short)half;
+        beyond_squeeze[i] = (int)(airframe_fuselage_half((float)(height - 1)) /
+                                  half * 65536.0f);
     }
-    edge = airframe_wing_edge(sx);
-    if (sy > edge) {
-        float out = fabsf(sx - AIRFRAME_KEEL_X) - AIRFRAME_WING_ROOT;
-        int x = (int)fmodf(out * 0.55f, 180.0f);
-        int y = 208 + (int)((sy - edge) * 0.6f);
-        if (y > 241) y = 241;
-        x = sx < AIRFRAME_KEEL_X ? 92 + x : 548 - x;
-        return surface_pixel(source, x, y);
+    for (i = 0; i < WING_SPAN_PIXELS; ++i) {
+        wing_edge_row[i] = (short)airframe_wing_edge(
+            AIRFRAME_KEEL_X + AIRFRAME_WING_ROOT + (float)i);
+        wing_fabric_x[i] = (short)fmodf((float)i * 0.55f, 180.0f);
     }
-    return key;
+}
+
+/* The painted columns of each row of the airframe painting, first and
+ * last, so a screen row is only walked where the painting has something:
+ * most of the picture is sky round the fin and tailplane.  Measured once
+ * from the loaded painting. */
+static short painting_first[SCREEN_H];
+static short painting_last[SCREEN_H];
+
+static void measure_painting_rows(SDL_Surface *source, pix_t key)
+{
+    static SDL_Surface *measured;
+    int x, y;
+    if (measured == source) return;
+    measured = source;
+    for (y = 0; y < source->h && y < SCREEN_H; ++y) {
+        const pix_t *row = PIX_ROW(source, y);
+        painting_first[y] = (short)source->w;
+        painting_last[y] = -1;
+        for (x = 0; x < source->w; ++x) if (row[x] != key) {
+            if (painting_first[y] > x) painting_first[y] = (short)x;
+            painting_last[y] = (short)x;
+        }
+    }
 }
 
 static void draw_gunner_airframe(Game *g)
@@ -11638,17 +11659,28 @@ static void draw_gunner_airframe(Game *g)
     SDL_Surface *dest = g->screen;
     AirframeView view;
     int beyond = gunner_dip(g) > 0.0f;
-    uint32_t key;
+    pix_t key;
     int x, y, top;
+    int w, h;
+    int keel = (int)(AIRFRAME_KEEL_X * 65536.0f);
+    int root = (int)(AIRFRAME_WING_ROOT * 65536.0f);
     int source_locked = 0;
     int dest_locked = 0;
-    if (!source || source->w != SCREEN_W || source->h != SCREEN_H) return;
+    float inverse_scale;
+    if (!source || source->w != SCREEN_W || source->h != SCREEN_H ||
+        source->format->BytesPerPixel != sizeof(pix_t))
+        return;
+    w = source->w;
+    h = source->h;
     gunner_airframe_view(g, &view);
-    key = SDL_MapRGB(source->format, 255, 0, 255);
+    inverse_scale = 1.0f / view.scale;
+    if (beyond) build_beyond_tables(h);
+    key = (pix_t)SDL_MapRGB(source->format, 255, 0, 255);
     if (SDL_MUSTLOCK(source)) {
         if (SDL_LockSurface(source) != 0) return;
         source_locked = 1;
     }
+    measure_painting_rows(source, key);
     if (SDL_MUSTLOCK(dest)) {
         if (SDL_LockSurface(dest) != 0) {
             if (source_locked) SDL_UnlockSurface(source);
@@ -11662,29 +11694,194 @@ static void draw_gunner_airframe(Game *g)
     if (top < 0) top = 0;
     /* Row-wise inverse mapping keeps the CPU surface authoritative and gives
      * the tail a convincing parallax/shear as the observer turns on the
-     * swivelling stool.  Pilot bank rolls the structure independently. */
+     * swivelling stool.  Pilot bank rolls the structure independently.
+     * Along a row both painting coordinates change by a fixed step, so they
+     * are stepped in 16.16 fixed point rather than worked out again for
+     * every pixel: on the 68040 the old floating-point work per pixel was
+     * most of the rear seat's drawing time, and more than doubled it with
+     * the gun depressed. */
     for (y = top; y < SCREEN_H; ++y) {
-        for (x = 0; x < SCREEN_W; ++x) {
-            float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
-            float shear = view.look * (float)(y - 215) * 0.20f;
-            float fy = (float)y - view.vertical_shift - roll - AIRFRAME_DROP;
-            float fx = SCREEN_W * 0.5f +
-                       ((float)x - SCREEN_W * 0.5f - view.centre_shift -
-                        shear) / view.scale;
-            int sy = (int)fy;
-            int sx = (int)fx;
-            uint32_t colour;
-            if (sx < 0 || sx >= source->w || sy < 0 || sy >= source->h) {
+        float shear = view.look * (float)(y - 215) * 0.20f;
+        float fy0 = (float)y - view.vertical_shift - AIRFRAME_DROP +
+                    g->view_bank * (float)(SCREEN_W / 2) * 0.22f;
+        float fx0 = SCREEN_W * 0.5f +
+                    (-SCREEN_W * 0.5f - view.centre_shift - shear) *
+                    inverse_scale;
+        float fy1 = fy0 - g->view_bank * 0.22f * (float)(SCREEN_W - 1);
+        int row_lo = (int)(fy0 < fy1 ? fy0 : fy1) - 1;
+        int row_hi = (int)(fy0 < fy1 ? fy1 : fy0) + 1;
+        int first = 1 << 14, last = -(1 << 14), r, x0, x1, run0, run1, part;
+        int wing_left, wing_right;
+        int fx, fy, step_x, step_y;
+        pix_t *out = PIX_ROW(dest, y);
+        /* Which painting columns can show on this row: the painted span of
+         * every painting row it crosses, and, looking down, the fuselage
+         * beyond the foot or (rarely, fully down at the edge of the
+         * picture) the whole row for the lower wing. */
+        for (r = row_lo < 0 ? 0 : row_lo; r <= row_hi && r < h; ++r) {
+            if (painting_first[r] < first) first = painting_first[r];
+            if (painting_last[r] > last) last = painting_last[r];
+        }
+        if (beyond && row_hi >= h) {
+            int half = beyond_half[row_hi - h < BEYOND_ROWS ?
+                                   row_hi - h : BEYOND_ROWS - 1] + 1;
+            if ((int)AIRFRAME_KEEL_X - half < first)
+                first = (int)AIRFRAME_KEEL_X - half;
+            if ((int)AIRFRAME_KEEL_X + half + 1 > last)
+                last = (int)AIRFRAME_KEEL_X + half + 1;
+        }
+        /* The lower wing lies only outboard of where its trailing edge has
+         * risen above this row (398 less 0.04 a pixel outboard, at most 3
+         * more for the scallops): from there out on either side, if that
+         * is on the screen at all. */
+        wing_left = -1;
+        wing_right = SCREEN_W;
+        if (beyond && row_hi > wing_edge_row[WING_SPAN_PIXELS - 1]) {
+            float out_min = (398.0f - (float)row_hi) / 0.04f - 1.0f;
+            float inboard;
+            if (out_min < 0.0f) out_min = 0.0f;
+            inboard = AIRFRAME_WING_ROOT + out_min;
+            wing_left = (int)((AIRFRAME_KEEL_X - inboard - fx0) * view.scale) + 2;
+            wing_right = (int)((AIRFRAME_KEEL_X + inboard - fx0) * view.scale) - 2;
+            if (wing_left > SCREEN_W) wing_left = SCREEN_W;
+            if (wing_right < 0) wing_right = 0;
+        }
+        if (first > last && wing_left < 0 && wing_right >= SCREEN_W) continue;
+        /* Back from painting columns to screen columns: fx = fx0 + x / s. */
+        if (first > last) {
+            x0 = x1 = wing_left > 0 ? wing_left : 0;
+        } else {
+            x0 = (int)(((float)first - fx0) * view.scale) - 2;
+            x1 = (int)(((float)last + 1.0f - fx0) * view.scale) + 2;
+            if (x0 < 0) x0 = 0;
+            if (x1 > SCREEN_W) x1 = SCREEN_W;
+            if (x1 < x0) x1 = x0;
+        }
+        step_x = (int)(inverse_scale * 65536.0f);
+        step_y = -(int)(g->view_bank * 0.22f * 65536.0f);
+        run0 = run1 = x1;   /* no run: the general walk does the row */
+        if (beyond && row_hi >= h) {
+            /* Where the whole row lies below the painting's foot it is the
+             * fuselage, the painting's last row stretched: drawn as one
+             * run, stepping along that row, with nothing to decide per
+             * pixel.  The run's squeeze is taken at its middle; with the
+             * pilot's bank it changes by a fraction of a pixel along it. */
+            float dfy = -g->view_bank * 0.22f;
+            float xa = (float)x0, xb = (float)x1;
+            if (dfy > 1e-6f) xa = ((float)h + 1.0f - fy0) / dfy;
+            else if (dfy < -1e-6f) xb = ((float)h + 1.0f - fy0) / dfy;
+            else if (fy0 < (float)h + 1.0f) xa = xb = (float)x0;
+            if (xa < (float)x0) xa = (float)x0;
+            if (xb > (float)x1) xb = (float)x1;
+            if (xa < xb) {
+                float mid = fy0 + dfy * (xa + xb) * 0.5f;
+                int i = (int)mid - h;
+                float half, squeeze, from, l, rr;
+                if (i < 0) i = 0;
+                if (i > BEYOND_ROWS - 1) i = BEYOND_ROWS - 1;
+                half = (float)beyond_half[i];
+                squeeze = (float)beyond_squeeze[i] / 65536.0f;
+                l = (AIRFRAME_KEEL_X - half - fx0) * view.scale + 1.0f;
+                rr = (AIRFRAME_KEEL_X + half - fx0) * view.scale - 1.0f;
+                if (l < xa) l = xa;
+                if (rr > xb) rr = xb;
+                if (l < rr) {
+                    const pix_t *last = PIX_ROW(source, h - 1);
+                    int px, step;
+                    run0 = (int)l + 1;
+                    run1 = (int)rr;
+                    from = fx0 + (float)run0 * inverse_scale -
+                           AIRFRAME_KEEL_X;
+                    px = (int)((AIRFRAME_KEEL_X + from * squeeze) * 65536.0f);
+                    step = (int)(inverse_scale * squeeze * 65536.0f);
+                    for (x = run0; x < run1; ++x, px += step) {
+                        int c = px >> 16;
+                        pix_t colour;
+                        if (c < 0 || c >= w) continue;
+                        colour = last[c];
+                        if (colour != key) out[x] = colour;
+                    }
+                }
+            }
+        }
+        /* Everything else on the row, either side of that run: the painting
+         * itself and the edges of the fuselage, and out at the sides the
+         * wing beyond them. */
+        for (part = 0; part < 4; ++part) {
+        int from_x = part == 0 ? 0 : part == 1 ? x0 : part == 2 ? run1 :
+                     (wing_right > x1 ? wing_right : x1);
+        int to_x = part == 0 ? (wing_left < x0 ? wing_left : x0) :
+                   part == 1 ? run0 : part == 2 ? x1 : SCREEN_W;
+        if (part == 3 && wing_right >= SCREEN_W) continue;
+        if (from_x >= to_x) continue;
+        fx = (int)(fx0 * 65536.0f) + step_x * from_x;
+        fy = (int)(fy0 * 65536.0f) + step_y * from_x;
+        for (x = from_x; x < to_x; ++x, fx += step_x, fy += step_y) {
+            /* Truncation toward zero, as the float version had. */
+            int sx = fx >= 0 ? fx >> 16 : -((-fx) >> 16);
+            int sy = fy >= 0 ? fy >> 16 : -((-fy) >> 16);
+            pix_t colour;
+            if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+                /* Inside the painting: copy on along this painting row
+                 * for as long as the bank leaves the row unchanged and the
+                 * column stays on the painting, with nothing else to test
+                 * per pixel.  This is most of the pixels drawn. */
+                const pix_t *row = PIX_ROW(source, sy);
+                int n = to_x - x;
+                if (step_y > 0) {
+                    int k = (((sy + 1) << 16) - fy + step_y - 1) / step_y;
+                    if (k < n) n = k;
+                } else if (step_y < 0) {
+                    int k = (fy - (sy << 16)) / -step_y + 1;
+                    if (k < n) n = k;
+                }
+                if (n < 1) n = 1;
+                for (;;) {
+                    colour = row[sx];
+                    if (colour != key) out[x] = colour;
+                    if (--n == 0) break;
+                    ++x;
+                    fx += step_x;
+                    fy += step_y;
+                    sx = fx >> 16;
+                    if (fx < 0 || sx >= w) {
+                        /* Off the painting: back to the general case. */
+                        --x;
+                        fx -= step_x;
+                        fy -= step_y;
+                        break;
+                    }
+                }
+                continue;
+            } else if (!beyond || fy < 0) {
+                continue;
+            } else {
                 /* Looking down over the side, the fuselage below the
                  * painting and the lower wing come into view. */
-                if (!beyond || fy < 0.0f || !airframe_below_painting(
-                        fx, fy, source->h))
-                    continue;
-                colour = airframe_beyond_painting(source, fx, fy, key);
-            } else {
-                colour = surface_pixel(source, sx, sy);
+                int across = fx - keel;
+                int out_by;
+                if (across < 0) across = -across;
+                if (sy >= h && sy - h < BEYOND_ROWS &&
+                    (across >> 16) < beyond_half[sy - h]) {
+                    int from = fx - keel;
+                    int px = (keel + (from >> 8) *
+                              (beyond_squeeze[sy - h] >> 8)) >> 16;
+                    if (px < 0 || px >= w) continue;
+                    colour = PIX_ROW(source, h - 1)[px];
+                } else {
+                    out_by = (across - root) >> 16;
+                    if (across < root || out_by >= WING_SPAN_PIXELS ||
+                        sy <= wing_edge_row[out_by])
+                        continue;
+                    sy = 208 + ((sy - wing_edge_row[out_by]) * 154 >> 8);
+                    if (sy > 241) sy = 241;
+                    colour = PIX_ROW(source, sy)[fx < keel ?
+                        92 + wing_fabric_x[out_by] :
+                        548 - wing_fabric_x[out_by]];
+                }
             }
-            if (colour != key) pixel(dest, x, y, colour);
+            if (colour != key) out[x] = colour;
+        }
         }
     }
     if (dest_locked) SDL_UnlockSurface(dest);
