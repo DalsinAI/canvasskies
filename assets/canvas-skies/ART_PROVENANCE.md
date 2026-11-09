@@ -37,6 +37,12 @@ observer's eye and lit by the low sun, the sky and a rim of sunlight, one
 frame for each aim of a grid over the rear arc. It is stored as a 256-colour
 run-length encoded BMP.
 
+The observer's Lewis gun on its Scarff ring (`rear-lewis.bmp`) is original
+art made the same way by `ports/amigaos3/make_rear_lewis.py`, in the colours
+of the earlier painted gun: the ring and its bow once, and the gun for a grid
+of aims from 30 degrees below level to 75 above. It replaces the painted
+atlas, which had no frames below level.
+
 `pilot-cockpit-single.bmp` is assembled from the existing cockpit
 paintings by `ports/amigaos3/make_single_gun_cockpit.py`, and
 `journal.bmp` is the existing journal painting with its ruled lines lifted
