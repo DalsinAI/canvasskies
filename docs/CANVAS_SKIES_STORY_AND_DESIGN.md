@@ -61,8 +61,8 @@ become. The chapter ends with the aeroplane having earned its place.
 
 Missions: A Field in France; The First Message; A Stranger Above; Columns on
 the Road; The Marne Bridge; Horses in the Sky; The Empty Flank; Rain Over
-Meaux; A Face in the Wind; Turn of the Armies; Orders at Dusk; Eyes Above the
-Marne.
+Meaux; A Face in the Wind; Turn of the Armies; Eyes Above the Marne; The
+Silent Front (the Christmas truce).
 
 ### Chapter 2 — The War Learns to Fly, 1915
 
@@ -83,8 +83,8 @@ desperate flight. Tom is wounded and, for a time, his empty seat is filled by a
 quiet replacement. The squadron wins very little and loses a great deal.
 
 Missions: Before the Barrage; Cut the Balloon Line; Above Albert; Zero Hour;
-The First Trench; Eccles' Wing; A Red Rocket; Supplies at Pozieres; The Empty
-Seat; The New Trench; Rain and Chalk; Over the Somme.
+The First Trench; The Sunken Road; A Red Rocket; Supplies at Pozieres; The
+Empty Seat; The New Trench; Home Defence; Over the Somme.
 
 ### Chapter 4 — Bloody April, 1917
 
@@ -94,8 +94,8 @@ safety of a desk when promotion arrives. Tom returns to the rear cockpit, but
 the chapter closes on empty chairs and a squadron almost remade from scratch.
 
 Missions: Arras at Dawn; The Forward Strip; The Circus; Missing Patrol; Vimy
-Ridge; Six Against Two; The Photograph; Tom Returns; Captain Mercer; Empty
-Chairs; The Rail Cutting; Bloody April.
+Ridge; Alone over the Scarpe; The Photograph; Tom Returns; Captain Mercer;
+Empty Chairs; The Gothas; Bloody April.
 
 ### Chapter 5 — The Iron Road, late 1917
 
