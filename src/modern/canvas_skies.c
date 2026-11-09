@@ -11436,17 +11436,42 @@ static void draw_top_target(Game *g, int x, int y, Target *target)
     if (g->topdown_targets) {
         /* The painted sprites (make_topdown_targets.py). */
         if (target->type == 3) {
-            float t = (float)SDL_GetTicks() * 0.0016f + (float)x;
+            /* Christmas in no man's land, from the air: men of both armies,
+             * khaki and field grey, round a brazier with its smoke going
+             * up, and a few more kicking a ball about beside them. */
+            float t = (float)sim_now(g) * 0.0016f + (float)x;
+            uint32_t tick = sim_now(g) / 110u;
             int k;
-            for (k = 0; k < 14; ++k) {
-                uint32_t h = scene_hash((uint32_t)(k * 7919 + x));
-                int dx = (int)(h % 90u) - 45, dy = (int)((h >> 8) % 40u) - 20;
-                dx += (int)(sinf(t * 0.7f + (float)k) * 3.0f);
-                td_blit_plain(g, (k & 1) ? TD_MAN_OURS : TD_MAN_THEIRS,
-                              x + dx, y + dy);
+            for (k = 0; k < 3; ++k) {
+                int rise = (int)((tick + (uint32_t)(k * 9)) % 27u);
+                blend_circle(s, x + rise / 3 + 2, y - rise, 3 + rise / 4,
+                             214, 212, 206, (uint8_t)(200 - rise * 6));
             }
-            td_blit_plain(g, TD_FOOTBALL, x + (int)(sinf(t) * 26.0f),
-                          y + (int)(cosf(t * 1.3f) * 9.0f));
+            for (k = 0; k < 16; ++k) {
+                uint32_t h = scene_hash((uint32_t)(k * 7919 + x));
+                int ours = k & 1, mx, my;
+                pix_t coat = ours ? PIX_PACK(150, 130, 84) : PIX_PACK(108, 116, 106);
+                if (k < 9) {
+                    /* round the fire */
+                    float a = (float)k * 0.70f + (float)(h % 7u) * 0.05f;
+                    mx = x + (int)(cosf(a) * 13.0f);
+                    my = y + (int)(sinf(a) * 9.0f);
+                } else {
+                    /* the football, off to one side */
+                    mx = x + 34 + (int)(h % 30u) - 15 +
+                         (int)(sinf(t * 0.8f + (float)k) * 4.0f);
+                    my = y + (int)((h >> 8) % 22u) - 11 +
+                         (int)(cosf(t * 0.6f + (float)k) * 3.0f);
+                }
+                blend_rect(s, mx, my + 1, 5, 3, 24, 22, 18, 110);     /* shadow */
+                rect(s, mx - 2, my - 2, 5, 5, coat);
+                rect(s, mx - 1, my - 1, 3, 3, PIX_PACK(206, 172, 140)); /* head */
+            }
+            blend_circle(s, x, y, 5, 255, 150, 50, 220);               /* fire */
+            rect(s, x - 1, y - 1, 2, 2, PIX_PACK(255, 236, 160));
+            circle(s, x + 34 + (int)(sinf(t) * 14.0f),
+                   y + (int)(cosf(t * 1.3f) * 7.0f), 1,
+                   PIX_PACK(240, 236, 224));                             /* ball */
             return;
         }
         if (target->type == 4) {
