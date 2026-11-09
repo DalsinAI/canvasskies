@@ -12,9 +12,12 @@ Squadron Commander standing at the head of it; the stove glowing in the
 corner with a man in a chair beside it and the squadron's dog asleep on
 the boards; the piano and its gramophone against the back wall, the
 propeller and a trophy cross above them; bunting under the eaves; and
-over all of it the tobacco smoke, lit gold round the lamp.  Each man is
-told by the set of his head and shoulders and by his hands, since a face
-here is a dozen pixels.
+over all of it the tobacco smoke, lit gold round the lamp.  A face here
+is a dozen pixels, so each man is told first by his carriage (weight on
+one leg, slumped in a chair, leaning on the piano, head turned to his
+neighbour), by what his hands hold (a glass, a pipe, a pen, a hand of
+cards, a newspaper) and by the light on him; then by the few strokes of
+his face.
 
 The squadron board hangs on the back wall at the left, its slate left
 clean: the game chalks the heading and the tally on it at run time, so
@@ -22,25 +25,32 @@ keep BOARD in step with draw_mess() in src/modern/canvas_skies.c.
 
 Three evenings, one picture each:
 
-  quiet   mess.bmp        an ordinary good evening: drinks, talk, the
-                          piano played softly, the CO with a glass.
+  quiet   mess.bmp        an ordinary good evening: a letter written,
+                          a hand of cards, a man reading with his pipe,
+                          the piano played softly, the CO with a glass,
+                          a man in his cardigan with the paper by the
+                          stove.
   rowdy   mess-rowdy.bmp  after a victory: the lamp turned up and candles
                           lit in bottles, glasses raised all round, a man
-                          on the table making a speech, the piano going
-                          and a singer at it.
-  wake    mess-wake.bmp   after a loss: the lamp turned low, fewer men,
-                          heads down, an empty chair pushed back with his
-                          cap on the seat and his glass full on the
-                          table, the CO alone at the board, the piano shut.
+                          up on a chair making a speech, and round the
+                          piano the pianist, a friend's arm about him and
+                          another leaning on the lid, all singing.
+  wake    mess-wake.bmp   after a loss: the lamp turned low, the men on
+                          their feet, quiet, heads bowed; his chair pushed
+                          back with his cap on the seat and his glass
+                          turned down on the table; the CO alone at the
+                          board, the piano shut.
 
 Rendered at four times the size (so that a face of a dozen pixels still
 has its brow, eyes, nose and mouth in it), filtered down and dithered to
-RGB565.  The men are drawn in a scene of their own and laid into the
-room (lamplit_men): lit as a painter would light them, mostly dark
-shapes with a warm rim from the lamp and the stove, their edges softened
-a touch, under the room's smoke; pipe and cigarette smoke drifts up
-through the lamp's glow and the corners of the room fall into shadow.
-Each evening takes about a minute and a half and some 850 MB.
+RGB565.  The men are drawn into a G-buffer of their own and painted by
+the kit (lamplit_men, figurekit.paint): their faces put on in strokes,
+the lamp's warm light wrapping round them and falling away into deep
+shadow, a rim where it is behind them, the shadows they cast on
+themselves; then their edges are softened a touch and they are laid into
+the room under its smoke; pipe and cigarette smoke drifts up through the
+lamp's glow and the corners of the room fall into shadow.  Each evening
+takes under a minute and some 950 MB.
 Writes assets/canvas-skies/mess.bmp, mess-rowdy.bmp and mess-wake.bmp.
 
   make_mess.py [quiet|rowdy|wake ...] [--preview DIR]
@@ -60,9 +70,11 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from figurekit import Figure  # noqa: E402
-from figures3d import Body, bentwood, dog  # noqa: E402
-from scene3d import Scene, fbm, normalize, planks, rot_z  # noqa: E402
+from figurekit import (FLAT as FLAT_HAND, SEAT_HIP, STAND_HIP,  # noqa: E402
+                       Figure, GScene, chair, paint, paint_faces)
+from figures3d import dog  # noqa: E402
+from scene3d import (Scene, cone, fbm, normalize, planks, rot_y,  # noqa: E402
+                     rot_z)
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets" / "canvas-skies"
@@ -343,6 +355,16 @@ def pot(sc, x, yb, z, full=1.0):
         sc.glow((x - 1, yb - 5), 2.4, (255, 190, 90), 0.3)
 
 
+def upturned(sc, x, yb, z):
+    """His pint pot turned down on the table at his empty place: the
+    glass empty and upside down, its mouth on the cloth."""
+    cone(sc, (x, yb - 5.5, z), (0, -1, 0), 5.5, 3.7, 3.1, (150, 156, 140),
+         spec=1.4, shine=48)
+    sc.ellipsoid((x, yb - 11, z), (3.1, 1.0, 3.1), (170, 172, 160),
+                 spec=1.2, shine=40)
+    sc.glow((x - 1, yb - 7), 2.0, (255, 220, 160), 0.25)
+
+
 def candle(sc, x, yb, z, lit=True):
     """A candle stuck in the neck of an empty bottle."""
     bottle(sc, x, yb, z, full=False)
@@ -381,74 +403,141 @@ def on_table(sc, mood):
             pot(sc, x, py, pz)
         ashtray(sc, 424, py + 2, pz + 1)
     else:
-        bottle(sc, 430, y + 1, yz)
-        candle(sc, 404, y + 2, yz - 2)
-        pot(sc, 384, py + 3, pz - 3)          # his, kept full
-        pot(sc, 352, py, pz)
-        ashtray(sc, 448, py + 2, pz + 1)
+        bottle(sc, 446, y + 1, yz)
+        candle(sc, 412, y + 2, yz - 2)
+        upturned(sc, 394, TOP[0] + 10, top_z(TOP[0] + 10) - 3)  # his
+        pot(sc, 340, py, pz)
+        pot(sc, 470, py, pz, full=0.0)
+        ashtray(sc, 456, py + 2, pz + 1)
 
 
 # ---- the officers ------------------------------------------------------------
-def officers(sc, room_sc, mood):
+def officers(G, room_sc, mood):
     """The squadron, each man made and posed with the figure kit
-    (figurekit.py): his own build, face and kit from his seed.  The men
-    go into their own scene 'sc', lit for lamplight (see lamplit_men);
-    the chair and the dog belong to the room."""
+    (figurekit.py): his own build, face and kit from his seed, and his own
+    chair under him.  The men go into a GScene of their own, 'G', to be
+    painted by lamplight (see lamplit_men); the dog belongs to the room.
+    Returns the men, for their faces to be painted on.
+
+    Each evening tells its own story.  The quiet one: a letter being
+    written, a hand of cards dealt across the table, a man reading with
+    his pipe, the CO standing easy with a glass, the piano played softly
+    and a man in his cardigan deep in a newspaper by the stove.  The
+    rowdy one: a man up on a chair making his speech with his glass high,
+    the table cheering him, and round the piano a man with his arm about
+    the pianist's shoulders and another leaning on the lid, all singing.
+    The wake: his chair empty at the near side of the table, pushed back,
+    his cap left on the seat and his glass turned down on the table;
+    the others on their feet across the table, quiet, heads bowed,
+    glasses held low;
+    a man standing back from the table at the near side; the CO alone
+    at the board; a man bent toward the stove."""
     far, near = 446, 372
     fy, ny = floor_y(far), 294            # the near side sit a little lower
     S, SN = 1.25 * 13, 1.4 * 13           # pixels to a head-height
     co = dict(grey=True, moustache="walrus", style="sd", hair=(70, 58, 44),
               skin=(196, 146, 116), build=1.08)
+    men = []
 
     def man(seed, pose, x, floor, z, px, yaw, make=None, **over):
         f = Figure(seed=seed, **(make or {}))
         f.pose(pose, **over)
-        f.draw(sc, x, floor, z, px, yaw)
+        f.draw(G, x, floor, z, px, yaw, fig=len(men) + 1)
+        men.append(f)
         return f
-    stove = (92, floor_y(448), 448, S)
+    def towards(x, floor, z, px, yaw, p, seated=False, tall=1.0):
+        """A point of the room (x, y, z at 1x) in the own frame of a man
+        to be stood at (x, floor, z): where to send his hand to reach
+        it (a friend's shoulder, the piano's lid)."""
+        k = px * tall
+        hip = (SEAT_HIP["bentwood"] if seated else STAND_HIP) * k
+        o = np.array((x, floor - hip, z), np.float32)
+        return tuple(rot_y(yaw).T @ ((np.asarray(p, np.float32) - o) / k))
+    stove = (96, floor_y(450), 450)
     if mood == "quiet":
-        # Round the far side, face-on: one with his glass, one talking,
-        # one drinking, one with his pipe.
-        man(21, "glass", 322, fy, far, S, 0.15, turn=18)
-        man(22, "talk", 374, fy, far, S, -0.1)
-        man(23, "drink", 426, fy, far, S, 0.0)
-        man(24, "pipe", 478, fy, far, S, -0.3, dict(moustache="full"),
-            turn=-14)
-        # The CO with a glass at the head of the table.
-        man(20, "sglass", 256, floor_y(430), 430, S, -0.5, co, turn=-10)
-        # Back-on at the near side, turned to his neighbour.
-        man(25, "table", 300, ny, near, SN, math.pi + 0.35, turn=25)
+        # Round the far side, face-on: a letter being written; two men at
+        # cards, turned to each other, the third hand at the near side.
+        man(21, "write", 322, fy, far, S, 0.1)
+        man(22, "cards", 376, fy, far, S, -0.35, turn=-12)
+        man(23, "cards", 430, fy, far, S, 0.3, dict(style="wrap"), turn=14,
+            mouth=0.3)
+        # Reading at the end of the table, his pipe going.
+        man(24, "readbook", 482, fy, far, S, -0.3, dict(moustache="full"),
+            props=[dict(kind="book"), "pipe_mouth"])
+        # The CO with a glass at the head of the table, his weight on one
+        # leg, his other hand in his pocket, watching the game.
+        man(20, "sglass", 256, floor_y(430), 430, S, -0.55, co, turn=-14)
+        # Back-on at the near side: the third man at cards, and a man
+        # turned to talk to his neighbour, his glass on the table.
+        man(25, "cards", 406, ny, near, SN, math.pi - 0.15, turn=-20,
+            hand_l=dict(kind="pinch", prop="cards", backs=False,
+                        at=(0.25, -2.0, -1.25), fingers=(-0.1, -1, 0.6),
+                        palm=(0, 0.2, 1), pole=(1, 0.6, 0.2)))
+        man(26, "glass", 300, ny, near, SN, math.pi + 0.35, turn=30)
         # At the piano, playing softly.
-        man(26, "piano", 572, floor_y(452), 452, S, math.pi)
-        # By the stove, his hands to it.
-        man(27, "warm", *stove[:3], S, math.pi / 2 - 0.25)
+        man(27, "piano", 572, floor_y(452), 452, S, math.pi)
+        # By the stove in his cardigan, deep in the paper.
+        man(28, "read", *stove, S, 0.75, dict(style="cardigan"))
     elif mood == "rowdy":
-        man(31, "toast", 322, fy, far, S, 0.2)
-        man(32, "cheer", 374, fy, far, S, 0.0, dict(style="shirt"))
-        man(33, "drink", 426, fy, far, S, -0.1)
-        man(34, "toast", 478, fy, far, S, -0.2, turn=-12)
-        # On the table, making his speech to the lamp.
-        man(35, "sraise", 452, TOP[0] + 5, top_z(TOP[0] + 5), S, -0.25)
-        man(20, "sraise", 256, floor_y(430), 430, S, -0.4, co)
-        man(36, "toast", 300, ny, near, SN, math.pi + 0.3)
-        man(37, "toast", 502, ny, near, SN, math.pi - 0.3, turn=-20)
-        # The piano going, and a man leaning on it to sing.
-        man(38, "piano", 566, floor_y(452), 452, S, math.pi - 0.2, lift=8)
-        man(39, "lean", 620, floor_y(458), 458, S, -0.6)
-        man(40, "toast", *stove[:3], S, -0.9)
+        # Bluebottle up on a chair at the head of the table making his
+        # speech, glass high, the other hand out to the room.
+        cx, cz = 250, 432
+        chair(G, cx, floor_y(cz), cz, S, -0.5, fig=len(men) + 1)
+        men.append(None)
+        seat = (SEAT_HIP["bentwood"] - 0.24) * S       # its top
+        man(35, "sraise", cx, floor_y(cz) - seat, cz - 1, S, -0.35,
+            mouth=1.0, turn=-10,
+            hand_l=dict(kind="open", at=(1.55, -2.1, -0.7),
+                        fingers=(1, -0.3, -0.3), palm=(0.2, 0, -1),
+                        pole=(1, 0.8, 0.2)))
+        # The table cheering him, heads up.
+        man(31, "toast", 322, fy, far, S, 0.2, turn=22)
+        man(32, "cheer", 378, fy, far, S, 0.1, dict(style="shirt"),
+            turn=24)
+        man(33, "toast", 456, fy, far, S, -0.35, turn=-24, mouth=1.0)
+        man(20, "sglass", 184, floor_y(444), 444, S, -0.6, co, mouth=0.7,
+            turn=-20, lift=14)
+        man(36, "toast", 300, ny, near, SN, math.pi + 0.3, turn=-25)
+        man(37, "toast", 470, ny, near, SN, math.pi - 0.3, turn=20,
+            mouth=1.0)
+        # Round the piano: the pianist in his shirt-sleeves, head back,
+        # a man with his arm about his shoulders, another leaning on the
+        # lid; all singing.
+        man(38, "piano", 566, floor_y(452), 452, S, math.pi - 0.15,
+            dict(style="shirt", rolled=True), lift=14, mouth=1.0)
+        sx_, sz_ = 530, 458
+        man(39, "sing", sx_, floor_y(sz_), sz_, S, -0.6,
+            hand_l=dict(kind="relax", at=towards(
+                sx_, floor_y(sz_), sz_, S, -0.6, (553, 204, 452)),
+                fingers=(0.3, 1, 0.2), palm=(0, 1, 0.3),
+                pole=(1, 0.3, -0.5)), turn=24)
+        lx_, lz_ = 624, 466
+        man(40, "lean", lx_, floor_y(lz_), lz_, S, 0.7, dict(style="wrap"),
+            turn=-6, hand_l=dict(FLAT_HAND, at=towards(
+                lx_, floor_y(lz_), lz_, S, 0.7, (604, 154, 478)),
+                pole=(1, 0.2, 0.6)))
+        man(41, "toast", *stove, S, -0.75, mouth=0.8, turn=-10,
+            chair="club")
     else:
-        # Fewer of us.  Heads down; nobody at the piano.
-        man(41, "clasp", 340, fy, far, S, 0.1, dict(hair=(36, 28, 22)))
-        man(42, "head", 466, fy, far, S, -0.15)
-        man(43, "clasp", 502, ny, near, SN, math.pi - 0.2)
-        # His chair, pushed back from the table, his cap on its back.
-        b = Body(room_sc, (390, ny - 1.9 * 13 * 1.4, near - 4), 1.4,
-                 math.pi + 0.3)
-        bentwood(b, cap=True)
+        # His chair at the near side of the table, pushed back and turned
+        # a little from it, his cap left on the seat and his glass turned
+        # down on the table beyond; the others on their feet across the
+        # table from it, quiet, heads bowed.
+        chair(G, 388, ny + 4, near - 6, SN, math.pi - 0.7, cap="seat",
+              col=(122, 82, 48), fig=len(men) + 1)
+        men.append(None)
+        man(41, "glass_low", 330, floor_y(456), 456, S, 0.3,
+            dict(hair=(36, 28, 22)), turn=-10)
+        man(42, "clasped", 452, floor_y(458), 458, S, -0.15, bow=6)
+        man(43, "glass_low", 500, floor_y(454), 454, S, -0.45, turn=-22,
+            bow=8)
+        man(45, "clasped", 268, ny + 6, near - 8, SN, math.pi + 0.5,
+            bow=10)
         # The CO alone at the board, his back half to us, hands behind.
-        man(20, "behind", 240, floor_y(436), 436, S, math.pi / 2 + 0.3, co)
-        man(44, "warm", *stove[:3], S, math.pi / 2 - 0.1, bow=22)
+        man(20, "behind", 210, floor_y(436), 436, S, math.pi / 2 + 0.3, co)
+        man(44, "warm", *stove, S, math.pi / 2 - 0.1, bow=22)
     dog(room_sc, 74, floor_y(404) - 7, 404, 1.2)
+    return [m for m in men if m is not None]
 
 
 # ---- our own table, nearest -------------------------------------------------
@@ -529,15 +618,18 @@ def near_table(sc, mood):
 
 
 # ---- the men by lamplight ----------------------------------------------------
-# How the men are lit, per evening: the lamp's share of plain light on
-# them, its rim, the stove's, the light everywhere else, and how much
-# their edges are softened (in pixels of the finished picture).  The
-# figures are the kit's (figurekit.py) unchanged; only the light and the
-# softness are the painter's.
+# How the men are painted, per evening: the lamp's share of light on them
+# and its rim, the stove's, the candle's and how far it carries (on the
+# night of a loss it is the candle by his empty place that lights his
+# chair), the light everywhere else, and how much their edges are
+# softened (in pixels of the finished picture).
 MEN = {
-    "quiet": dict(lamp=0.9, rim=3.6, stove=0.9, ambient=0.014, soft=0.7),
-    "rowdy": dict(lamp=1.1, rim=3.8, stove=0.9, ambient=0.018, soft=0.85),
-    "wake":  dict(lamp=0.32, rim=3.0, stove=1.0, ambient=0.006, soft=0.75),
+    "quiet": dict(lamp=1.25, rim=1.6, stove=1.0, candle=0.35, reach=70,
+                  ambient=0.03, soft=0.45),
+    "rowdy": dict(lamp=1.35, rim=1.8, stove=0.9, candle=0.5, reach=70,
+                  ambient=0.035, soft=0.5),
+    "wake":  dict(lamp=0.7, rim=1.4, stove=1.1, candle=0.9, reach=120,
+                  ambient=0.018, soft=0.45),
 }
 
 
@@ -565,27 +657,38 @@ def soften(a, r, passes=3):
 
 
 def lamplit_men(sc, mood):
-    """Draws the squadron in a scene of their own, lit as a painter
-    would light men in a smoky hut: little plain light, so they read
-    mostly as dark shapes, a face catching the lamp only on the side
-    toward it; a warm rim of light round heads, shoulders and raised
-    arms from the lamp (set back over the table, among them) and from
-    the stove.  Then their edges are softened a touch and they are laid
-    into the room where nothing nearer hides them, before the smoke."""
+    """Draws the squadron into a GScene of their own and paints them by
+    lamplight (figurekit.paint_faces and paint): the face put on in a few
+    strokes, the lamp's warm light wrapping round them and falling off
+    across the room, skin warming at the edge of its light, shadow pooled
+    where one form meets another and cast by an arm or a chin, a rim of
+    light where the lamp or the stove is behind a man, and a low painterly
+    mottle over all.  Then their edges are softened a touch and they are
+    laid into the room where nothing nearer hides them, before the
+    smoke."""
     k, m = MOODS[mood], MEN[mood]
-    amb = m["ambient"]
-    men = Scene(W, H, ss=SS, ambient=(amb, amb * 0.85, amb * 0.7))
-    men.point_rim = m["rim"] / max(m["lamp"], 0.1)
+    G = GScene(W, H, ss=SS)
+    figs = officers(G, sc, mood)
+    paint_faces(G, figs)
     lamp_col = np.array(k["lamp"]) * m["lamp"]
-    men.point((LAMP[0], LAMP[1] + 30, 438), tuple(lamp_col), k["reach"])
-    men.point((28, 234, 440), tuple(np.array(k["stove"]) * m["stove"]), 110)
-    officers(men, sc, mood)
-    vis = np.isfinite(men.z) & (men.z < sc.z)
+    cand = {"quiet": (0.3, 0.2, 0.1), "rowdy": (0.5, 0.35, 0.18),
+            "wake": (0.7, 0.46, 0.22)}[mood]
+    lights = [((LAMP[0], LAMP[1] + 24, 430), tuple(lamp_col), k["reach"],
+               m["rim"]),
+              ((28, 234, 440), tuple(np.array(k["stove"]) * m["stove"]), 120,
+               m["rim"] * 1.2),
+              ((404, 176, 420), tuple(np.array(cand) * m["candle"] * 2),
+               m["reach"], 0.8)]
+    a = m["ambient"]
+    rgb, cov = paint(G, lights, 1.25 * 13, ambient=(a, a * 0.82, a * 0.62),
+                     bounce=(a * 0.8, a * 0.55, a * 0.3),
+                     seed=MOODS[mood]["seed"])
+    vis = cov & (G.z < sc.z)
     r = int(round(m["soft"] * SS))
-    a = soften(vis.astype(np.float32), r)
-    rgb = soften(np.where(vis[..., None], men.rgb, 0), r)
-    sc.rgb = sc.rgb * (1 - a[..., None]) + rgb
-    sc.z = np.where(vis, men.z, sc.z)
+    al = soften(vis.astype(np.float32), r)
+    rgb = soften(np.where(vis[..., None], rgb, 0), r)
+    sc.rgb = sc.rgb * (1 - al[..., None]) + rgb
+    sc.z = np.where(vis, G.z, sc.z)
 
 
 def pipe_smoke(sc, mood, lamp_col):
@@ -760,9 +863,9 @@ SAMPLE = {
                      "BLUEBOTTLE STANDS ON A CHAIR AND MAKES A SPEECH NOBODY HEARS.",
                      "WE SING EVERY SONG WE KNOW, AND THEN THE RUDE ONES."]),
     "wake":  (23, 1, ["THE MESS, THAT EVENING.",
-                      "ECCLES IS IN THE SICK BAY TONIGHT.",
-                      "THE COLONEL LOOKS IN, STANDS A WHILE AT THE BOARD, AND GOES.",
-                      "WE KEEP HIS GLASS FULL FOR THE MORNING."]),
+                      "WE DRINK TO THE DAY AND DO NOT COUNT THE CHAIRS.",
+                      "TOM STANDS AND RAISES HIS GLASS: TO ABSENT FRIENDS.",
+                      "NOBODY SITS IN HIS CHAIR."]),
 }
 
 

@@ -90,10 +90,25 @@ ordinary good evening), `mess-rowdy.bmp` (the night of a victory) and
 `mess-wake.bmp` (the night of a loss).  The officers are made with our own
 rigged figure kit, `ports/amigaos3/figurekit.py`: men built from shaped
 solids on a small skeleton, posed by joint angles, with no outside models,
-textures or reference pictures.  The dog, the flying helmet, the map and
-everything else in the room are built from the renderer's own lit solids
-and surfaces (`figures3d.py`); no outside textures, photographs or figures
-are used.
+textures or reference pictures.  The kit draws them into a buffer that
+keeps each pixel's colour, surface, depth and material, and then paints
+them in code: the faces put on in a few strokes (eyes, brows, the shadow
+under the nose, the mouth, colour in the cheeks), the lamplight wrapped
+round them with its falloff, rim light, shadow and a painterly mottle.
+Their chairs, the cards, letters, books and newspaper in their hands are
+the kit's own flat and solid pieces.  Knowledge of 1916-18 R.F.C. dress
+(service dress and the double-breasted jacket, the Sam Browne belt,
+collar and tie, the wings over the left breast, breeches and riding
+boots) was used only for accuracy; nothing was copied or traced from any
+photograph, film or other artwork.  The dog, the flying helmet, the map
+and everything else in the room are built from the renderer's own lit
+solids and surfaces (`figures3d.py`); no outside textures, photographs or
+figures are used.  Each picture is 640x400, 24-bit BMP holding RGB565
+values (768,054 bytes); SHA-256:
+
+    mess.bmp        52f97093d203ffaa02873f13a7d2406a754e9e39f050a6acffe48517ea34ec20
+    mess-rowdy.bmp  58f7eb8affa145f2e282cf7aad755e7f395ff714c8acfe9243908a4803fad501
+    mess-wake.bmp   8393113f77116c5b96fdf931c481b9f902c43eb46c7db0346b7d0c5c77881961
 
 `explosion-atlas.bmp` and `topdown-explosion-atlas.bmp` are re-cut from
 their painted `-source.png` files by `ports/amigaos3/make_explosion_atlases.py`.
