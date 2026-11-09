@@ -14822,7 +14822,10 @@ static void draw_debrief(Game *g)
     display_text(g, 69, 48,
          g->success ? "DUTY CARRIED OUT" : "DUTY NOT CARRIED OUT",
          12, 18, red);
-    if (g->obs_count)
+    if (g->special == SPECIAL_TRUCE)
+        snprintf(buf, sizeof(buf), "PUDDING DELIVERED           %d/1",
+                 g->pudding_delivered ? 1 : 0);
+    else if (g->obs_count)
         snprintf(buf, sizeof(buf), "OBSERVER'S TASKS            %d/%d",
                  g->objectives, current_mission_goal(g));
     else if (is_perspective_mode(campaign_missions[g->chapter][g->mission].mode))
