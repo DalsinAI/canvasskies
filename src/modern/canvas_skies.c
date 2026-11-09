@@ -24,6 +24,7 @@
 #include "canvas_machine_sprites.h"
 #include "canvas_side_civilians.h"
 #include "canvas_rear_carbine.h"
+#include "canvas_rear_lewis.h"
 #include "canvas_ticks.h"
 #include "canvas_remember.h"
 #include "canvas_riflemen.h"
@@ -137,8 +138,8 @@
 #ifndef CANVAS_GUNNER_AIRFRAME_BMP
 #define CANVAS_GUNNER_AIRFRAME_BMP "assets/canvas-skies/gunner-airframe-tail.bmp"
 #endif
-#ifndef CANVAS_GUNNER_MOVING_BMP
-#define CANVAS_GUNNER_MOVING_BMP "assets/canvas-skies/gunner-single-atlas.bmp"
+#ifndef CANVAS_REAR_LEWIS_BMP
+#define CANVAS_REAR_LEWIS_BMP "assets/canvas-skies/rear-lewis.bmp"
 #endif
 #ifndef CANVAS_EXPLOSION_ATLAS_BMP
 #define CANVAS_EXPLOSION_ATLAS_BMP "assets/canvas-skies/explosion-atlas.bmp"
@@ -571,6 +572,7 @@ typedef struct {
     uint32_t last_shot;
     int ai_state, target, fled;
     int player_hit;   /* our own rounds have struck it */
+    int from_below;   /* rear seat: comes up under the tail */
     float ai_timer, ai_side, smoke_timer;
 } Enemy;
 
@@ -819,7 +821,7 @@ typedef struct {
     SDL_Surface *gunner_cockpit;
     SDL_Surface *gunner_ring;
     SDL_Surface *gunner_airframe;
-    SDL_Surface *gunner_moving_guns;
+    SDL_Surface *rear_lewis;            /* 1915-18: the ring and the Lewis */
     SDL_Surface *explosion_atlas;
     SDL_Surface *topdown_explosion_atlas;
     SDL_Surface *topdown_targets;   /* the painted mission targets */
@@ -1591,6 +1593,19 @@ static int campaign_menu_count(const Game *g)
             7 : 6) + 2;
 }
 
+/* The rear seat's aim.  Above level the crosshair runs from y 300 (level)
+ * to y 28 (75 degrees up), and the view tips up after it.  The Lewis gun
+ * on its Scarff ring also depresses, to 30 degrees below level: below
+ * y 300 the crosshair goes on down to y 336, just clear of the signs, and
+ * the view tips down after it until the world has risen 120 pixels.  Both
+ * arcs come to about 5.2 pixels a degree of the world past the sight, so
+ * the swing feels the same either side of level.  The carbine is held
+ * above level (CARBINE_AIM_Y1), and the unarmed seat has nothing to aim. */
+#define GUNNER_LEVEL_Y 300.0f
+#define GUNNER_LOW_Y 336.0f
+#define GUNNER_DEPRESSION 0.40f    /* 30 degrees, where 1 is 75 */
+#define GUNNER_DIP_SHIFT 120.0f    /* how far the world rises, fully down */
+
 static float gunner_traverse(const Game *g)
 {
     float value = (g->gunner_view_x - 320.0f) / 176.0f;
@@ -1599,12 +1614,28 @@ static float gunner_traverse(const Game *g)
     return value;
 }
 
+/* The view's elevation, in the aim's units: -GUNNER_DEPRESSION looking
+ * fully down over the side, 1 looking up at 75 degrees. */
 static float gunner_elevation(const Game *g)
 {
     float value = (235.0f - g->gunner_view_y) / 90.0f;
-    if (value < 0.0f) value = 0.0f;
+    if (value < -GUNNER_DEPRESSION) value = -GUNNER_DEPRESSION;
     if (value > 1.0f) value = 1.0f;
     return value;
+}
+
+/* The view above level (0..1), which tips the world down as before, and
+ * below it (0..1 of the full 30 degrees), which lifts it. */
+static float gunner_rise(const Game *g)
+{
+    float value = gunner_elevation(g);
+    return value > 0.0f ? value : 0.0f;
+}
+
+static float gunner_dip(const Game *g)
+{
+    float value = gunner_elevation(g);
+    return value < 0.0f ? -value / GUNNER_DEPRESSION : 0.0f;
 }
 
 static float gunner_aim_traverse(const Game *g)
@@ -1617,56 +1648,148 @@ static float gunner_aim_traverse(const Game *g)
 
 static float gunner_aim_elevation(const Game *g)
 {
-    float value = (300.0f - g->player_y) / 272.0f;
-    if (value < 0.0f) value = 0.0f;
+    float value;
+    if (g->player_y > GUNNER_LEVEL_Y) {
+        value = -(g->player_y - GUNNER_LEVEL_Y) /
+                (GUNNER_LOW_Y - GUNNER_LEVEL_Y) * GUNNER_DEPRESSION;
+        if (value < -GUNNER_DEPRESSION) value = -GUNNER_DEPRESSION;
+        return value;
+    }
+    value = (GUNNER_LEVEL_Y - g->player_y) / 272.0f;
     if (value > 1.0f) value = 1.0f;
     return value;
 }
 
+/* The Lewis gun is rendered for a grid of aims (make_rear_lewis.py): its
+ * traverse across the crosshair's width and its elevation from 30 degrees
+ * down to 75 up.  The frame for the nearest aim is drawn where it was
+ * rendered, moved with the small shift of the observer on his ring that
+ * follows the traverse; the ring and its bow are one picture, moved the
+ * same way. */
+static const short *lewis_frame(const Game *g)
+{
+    float fx = gunner_aim_traverse(g) * (LEWIS_TRAVERSE_COLUMNS - 1);
+    float fy = (gunner_aim_elevation(g) - LEWIS_ELEVATION_LOW) *
+               (LEWIS_ELEVATION_ROWS - 1) /
+               (LEWIS_ELEVATION_HIGH - LEWIS_ELEVATION_LOW);
+    int column = (int)(fx + 0.5f), row = (int)(fy + 0.5f);
+    if (column < 0) column = 0;
+    if (column > LEWIS_TRAVERSE_COLUMNS - 1)
+        column = LEWIS_TRAVERSE_COLUMNS - 1;
+    if (row < 0) row = 0;
+    if (row > LEWIS_ELEVATION_ROWS - 1) row = LEWIS_ELEVATION_ROWS - 1;
+    return lewis_frames[row * LEWIS_TRAVERSE_COLUMNS + column];
+}
+
+static void lewis_carriage_offset(const Game *g, int *dx, int *dy)
+{
+    float traverse = gunner_aim_traverse(g);
+    *dx = (int)((traverse - 0.5f) * 74.0f);
+    *dy = (int)(fabsf(traverse - 0.5f) * 8.0f);
+}
+
 static void gunner_muzzle_position(const Game *g, float *x, float *y)
 {
-    /* Measured barrel-bore centres for every painted atlas frame, arranged as
-     * [elevation][traverse].  X is not separable from elevation and Y is not
-     * separable from traverse: the former one-dimensional approximation made
-     * tracers visibly begin beside the Lewis gun at oblique angles. */
-    static const int muzzle_x_in_frame[5][5] = {
-        { 58, 108, 210, 311, 362 },
-        { 60, 106, 209, 312, 359 },
-        { 72, 109, 210, 309, 346 },
-        { 91, 116, 210, 299, 327 },
-        {103, 136, 210, 281, 318 }
-    };
-    static const int muzzle_y_in_frame[5][5] = {
-        {80, 58, 50, 58, 80},
-        {64, 54, 50, 54, 65},
-        {59, 49, 48, 49, 59},
-        {51, 43, 52, 43, 51},
-        {35, 36, 36, 36, 35}
-    };
-    float traverse = gunner_aim_traverse(g);
-    float elevation = gunner_aim_elevation(g);
-    int column = (int)(traverse * 4.999f);
-    int row = (int)(elevation * 4.999f);
-    int carriage_x = 320 + (int)((traverse - 0.5f) * 74.0f);
-    int carriage_y = 176 + (int)(fabsf(traverse - 0.5f) * 8.0f);
-    /* These are the painted barrel openings, below the separate ring sights,
-     * not an estimate from the screen centre or the sight itself. */
-    *x = (float)(carriage_x - 210 + muzzle_x_in_frame[row][column]);
-    *y = (float)(carriage_y + muzzle_y_in_frame[row][column]);
+    /* The muzzle is where the renderer put the end of the flash cone, so
+     * the tracer leaves the barrel itself at every aim, below level too. */
+    const short *f = lewis_frame(g);
+    int dx, dy;
+    lewis_carriage_offset(g, &dx, &dy);
+    *x = (float)(f[6] + dx);
+    *y = (float)(f[7] + dy);
+}
+
+/* How the painted airframe (the tail, seen from the rear seat) lies on the
+ * screen for the present view.  The painting is turned, sheared, lifted
+ * and dipped as one piece.  draw_gunner_airframe, the bullet holes in it
+ * and the self-hit test all use these numbers, so what is drawn is what
+ * stops a round. */
+typedef struct {
+    float look, scale, centre_shift, vertical_shift;
+} AirframeView;
+
+#define AIRFRAME_DROP 40.0f        /* the painting sits this far down */
+
+static void gunner_airframe_view(const Game *g, AirframeView *v)
+{
+    v->look = gunner_traverse(g);
+    v->scale = 1.0f - fabsf(v->look) * 0.14f;
+    v->centre_shift = -v->look * 104.0f;
+    v->vertical_shift = gunner_rise(g) * 34.0f + g->view_pitch * 22.0f -
+                        gunner_dip(g) * GUNNER_DIP_SHIFT;
+}
+
+/* The point of the painting under a point of the screen. */
+static void gunner_airframe_source(const Game *g, const AirframeView *v,
+                                   float x, float y, float *sx, float *sy)
+{
+    float roll = g->view_bank * (x - SCREEN_W * 0.5f) * 0.22f;
+    float shear = v->look * (y - 215.0f) * 0.20f;
+    *sy = y - v->vertical_shift - roll - AIRFRAME_DROP;
+    *sx = SCREEN_W * 0.5f + (x - SCREEN_W * 0.5f - v->centre_shift - shear) /
+          v->scale;
+}
+
+/* The painting ends at its foot, which the level view never reaches.
+ * Looking down over the side shows what lies beyond it, in the painting's
+ * own coordinates: the fuselage going on towards the rear cockpit, still
+ * widening at the rate the painting's longerons do (27 pixels each side of
+ * the keel at row 250, 0.91 more each row), and, far out to either side,
+ * the trailing edge of the lower wing.  The wing is only reached with the
+ * gun swung hard over and fully down, at the edge of the picture: its
+ * trailing edge lies a little forward of the beam, below the cockpit. */
+#define AIRFRAME_KEEL_X 319.5f
+#define AIRFRAME_WING_ROOT 330.0f  /* keel to the wing's inboard end */
+
+static float airframe_fuselage_half(float sy)
+{
+    return 27.0f + (sy - 250.0f) * 0.91f;
+}
+
+/* Where the lower wing's trailing edge is at painting column sx, or a
+ * large number where there is no wing.  It rises a little outboard with
+ * the dihedral and is scalloped between the ribs. */
+static float airframe_wing_edge(float sx)
+{
+    float out = fabsf(sx - AIRFRAME_KEEL_X) - AIRFRAME_WING_ROOT;
+    if (out < 0.0f) return 1e9f;
+    return 398.0f - out * 0.04f + fabsf(sinf(out * 0.087f)) * 3.0f;
+}
+
+static int airframe_below_painting(float sx, float sy, int height)
+{
+    if (sy >= (float)height &&
+        fabsf(sx - AIRFRAME_KEEL_X) < airframe_fuselage_half(sy))
+        return 1;
+    return sy > airframe_wing_edge(sx);
 }
 
 static int gunner_tail_blocks_shot(const Game *g, int aim_x, int aim_y)
 {
     float look = gunner_traverse(g);
-    float elevation = gunner_elevation(g);
     int tail_x = 320 - (int)(look * 132.0f);
-    int tail_y = 226 + (int)(elevation * 34.0f);
-    int fin_top = 76 + (int)(elevation * 26.0f);
+    int tail_y = 226 + (int)(gunner_rise(g) * 34.0f -
+                             gunner_dip(g) * GUNNER_DIP_SHIFT);
+    int fin_top = 76 + (int)(gunner_rise(g) * 26.0f -
+                             gunner_dip(g) * GUNNER_DIP_SHIFT);
+    AirframeView view;
+    float sx, sy;
     /* The fin blocks the central vertical cone; the tailplane blocks the
-     * lower horizontal cone.  Both move with the transformed airframe. */
+     * lower horizontal cone.  Both move with the transformed airframe,
+     * and rise with it when the gun is depressed. */
     if (abs(aim_x - tail_x) < 27 && aim_y >= fin_top && aim_y <= tail_y + 18)
         return 1;
     if (abs(aim_y - tail_y) < 24 && abs(aim_x - tail_x) < 242)
+        return 1;
+    /* Below the tail: our own fuselage, and with the gun hard over and
+     * down, the lower wing's trailing edge.  These are tested in the
+     * painting itself, through the same transform that draws it. */
+    gunner_airframe_view(g, &view);
+    gunner_airframe_source(g, &view, (float)aim_x, (float)aim_y, &sx, &sy);
+    if (sy >= 250.0f &&
+        fabsf(sx - AIRFRAME_KEEL_X) < airframe_fuselage_half(sy))
+        return 1;
+    if (sy > airframe_wing_edge(sx))
         return 1;
     return 0;
 }
@@ -4223,7 +4346,36 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
     float side = (index & 1) ? 1.0f : -1.0f;
     int path = index & 3;
     if (depth < -520.0f || depth > 3300.0f) return 0;
-    if (depth >= 90.0f) {
+    if (depth >= 90.0f && enemy->from_below) {
+        /* He works up from below and astern, into the blind spot under our
+         * tail, and holds off to one side of the fuselage beneath the
+         * tailplane, out of the level arc: the observer must depress the
+         * gun over the side to bear on him.  He begins low on the horizon
+         * and comes up out of the haze below the screen. */
+        float rise_in;
+        approach = (3300.0f - depth) / 3210.0f;
+        if (approach < 0.0f) approach = 0.0f;
+        if (approach > 1.0f) approach = 1.0f;
+        if (approach < 0.035f) return 0;
+        close = depth < 760.0f ? (760.0f - depth) / 670.0f : 0.0f;
+        *size = (int)(10.0f + powf(approach, 1.22f) * 98.0f);
+        *sx = 320 + (int)(side * (130.0f + approach * 120.0f +
+                                  close * 40.0f) +
+                          sinf(enemy->phase + g->scroll * 0.0021f) *
+                          (16.0f + approach * 30.0f));
+        *sy = 280 + (int)(approach * 140.0f + close * 24.0f +
+                          cosf(enemy->phase * 1.3f + g->scroll * 0.0017f) *
+                          (6.0f + approach * 14.0f));
+        rise_in = (approach - 0.035f) / 0.265f;
+        if (rise_in < 1.0f) {
+            /* The first sight of him is a dot climbing out of the ground
+             * haze below the screen, not a machine appearing in place. */
+            int entry_y = SCREEN_H + 40;
+            if (rise_in < 0.0f) rise_in = 0.0f;
+            rise_in = rise_in * rise_in * (3.0f - 2.0f * rise_in);
+            *sy = entry_y + (int)((*sy - entry_y) * rise_in);
+        }
+    } else if (depth >= 90.0f) {
         int flight_x;
         int flight_y;
         approach = (3300.0f - depth) / 3210.0f;
@@ -4271,7 +4423,11 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
         past = (90.0f - depth) / 610.0f;
         if (past > 1.0f) past = 1.0f;
         *size = 108 + (int)(past * 52.0f);
-        if (path == 1) {
+        if (enemy->from_below) {
+            /* Overshooting, he zooms up past our side and away. */
+            *sx = 320 + (int)(side * (250.0f + past * 560.0f));
+            *sy = 360 - (int)(past * 420.0f);
+        } else if (path == 1) {
             *sx = 320 - (int)(side * (220.0f + past * 560.0f));
             *sy = 212 + (int)(past * 135.0f);
         } else {
@@ -4280,7 +4436,7 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
         }
     }
     if (campaign_missions[g->chapter][g->mission].mode == MISSION_GUNNER_3D &&
-        depth >= 90.0f && index % 3 == 2) {
+        depth >= 90.0f && index % 3 == 2 && !enemy->from_below) {
         /* Every third attacker works round a flank, out beside the tailplane
          * where the observer must swing right round to bear on him, and
          * comes in from there rather than from dead astern. */
@@ -4297,7 +4453,8 @@ static int project_enemy_3d(const Game *g, const Enemy *enemy, int index,
          * view must move the world, rather than sliding a sight over a fixed
          * postcard.  Elevation likewise pitches the view with the Lewis gun. */
         *sx -= (int)(gunner_traverse(g) * 306.0f);
-        *sy += (int)(gunner_elevation(g) * 118.0f);
+        *sy += (int)(gunner_rise(g) * 118.0f -
+                     gunner_dip(g) * GUNNER_DIP_SHIFT);
     }
     return 1;
 }
@@ -6869,15 +7026,25 @@ static void update_perspective_sortie(Game *g, float dt,
         /* Tom flies a gentle evasive course.  The player swivels Neddy's
          * crosshair through the rear arc.  The observer's viewpoint follows
          * with damped motion while the single Lewis gun stays on the sight. */
+        float vertical = 195.0f;
         g->airspeed = 112.0f + sinf(g->scroll * 0.006f) * 8.0f;
+        /* Below level the crosshair moves a third as fast: the view tips
+         * down with it, so the gun still swings at about 54 degrees a
+         * second either side of level. */
+        if (g->player_y > GUNNER_LEVEL_Y ||
+            (g->player_y == GUNNER_LEVEL_Y && keys[SDL_SCANCODE_DOWN]))
+            vertical = 195.0f * (GUNNER_LOW_Y - GUNNER_LEVEL_Y) /
+                       (272.0f * GUNNER_DEPRESSION);
         if (keys[SDL_SCANCODE_LEFT]) g->player_x -= 225.0f * dt;
         if (keys[SDL_SCANCODE_RIGHT]) g->player_x += 225.0f * dt;
-        if (keys[SDL_SCANCODE_UP]) g->player_y -= 195.0f * dt;
-        if (keys[SDL_SCANCODE_DOWN]) g->player_y += 195.0f * dt;
+        if (keys[SDL_SCANCODE_UP]) g->player_y -= vertical * dt;
+        if (keys[SDL_SCANCODE_DOWN]) g->player_y += vertical * dt;
         if (g->player_x < 28.0f) g->player_x = 28.0f;
         if (g->player_x > 612.0f) g->player_x = 612.0f;
         if (g->player_y < 28.0f) g->player_y = 28.0f;
-        if (g->player_y > 300.0f) g->player_y = 300.0f;
+        /* Only the Lewis gun on its ring goes below level. */
+        if (g->player_y > (mission_armed(g) ? GUNNER_LOW_Y : GUNNER_LEVEL_Y))
+            g->player_y = mission_armed(g) ? GUNNER_LOW_Y : GUNNER_LEVEL_Y;
         if (personal) {
             /* The carbine's range: a rifle aimed lower than this would lie
              * under the signs, where nobody could see where it pointed. */
@@ -8157,6 +8324,12 @@ static void gunner_spawn_wave(Game *g, int count, int behind)
     for (i = 0; i < MAX_ENEMIES && k < count; ++i) {
         if (g->enemies[i].active) continue;
         gunner_place_enemy(g, i, 2300.0f + (float)k * 480.0f);
+        /* Behind the Lewis gun every third attacker, the second of the
+         * first pair among them, comes up from below rather than in level
+         * or from above: the gun must go down over the side to meet him.
+         * The carbine cannot depress, so in 1914 none does. */
+        g->enemies[i].from_below = mission_armed(g) &&
+                                   (g->wave + k) % 3 == 1;
         ++k;
     }
     g->wave_clock = 0.0f;
@@ -8394,7 +8567,10 @@ static const uint8_t *qa_gunner_keys(Game *g, const uint8_t *keys)
         int sx, sy, size, d;
         if (!g->enemies[i].active || g->enemies[i].crashing) continue;
         if (!project_enemy_3d(g, &g->enemies[i], i, &sx, &sy, &size)) continue;
-        if (sx < 0 || sx > SCREEN_W || sy < 0 || sy > 300) continue;
+        /* Those below the level arc count too: he goes down after them,
+         * and the view dips to bring them up into the sight. */
+        if (sx < 0 || sx > SCREEN_W || sy < 0 ||
+            sy > (mission_armed(g) ? SCREEN_H + 60 : 300)) continue;
         d = abs(sx - (int)g->player_x) + abs(sy - (int)g->player_y);
         if (d < best) { best = d; tx = sx; ty = sy; }
     }
@@ -11324,6 +11500,8 @@ static void draw_flight_background(Game *g)
     int base_x;
     int base_y;
     int locked = 0;
+    float dip_rows = 0.0f;   /* rear seat, gun depressed: see below */
+    float dip_scale = 1.0f;
     if (!bg || bg->w < SCREEN_W || bg->h < SCREEN_H) return;
     bpp = s->format->BytesPerPixel;
     if (bg->format->BytesPerPixel != bpp) return;
@@ -11341,14 +11519,27 @@ static void draw_flight_background(Game *g)
     if (mode == MISSION_GUNNER_3D) {
         /* The generated panorama is twice the viewport width.  Spend all of
          * that width on the observer's 90-degree rear arc, and use the spare
-         * vertical field for the gun's 0..75-degree elevation. */
+         * vertical field for the gun's 0..75-degree elevation; below level
+         * the ground is stretched instead (dip_rows). */
         base_x += (int)(gunner_traverse(g) *
                         (float)(bg->w - SCREEN_W) * 0.5f);
-        base_y -= (int)(gunner_elevation(g) *
+        base_y -= (int)(gunner_rise(g) *
                         (float)(bg->h - SCREEN_H));
+        dip_rows = gunner_dip(g) * GUNNER_DIP_SHIFT;
     }
     if (base_y < 0) base_y = 0;
     if (base_y + SCREEN_H > bg->h) base_y = bg->h - SCREEN_H;
+    if (dip_rows > 0.0f) {
+        /* Looking down over the side, the horizon rises GUNNER_DIP_SHIFT
+         * pixels with the world, but the panorama has only a few rows
+         * below the level view.  So the ground below the horizon is drawn
+         * taller instead, as it is when seen from more nearly above: rows
+         * are taken from the level view's top row down, spaced so that the
+         * panorama's last row still meets the bottom of the screen. */
+        dip_scale = (float)(bg->h - 1 - base_y) /
+                    ((float)(SCREEN_H - 1) + dip_rows);
+        if (dip_scale > 1.0f) dip_scale = 1.0f;
+    }
     if (SDL_MUSTLOCK(bg)) {
         if (SDL_LockSurface(bg) != 0) return;
         locked = 1;
@@ -11391,18 +11582,23 @@ static void draw_flight_background(Game *g)
         /* The rear gunner pans around the cockpit rather than banking the
          * aeroplane, so its cheaper scanline path remains appropriate. */
         int sx = base_x + (int)(g->view_bank * 0.46f * (y - SCREEN_H / 2));
+        int row = base_y + y;
         int first_pixels;
         const uint8_t *src;
         uint8_t *dst;
+        if (dip_rows > 0.0f) {
+            row = base_y + (int)(((float)y + dip_rows) * dip_scale);
+            if (row > bg->h - 1) row = bg->h - 1;
+        }
         sx %= bg->w;
         if (sx < 0) sx += bg->w;
-        src = (const uint8_t *)bg->pixels + (base_y + y) * bg->pitch + sx * bpp;
+        src = (const uint8_t *)bg->pixels + row * bg->pitch + sx * bpp;
         dst = (uint8_t *)s->pixels + y * s->pitch;
         first_pixels = bg->w - sx;
         if (first_pixels > SCREEN_W) first_pixels = SCREEN_W;
         memcpy(dst, src, (size_t)first_pixels * (size_t)bpp);
         if (first_pixels < SCREEN_W) {
-            src = (const uint8_t *)bg->pixels + (base_y + y) * bg->pitch;
+            src = (const uint8_t *)bg->pixels + row * bg->pitch;
             memcpy(dst + first_pixels * bpp, src,
                    (size_t)(SCREEN_W - first_pixels) * (size_t)bpp);
         }
@@ -11410,21 +11606,48 @@ static void draw_flight_background(Game *g)
     if (locked) SDL_UnlockSurface(bg);
 }
 
+/* What lies beyond the foot of the painting, at painting point (sx, sy),
+ * for airframe_below_painting: the fuselage is its last row stretched out
+ * to the widening longerons (the dark rim of the rear cockpit between
+ * them), and the lower wing is the painted tailplane's fabric, ribs and
+ * all, laid out from its trailing edge.  Returns the key where neither. */
+static uint32_t airframe_beyond_painting(SDL_Surface *source, float sx,
+                                         float sy, uint32_t key)
+{
+    int h = source->h;
+    float edge;
+    if (sy >= (float)h &&
+        fabsf(sx - AIRFRAME_KEEL_X) < airframe_fuselage_half(sy)) {
+        float squeeze = airframe_fuselage_half((float)(h - 1)) /
+                        airframe_fuselage_half(sy);
+        int x = (int)(AIRFRAME_KEEL_X + (sx - AIRFRAME_KEEL_X) * squeeze);
+        if (x < 0 || x >= source->w) return key;
+        return surface_pixel(source, x, h - 1);
+    }
+    edge = airframe_wing_edge(sx);
+    if (sy > edge) {
+        float out = fabsf(sx - AIRFRAME_KEEL_X) - AIRFRAME_WING_ROOT;
+        int x = (int)fmodf(out * 0.55f, 180.0f);
+        int y = 208 + (int)((sy - edge) * 0.6f);
+        if (y > 241) y = 241;
+        x = sx < AIRFRAME_KEEL_X ? 92 + x : 548 - x;
+        return surface_pixel(source, x, y);
+    }
+    return key;
+}
+
 static void draw_gunner_airframe(Game *g)
 {
     SDL_Surface *source = g->gunner_airframe;
     SDL_Surface *dest = g->screen;
-    float look = gunner_traverse(g);
-    float elevation = gunner_elevation(g);
-    float scale = 1.0f - fabsf(look) * 0.14f;
-    float centre_shift = -look * 104.0f;
-    float vertical_shift = elevation * 34.0f + g->view_pitch * 22.0f;
-    const int foreground_drop = 40;
+    AirframeView view;
+    int beyond = gunner_dip(g) > 0.0f;
     uint32_t key;
-    int x, y;
+    int x, y, top;
     int source_locked = 0;
     int dest_locked = 0;
     if (!source || source->w != SCREEN_W || source->h != SCREEN_H) return;
+    gunner_airframe_view(g, &view);
     key = SDL_MapRGB(source->format, 255, 0, 255);
     if (SDL_MUSTLOCK(source)) {
         if (SDL_LockSurface(source) != 0) return;
@@ -11437,22 +11660,34 @@ static void draw_gunner_airframe(Game *g)
         }
         dest_locked = 1;
     }
+    /* The painting's first 32 rows are empty sky; skip them wherever the
+     * view has put them. */
+    top = 72 + (view.vertical_shift < 0.0f ? (int)view.vertical_shift : 0);
+    if (top < 0) top = 0;
     /* Row-wise inverse mapping keeps the CPU surface authoritative and gives
      * the tail a convincing parallax/shear as the observer turns on the
      * swivelling stool.  Pilot bank rolls the structure independently. */
-    for (y = 72; y < SCREEN_H; ++y) {
+    for (y = top; y < SCREEN_H; ++y) {
         for (x = 0; x < SCREEN_W; ++x) {
             float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
-            float shear = look * (float)(y - 215) * 0.20f;
-            int sy = (int)((float)y - vertical_shift - roll -
-                           (float)foreground_drop);
-            int sx = (int)(SCREEN_W * 0.5f +
-                     ((float)x - SCREEN_W * 0.5f - centre_shift - shear) /
-                     scale);
+            float shear = view.look * (float)(y - 215) * 0.20f;
+            float fy = (float)y - view.vertical_shift - roll - AIRFRAME_DROP;
+            float fx = SCREEN_W * 0.5f +
+                       ((float)x - SCREEN_W * 0.5f - view.centre_shift -
+                        shear) / view.scale;
+            int sy = (int)fy;
+            int sx = (int)fx;
             uint32_t colour;
-            if (sx < 0 || sx >= source->w || sy < 0 || sy >= source->h)
-                continue;
-            colour = surface_pixel(source, sx, sy);
+            if (sx < 0 || sx >= source->w || sy < 0 || sy >= source->h) {
+                /* Looking down over the side, the fuselage below the
+                 * painting and the lower wing come into view. */
+                if (!beyond || fy < 0.0f || !airframe_below_painting(
+                        fx, fy, source->h))
+                    continue;
+                colour = airframe_beyond_painting(source, fx, fy, key);
+            } else {
+                colour = surface_pixel(source, sx, sy);
+            }
             if (colour != key) pixel(dest, x, y, colour);
         }
     }
@@ -11463,20 +11698,18 @@ static void draw_gunner_airframe(Game *g)
 static void draw_gunner_bullet_holes(Game *g)
 {
     SDL_Surface *s = g->screen;
-    float look = gunner_traverse(g);
-    float elevation = gunner_elevation(g);
-    float scale = 1.0f - fabsf(look) * 0.14f;
-    float centre_shift = -look * 104.0f;
-    float vertical_shift = elevation * 34.0f + g->view_pitch * 22.0f;
+    AirframeView view;
     int i;
+    gunner_airframe_view(g, &view);
     for (i = 0; i < MAX_BULLET_HOLES; ++i) if (g->bullet_holes[i].active) {
         float source_x = g->bullet_holes[i].x;
         float source_y = g->bullet_holes[i].y;
-        float shear = look * (source_y - 215.0f) * 0.20f;
+        float shear = view.look * (source_y - 215.0f) * 0.20f;
         int x = (int)(SCREEN_W * 0.5f +
-                (source_x - SCREEN_W * 0.5f) * scale + centre_shift + shear);
+                (source_x - SCREEN_W * 0.5f) * view.scale +
+                view.centre_shift + shear);
         float roll = g->view_bank * (float)(x - SCREEN_W / 2) * 0.22f;
-        int y = (int)(source_y + vertical_shift + roll + 40.0f);
+        int y = (int)(source_y + view.vertical_shift + roll + AIRFRAME_DROP);
         circle(s, x, y, 3, rgb(s, 187, 150, 95));
         circle(s, x, y, 2, rgb(s, 35, 27, 22));
         pixel(s, x - 1, y - 1, rgb(s, 232, 198, 135));
@@ -13678,37 +13911,31 @@ static void draw_dogfight_3d_sortie(Game *g)
         draw_gunner_airframe(g);
         draw_gunner_bullet_holes(g);
     }
-    if (gunner && mission_armed(g) && g->gunner_moving_guns) {
-        SDL_Rect gun_source;
-        SDL_Rect gun_position;
-        float traverse = gunner_aim_traverse(g);
-        float elevation = gunner_aim_elevation(g);
-        int column;
-        int row;
-        int carriage_x;
-        int carriage_y;
-        if (traverse < 0.0f) traverse = 0.0f;
-        if (traverse > 1.0f) traverse = 1.0f;
-        if (elevation < 0.0f) elevation = 0.0f;
-        if (elevation > 1.0f) elevation = 1.0f;
-        column = (int)(traverse * 4.999f);
-        row = (int)(elevation * 4.999f);
-        /* The single Lewis gun remains anchored to the Scarff rail.  Most of
-         * the 90-degree traverse is now expressed by the moving viewpoint;
-         * this smaller carriage shift shows the physical mount following it. */
-        carriage_x = 320 + (int)((traverse - 0.5f) * 74.0f);
-        carriage_y = 176 + (int)(fabsf(traverse - 0.5f) * 8.0f);
-        gun_source.x = column * 420;
-        gun_source.y = row * 220;
-        gun_source.w = 420;
-        gun_source.h = 220;
-        gun_position.x = carriage_x - 210;
-        gun_position.y = carriage_y;
-        gun_position.w = gun_position.h = 0;
-        SDL_BlitSurface(g->gunner_moving_guns, &gun_source, s, &gun_position);
-        /* The rail is already painted into the airframe foreground.  The old
-         * full-screen ring overlay belonged to the abandoned twin-gun mockup
-         * and would duplicate the mount around the single Lewis. */
+    if (gunner && mission_armed(g) && g->rear_lewis) {
+        const short *f = lewis_frame(g);
+        SDL_Rect source;
+        SDL_Rect at;
+        int dx, dy;
+        /* The ring and its bow first, then the gun on top of them: each
+         * gun frame holds only what of the gun lies in front of the
+         * mounting.  Both shift a little with the observer as he turns on
+         * the ring; most of the 90-degree traverse is the moving view. */
+        lewis_carriage_offset(g, &dx, &dy);
+        source.x = lewis_mounting[0];
+        source.y = lewis_mounting[1];
+        source.w = lewis_mounting[2];
+        source.h = lewis_mounting[3];
+        at.x = lewis_mounting[4] + dx;
+        at.y = lewis_mounting[5] + dy;
+        at.w = source.w;
+        at.h = source.h;
+        SDL_BlitSurface(g->rear_lewis, &source, s, &at);
+        source.x = f[0]; source.y = f[1]; source.w = f[2]; source.h = f[3];
+        at.x = f[4] + dx;
+        at.y = f[5] + dy;
+        at.w = source.w;
+        at.h = source.h;
+        SDL_BlitSurface(g->rear_lewis, &source, s, &at);
     } else if (gunner && !mission_armed(g)) {
         /* 1914: Neddy in the back with the carbine, and where it points. */
         if (personal_arms(g)) {
@@ -14483,8 +14710,10 @@ static const AssetSpec asset_specs[] = {
     ASSET(gunner_cockpit, CANVAS_GUNNER_COCKPIT_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
     ASSET(gunner_ring, CANVAS_GUNNER_RING_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
     ASSET(gunner_airframe, CANVAS_GUNNER_AIRFRAME_BMP, AG_GUNNER, 1, ASSET_LOOSE_KEY),
-    ASSET(gunner_moving_guns, CANVAS_GUNNER_MOVING_BMP, AG_LEWIS, 1, ASSET_LOOSE_KEY),
-    /* The carbine stays in its 256 colours, keyed by its last entry. */
+    /* The Lewis gun and the carbine stay in their 256 colours, keyed by
+     * the last entry: a byte a pixel, half what the screen's format would
+     * take. */
+    ASSET(rear_lewis, CANVAS_REAR_LEWIS_BMP, AG_LEWIS, 0, ASSET_INDEX_KEY),
     ASSET(rear_carbine, CANVAS_REAR_CARBINE_BMP, AG_CARBINE, 0, ASSET_INDEX_KEY),
     ASSET(newspaper_table, CANVAS_NEWSPAPER_TABLE_BMP, AG_NEWS, 1, ASSET_PLAIN),
     ASSET(cinema_hut, CANVAS_CINEMA_HUT_BMP, AG_CINEMA, 1, ASSET_PLAIN),

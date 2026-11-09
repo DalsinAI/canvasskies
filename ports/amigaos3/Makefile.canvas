@@ -4,7 +4,7 @@ SYSROOT := $(PREFIX)/m68k-amigaos
 CC := $(PREFIX)/bin/m68k-amigaos-gcc
 OUT := build-canvas-skies/CanvasSkies
 SRC := src/modern/canvas_skies.c
-HDR := src/modern/canvas_campaign.h src/modern/canvas_career.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h src/modern/canvas_remember.h
+HDR := src/modern/canvas_campaign.h src/modern/canvas_career.h src/modern/canvas_news.h src/modern/canvas_fonts.h src/modern/canvas_topdown_sprites.h src/modern/canvas_machine_sprites.h src/modern/canvas_side_civilians.h src/modern/canvas_rear_carbine.h src/modern/canvas_rear_lewis.h src/modern/canvas_riflemen.h src/modern/canvas_ticks.h src/modern/canvas_remember.h
 
 CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-fno-delete-null-pointer-checks -I$(SYSROOT)/include/SDL2 \
@@ -43,7 +43,7 @@ CFLAGS := -std=gnu99 -O2 -Wall -Wextra -m68040 -m68881 -noixemul \
 	-DCANVAS_GUNNER_COCKPIT_BMP=\"PROGDIR:assets/canvas-skies/gunner-cockpit.bmp\" \
 	-DCANVAS_GUNNER_RING_BMP=\"PROGDIR:assets/canvas-skies/gunner-ring-empty-v2.bmp\" \
 	-DCANVAS_GUNNER_AIRFRAME_BMP=\"PROGDIR:assets/canvas-skies/gunner-airframe-tail.bmp\" \
-	-DCANVAS_GUNNER_MOVING_BMP=\"PROGDIR:assets/canvas-skies/gunner-single-atlas.bmp\" \
+	-DCANVAS_REAR_LEWIS_BMP=\"PROGDIR:assets/canvas-skies/rear-lewis.bmp\" \
 	-DCANVAS_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/explosion-atlas.bmp\" \
 	-DCANVAS_TOPDOWN_EXPLOSION_ATLAS_BMP=\"PROGDIR:assets/canvas-skies/topdown-explosion-atlas.bmp\" \
 	-DCANVAS_TOPDOWN_TARGETS_BMP=\"PROGDIR:assets/canvas-skies/topdown-targets.bmp\" \
