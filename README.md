@@ -103,8 +103,9 @@ game's own 640x400.
 - AmigaOS 3.x on a 68040 with FPU (or an AmiCradle instance)
 - RTG graphics: the game opens a 640x400 window on a 16-bit (or deeper)
   Workbench screen
-- GFOpenUp with the OpenGPU SDL2 runtime (`LIBS:OpenGPU/SDL2.module` and
-  `LIBS:opengpu.library`)
+- GFOpenUp's GFOpenGPU part, with its SDL 2 runtime
+  (`LIBS:GFOpenGPU/SDL2.module` and `LIBS:gfopengpu.library`), tested with
+  GFOpenUp 0.8.26. Without it the game stops at once and says so.
 - AHI for sound
 
 ## Building

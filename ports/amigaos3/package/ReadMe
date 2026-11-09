@@ -115,8 +115,9 @@ Requirements
 - 68040 with FPU
 - RTG graphics: the game opens a 640x400 window on a 16-bit (or deeper)
   Workbench screen
-- GFOpenUp with the OpenGPU SDL2 runtime (LIBS:OpenGPU/SDL2.module and
-  LIBS:opengpu.library)
+- GFOpenUp's GFOpenGPU part, with its SDL 2 runtime
+  (LIBS:GFOpenGPU/SDL2.module and LIBS:gfopengpu.library); tested with
+  GFOpenUp 0.8.26. Without it the game stops at once and says so
 - AHI for sound
 - 32 MB of fast memory; with 96 MB or more free the art is kept in
   memory once loaded (the Officer's Preferences can change this)
