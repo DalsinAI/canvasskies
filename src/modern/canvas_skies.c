@@ -6861,7 +6861,11 @@ static void sortie_tally(Game *g, float dt)
 }
 
 /* One line in RAM: for each sortie flown: the mission, how long it took,
- * how much of it was idle and the longest idle stretch, in tenths. */
+ * how much of it was idle and the longest idle stretch, in tenths.  sim is
+ * the sortie's own seconds and wall the seconds on the wall clock since it
+ * began: on a machine that draws fewer than twenty frames a second the
+ * sortie clock runs slow (each frame moves the world at most SIM_MAX_STEP),
+ * so wall is the longer, and the two together say by how much. */
 static void qa_log_sortie(Game *g)
 {
     static const char *const modes[4] = {"SIDE", "TOPDOWN", "DOGFIGHT", "GUNNER"};
@@ -6874,7 +6878,7 @@ static void qa_log_sortie(Game *g)
     if (!f) return;
     fprintf(f, "C%d M%02d %s MIX%d %s total=%d.%d idle=%d.%d longest=%d.%d "
             "success=%d objectives=%d/%d kills=%d health=%d fuel=%d "
-            "shots=%d hits=%d enemy_shots=%d damage=%d sim=%u offered=%d "
+            "shots=%d hits=%d enemy_shots=%d damage=%d sim=%u wall=%u offered=%d "
             "unreached=%d bombs=%d/%d\n",
             g->chapter + 1, g->mission + 1, modes[sortie_mode(g)], g->td_mix,
             personal_arms(g) ? "UNARMED" : mission_armed(g) ? "ARMED" : "QUIET",
@@ -6882,6 +6886,7 @@ static void qa_log_sortie(Game *g)
             g->success, g->objectives, current_mission_goal(g), g->kills,
             g->health, (int)g->fuel, g->qa_shots, g->qa_hits, g->qa_enemy_shots,
             g->qa_damage, (unsigned)((g->sim_ms - SIM_EPOCH) / 1000u),
+            (unsigned)((SDL_GetTicks() - g->scene_started) / 1000u),
             g->qa_offered, g->qa_unreached,
             g->qa_bombs_carried - g->bombs_remaining, g->qa_bombs_carried);
     fclose(f);

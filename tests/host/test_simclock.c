@@ -51,6 +51,31 @@ int main(void)
         CHECK(slow >= 130 && slow <= 155);
         CHECK(fast - slow <= 25 && slow - fast <= 25);
     }
+    /* The sortie's ends are all on this clock: a cockpit patrol turns for
+     * home by 220 s of it and is home 60 s later at most, so it is over by
+     * 280 s whatever the frame rate.  Frames of any length move the clock
+     * on, the shortest by the carried fraction, so it always gets there;
+     * at fifty frames a second in 280 s of the wall clock, and under
+     * SLOWFRAMES, at 125 ms a frame and 50 ms of sortie each, in 5600
+     * frames and 700 s of the wall clock: two and a half times as long
+     * before the drawing time is counted.  A lab run that stops at 600 s
+     * stops a slow-frames patrol before it is over. */
+    {
+        static const float frame[] = {0.0005f, 0.02f, 0.05f, 0.125f, 0.4f};
+        static const long want[] = {560000L, 14000L, 5600L, 5600L, 5600L};
+        int k;
+        for (k = 0; k < 5; ++k) {
+            uint32_t ms = 0u;
+            float carry = 0.0f;
+            long n = 0;
+            while (ms < 280000u && n < 2000000L) {
+                sim_advance(&ms, &carry, frame[k]);
+                ++n;
+            }
+            CHECK(ms >= 280000u);
+            CHECK(n >= want[k] - 2 && n <= want[k] + 2);
+        }
+    }
     /* Across the 32-bit wrap the clock and the cooldown still agree. */
     {
         uint32_t ms = 0xffffff00u, at = ms;
