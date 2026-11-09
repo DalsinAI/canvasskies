@@ -9,15 +9,19 @@ release archive because it records the archive's own checksum.
 
 | | |
 |---|---|
-| Source | `release/rc6` at `46c8a1d`: `main` at `92a79da` (round 6, PRs #20 to #32) plus the RC6 text in `README.md`, the drawer's `ReadMe` and `docs/CANVAS_SKIES_STATUS.md` |
+| Source | `release/rc6` at `8e198ae`: `main` at `92a79da` (round 6, PRs #20 to #32), the QA pilot from #34, and the RC6 text in `README.md`, the drawer's `ReadMe` and `docs/CANVAS_SKIES_STATUS.md` |
 | Compiler | the Open6 stove, GFOpenAmigaGCC 16.2.0-open6 (`os32-gcc16`), on daletop |
 | Build | `make -f ports/amigaos3/Makefile.canvas AMIGA_STOVE=<stove> package`: no warnings, campaign check and package link check pass |
-| Archive | `CanvasSkies-0.2.0-rc6.lha`, 59,517,597 bytes, the `CanvasSkies` drawer and its icon |
-| Archive SHA-256 | `fd7000ac35b97884cdc3cb7720ddc6351df044eb61532d4967d26502cf8696c8` |
-| Program SHA-256 | `9e66a9c43478e9dfbc0c769f709e793e7f2ce0ecdb0c1d81396be16242cec1db` |
+| Archive | `CanvasSkies-0.2.0-rc6.lha`, 59,519,850 bytes, the `CanvasSkies` drawer and its icon |
+| Archive SHA-256 | `ec9c9051f9f2862ccdf58e4917cc5f289de6a4723d746e42c2888f46cfbeacdb` |
+| Program SHA-256 | `7e4f08d5445362251a21e064d3a337b6fc6c46f2e2999f97e1e1eb6b37350909` |
 
-The program is the same in every RC6 build made on 9 November (the later builds
-changed only documents); the lab runs below used it.
+This is the second RC6 build. The first (`46c8a1d`, program `9e66a9c4...`,
+archive `fd7000ac...`) was tested in full below. Three sorties in it missed
+their orders or ran past the lab's time limit; all three were the QA
+autopilot, not the game (see "The rebuild"), and #34 gave the autopilot a
+better pilot. Only the autopilot and the sortie log's `hits=` and `wall=`
+fields differ between the two programs; no order, enemy or rule changed.
 
 ## What RC6 needs
 
@@ -58,6 +62,38 @@ screenshots, all of which were looked at.
 The 1918 spring, 1915 railway, trench run and base sorties, and the slow-frames
 dogfight, are the #27 runs a pause had cut off.
 
+### The rebuild
+
+The three misses above, investigated:
+
+- The 1918 cockpit dogfight offers 9 enemies and ammunition for many more;
+  the old autopilot aimed at where the enemy was, not where it would be, and
+  never cleared a gun jam.
+- The 1918 spring side-on offers 9 targets for 5 orders and 10 bombs; the old
+  autopilot spent half its bombs on machine-gun posts that don't count.
+- The slow-frames dogfight ends on the sortie clock, which advances at most
+  50 ms a frame, so at about eight frames a second it runs about three times
+  slower than real time. The sortie was longer than the lab's 600 s.
+
+With the new pilot, every one of the 16 cockpit dogfights met its order on
+three host clocks (48 of 48), and all 32 side-on sorties still do. The rebuilt
+archive was installed clean on both labs again:
+
+| Lab | Sortie | Result |
+|---|---|---|
+| 51 | 1918 cockpit dogfight (`DOGFIGHT 6`) | success, 9/4 kills, 132 shots, 54 hits |
+| 51 | 1918 spring side-on | success, 9/5 orders, 9 of 10 bombs |
+| 51 | Christmas truce | success, as before |
+| 51 | slow-frames dogfight (`DOGFIGHT 3 SLOWFRAMES`) | success, 5/3 kills, 118 s of sortie in 370 s |
+| 50 | 1918 cockpit, mission 12 | success, 9/4 kills |
+| 50 | 1918 rear seat, Lewis gun | success, 4 kills |
+| 50 | 1914 cockpit, "Horses in the Sky" | success, observer's tasks 4/3 |
+| 50 | 1914 side-on, mission 5 | success, 4/3 |
+| 50 | top-down trench run | success, 15/9 |
+
+Full screen in, out, in and Escape to a clean Workbench, and the wake evening
+in the mess, were checked again on both labs.
+
 ### Scenes, display and saves (both labs)
 
 - The three mess evenings (`MESS`, `MESS QUIET`, `MESS WAKE`), We Remember,
@@ -80,8 +116,7 @@ Fresh lab copies of the updated instances booted straight into RC6 from
 WBStartup, switched full screen in and out and quit to a clean Workbench, and
 Instance-50's own RC5 save continued.
 
-After the final build, the instances' game folders were checked file by file
-against this archive: no differences.
+They run the first build. Bringing them to this one waits for the owner's word.
 
 ## Not tested
 
@@ -91,3 +126,5 @@ against this archive: no differences.
   and the game by ear for ticks.
 - Memory in use with the Lewis gun's new sheet (calculated, not measured).
 - Any GFOpenUp before 0.8.26.
+- A real 68040 drawing under 20 frames a second plays in slow motion, as the
+  slow-frames run shows; whether one does has not been measured.
