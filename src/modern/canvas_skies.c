@@ -14731,6 +14731,34 @@ static void late_edition_text(const Game *g, char *out, size_t size)
             "OUR AIRMEN WERE UNABLE TO OVERTAKE IT." :
             "ENEMY AEROPLANES REACHED LONDON IN DAYLIGHT. CASUALTIES ARE "
             "REPORTED IN THE EAST END.");
+    } else if (g->obs_count) {
+        /* The 1914 cockpit patrols: the observer's work, as much of it as
+         * was done, in the order the paper would put it. */
+        static const char *const work[4] = {
+            "COLUMNS ON THE MARCH REPORTED", "A MESSAGE DROPPED AT H.Q.",
+            "A BATTERY PHOTOGRAPHED", "OUR GUNS RANGED ON THE ENEMY"
+        };
+        const char *done[4];
+        int k, n = 0;
+        for (k = 0; k < 4; ++k) {
+            int j;
+            for (j = 0; j < g->obs_count; ++j)
+                if (g->obs[j].kind == k && g->obs[j].done) done[n++] = work[k];
+        }
+        if (n == 0)
+            snprintf(out, size, "OUR AIRMEN WATCHED THE ROADS YESTERDAY, BUT "
+                     "MIST HID THE ENEMY'S MOVEMENTS.");
+        else if (n == 1)
+            snprintf(out, size, "RECONNAISSANCE YESTERDAY: %s.", done[0]);
+        else if (n == 2)
+            snprintf(out, size, "RECONNAISSANCE YESTERDAY: %s AND %s.",
+                     done[0], done[1]);
+        else if (n == 3)
+            snprintf(out, size, "RECONNAISSANCE YESTERDAY: %s, %s AND %s.",
+                     done[0], done[1], done[2]);
+        else
+            snprintf(out, size, "RECONNAISSANCE YESTERDAY: %s, %s, %s AND %s.",
+                     done[0], done[1], done[2], done[3]);
     } else if (!g->success) {
         snprintf(out, size, "THERE WAS LITTLE ACTIVITY IN THE AIR, OWING "
                  "TO THE WEATHER.");
